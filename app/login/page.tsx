@@ -8,8 +8,8 @@ export default function LoginPage() {
   const router = useRouter();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("root@example.com");
-  const [password, setPassword] = useState("root123456");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -142,11 +142,6 @@ export default function LoginPage() {
         >
           {loading ? "处理中..." : mode === "login" ? "登录" : "注册并登录"}
         </button>
-        {mode === "login" ? (
-          <p className="text-xs text-zinc-400">
-            root: root@example.com / root123456
-          </p>
-        ) : null}
       </form>
     </div>
   );

@@ -1,6 +1,11 @@
 # project-manager
 
-本地项目管理工具：项目树、任务单（从 10000 递增）、进度跟踪、Git 提交自动关联。
+本地项目管理工具：项目树、任务单（从 10000 递增）、状态跟踪、Git 提交自动关联。
+
+## 文档
+
+- [架构说明](docs/ARCHITECTURE.md) — 领域模型、路由、API、权限
+- [运维说明](docs/OPERATIONS.md) — 部署、重启、局域网、环境变量
 
 ## 技术栈
 
@@ -16,12 +21,12 @@ cp .env.example .env
 npm install
 npx prisma db push
 npm run db:seed
-npm run dev
+npm run build
+npm run start
 ```
 
-访问 http://localhost:3003（3000 端口通常被 community 占用）
-
-局域网访问：`http://<本机IP>:3003`（服务已绑定 `0.0.0.0`，同网段机器可直接打开）
+- 本机：http://localhost:3003
+- 局域网：`http://<本机IP>:3003`
 
 ## Git 远端
 
@@ -32,10 +37,7 @@ git remote add origin /home/hxy/work/personal/project-manager.git
 git push -u origin main
 ```
 
-默认账号：
-
-- root：`root@example.com` / `root123456`（可创建项目、模块、任务单）
-- user：`user@example.com` / `user123456`（可更新任务进度）
+账号通过登录页注册（默认为 user 权限），root 权限需在数据库中手动设置。
 
 ## Git 提交规范
 
@@ -49,6 +51,10 @@ git push -u origin main
 
 ## 脚本
 
-- `npm run db:push` — 同步 Prisma schema（`npx prisma db push`）
-- `npm run db:seed` — 初始化用户与单号计数器
-- `npm run test:acceptance` — 运行验收测试
+| 命令 | 说明 |
+|------|------|
+| `npm run dev` | 开发模式（0.0.0.0:3003） |
+| `npm run build` | 生产构建 |
+| `npm run start` | 生产服务 |
+| `npm run db:seed` | 初始化单号计数器 |
+| `npm run test:acceptance` | 验收测试 |
