@@ -1,0 +1,230 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["pm"]
+}
+
+enum UserRole {
+  ROOT
+  USER
+
+  @@schema("pm")
+}
+
+enum ResponsibilityKind {
+  PROGRAM
+  DESIGN
+
+  @@schema("pm")
+}
+
+enum TicketStatus {
+  DEVELOPING
+  READY_FOR_TEST
+  DONE
+
+  @@schema("pm")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+  role          UserRole  @default(USER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  accounts      Account[]
+  sessions      Session[]
+  createdTickets Ticket[] @relation("TicketCreator")
+  assignedTickets Ticket[] @relation("TicketAssignee")
+  assigneeHistoryTargets TicketAssigneeHistory[] @relation("AssigneeHistoryTarget")
+  assigneeHistoryChanges TicketAssigneeHistory[] @relation("AssigneeHistoryActor")
+  statusHistoryChanges TicketStatusHistory[] @relation("StatusHistoryActor")
+
+  @@schema("pm")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@schema("pm")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@schema("pm")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@schema("pm")
+}
+
+model Project {
+  id               String           @id @default(cuid())
+  name             String
+  description      String?
+  status           String           @default("ACTIVE")
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  responsibilities Responsibility[]
+  tickets          Ticket[]
+
+  @@schema("pm")
+}
+
+model Responsibility {
+  id        String             @id @default(cuid())
+  projectId String
+  kind      ResponsibilityKind
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  project   Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  modules   Module[]
+
+  @@unique([projectId, kind])
+  @@schema("pm")
+}
+
+model Module {
+  id               String         @id @default(cuid())
+  responsibilityId String
+  name             String
+  description      String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  responsibility   Responsibility @relation(fields: [responsibilityId], references: [id], onDelete: Cascade)
+  tickets          Ticket[]
+
+  @@unique([responsibilityId, name])
+  @@schema("pm")
+}
+
+model Ticket {
+  id          String            @id @default(cuid())
+  ticketNo    Int               @unique
+  title       String
+  description String?
+  progress    Int               @default(0)
+  status      TicketStatus      @default(DEVELOPING)
+  projectId   String
+  moduleId    String
+  creatorId   String
+  assigneeId  String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  module      Module            @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  creator     User              @relation("TicketCreator", fields: [creatorId], references: [id], onDelete: Restrict)
+  assignee    User?             @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  repoBindings TicketRepoBinding[]
+  commits     TicketCommit[]
+  assigneeHistory TicketAssigneeHistory[]
+  statusHistory TicketStatusHistory[]
+
+  @@schema("pm")
+}
+
+model TicketStatusHistory {
+  id          String       @id @default(cuid())
+  ticketId    String
+  status      TicketStatus
+  changedById String
+  createdAt   DateTime     @default(now())
+  ticket      Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  changedBy   User         @relation("StatusHistoryActor", fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@index([ticketId, createdAt(sort: Desc)])
+  @@schema("pm")
+}
+
+model TicketAssigneeHistory {
+  id          String   @id @default(cuid())
+  ticketId    String
+  assigneeId  String?
+  changedById String
+  createdAt   DateTime @default(now())
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  assignee    User?    @relation("AssigneeHistoryTarget", fields: [assigneeId], references: [id], onDelete: SetNull)
+  changedBy   User     @relation("AssigneeHistoryActor", fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@index([ticketId, createdAt(sort: Desc)])
+  @@schema("pm")
+}
+
+model TicketRepoBinding {
+  id        String   @id @default(cuid())
+  ticketId  String
+  repoPath  String
+  createdAt DateTime @default(now())
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketId, repoPath])
+  @@index([repoPath])
+  @@schema("pm")
+}
+
+model TicketCommit {
+  id         String   @id @default(cuid())
+  ticketId   String
+  ticketNo   Int
+  repoPath   String
+  commitSha  String
+  author     String
+  committedAt DateTime
+  subject    String
+  createdAt  DateTime @default(now())
+  ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@unique([repoPath, commitSha])
+  @@index([ticketNo, committedAt(sort: Desc)])
+  @@schema("pm")
+}
+
+model SyncCursor {
+  id           String   @id @default(cuid())
+  repoPath     String   @unique
+  lastCommitAt DateTime?
+  lastCommitSha String?
+  updatedAt    DateTime @updatedAt
+
+  @@schema("pm")
+}
+
+model Counter {
+  key       String @id
+  nextValue Int
+  updatedAt DateTime @updatedAt
+
+  @@schema("pm")
+}

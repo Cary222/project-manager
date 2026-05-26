@@ -1,0 +1,22 @@
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
+import { requireSession } from "@/lib/permissions";
+
+export async function GET() {
+  try {
+    await requireSession();
+    const users = await prisma.user.findMany({
+      orderBy: [{ role: "asc" }, { name: "asc" }, { email: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+      },
+    });
+    return NextResponse.json({ users });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown";
+    return NextResponse.json({ error: message }, { status: 401 });
+  }
+}
