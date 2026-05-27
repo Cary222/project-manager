@@ -36,7 +36,21 @@ npm run start    # 生产服务，0.0.0.0:3003
 npm run db:seed  # 重置 Counter（不创建默认用户）
 ```
 
-## 重启服务
+## systemd 常驻（推荐）
+
+用户级服务，开机/登出后仍运行（`Linger=yes`）：
+
+```bash
+systemctl --user enable --now project-manager.service   # 启用并启动
+systemctl --user status project-manager.service         # 状态
+systemctl --user restart project-manager.service        # 重启（改代码后先 npm run build）
+systemctl --user stop project-manager.service           # 停止
+journalctl --user -u project-manager.service -f         # 日志
+```
+
+单元文件：`~/.config/systemd/user/project-manager.service`
+
+## 手动重启（未用 systemd 时）
 
 ```bash
 fuser -k 3003/tcp 2>/dev/null

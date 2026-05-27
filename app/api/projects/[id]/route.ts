@@ -21,8 +21,12 @@ export async function GET(
                 tickets: {
                   orderBy: { ticketNo: "desc" },
                   include: {
-                    assignee: {
-                      select: { id: true, name: true, email: true, role: true },
+                    assignees: {
+                      include: {
+                        user: {
+                          select: { id: true, name: true, email: true, role: true },
+                        },
+                      },
                     },
                     commits: {
                       orderBy: { committedAt: "desc" },
@@ -40,7 +44,21 @@ export async function GET(
       return NextResponse.json({ error: "project not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ project });
+    return NextResponse.json({
+      project: {
+        ...project,
+        responsibilities: project.responsibilities.map((responsibility) => ({
+          ...responsibility,
+          modules: responsibility.modules.map((module) => ({
+            ...module,
+            tickets: module.tickets.map((ticket) => ({
+              ...ticket,
+              assignees: ticket.assignees.map((item) => item.user),
+            })),
+          })),
+        })),
+      },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
     return NextResponse.json({ error: message }, { status: 401 });

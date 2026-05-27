@@ -6,7 +6,10 @@ import { prisma } from "../lib/db";
 async function testParse() {
   assert.equal(parseTicketCommitSubject("10001: 修复登录")?.ticketNo, 10001);
   assert.equal(parseTicketCommitSubject("10002：新增模块")?.ticketNo, 10002);
+  assert.equal(parseTicketCommitSubject("10008")?.ticketNo, 10008);
+  assert.equal(parseTicketCommitSubject("#10008")?.ticketNo, 10008);
   assert.equal(parseTicketCommitSubject("feat: no ticket"), null);
+  assert.equal(parseTicketCommitSubject("1008"), null);
 }
 
 async function testTicketCounter() {
@@ -15,17 +18,15 @@ async function testTicketCounter() {
   assert.ok(b > a, "ticket numbers should increase");
 }
 
-async function testUsersSeeded() {
-  const root = await prisma.user.findUnique({ where: { email: "root@example.com" } });
-  const user = await prisma.user.findUnique({ where: { email: "user@example.com" } });
-  assert.equal(root?.role, "ROOT");
-  assert.equal(user?.role, "USER");
+async function testCounterSeeded() {
+  const counter = await prisma.counter.findUnique({ where: { key: "ticketNo" } });
+  assert.ok(counter && counter.nextValue >= 10000);
 }
 
 async function main() {
   await testParse();
   await testTicketCounter();
-  await testUsersSeeded();
+  await testCounterSeeded();
   console.log("acceptance tests passed");
 }
 

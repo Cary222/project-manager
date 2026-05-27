@@ -6,7 +6,11 @@ export async function GET() {
   try {
     const session = await requireSession();
     const tickets = await prisma.ticket.findMany({
-      where: { assigneeId: session.user.id },
+      where: {
+        assignees: {
+          some: { userId: session.user.id },
+        },
+      },
       orderBy: { ticketNo: "desc" },
       select: {
         id: true,

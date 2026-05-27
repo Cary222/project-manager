@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { TicketStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import {
+  assigneeUserSelect,
+  normalizeAssigneeIds,
+  replaceTicketAssignees,
+} from "@/lib/ticket-assignees";
 import { requireRoot, requireSession } from "@/lib/permissions";
 import { allocateTicketNo } from "@/lib/ticket-counter";
 
@@ -13,6 +18,7 @@ export async function POST(request: Request) {
       projectId?: string;
       moduleId?: string;
       assigneeId?: string;
+      assigneeIds?: string[];
       status?: TicketStatus;
       repoPaths?: string[];
     };
@@ -28,7 +34,10 @@ export async function POST(request: Request) {
     const projectId = body.projectId;
     const moduleId = body.moduleId;
     const ticketNo = await allocateTicketNo();
-    const assigneeId = body.assigneeId || null;
+    const assigneeIds = normalizeAssigneeIds(
+      body.assigneeIds ?? (body.assigneeId ? [body.assigneeId] : [])
+    );
+
     const ticket = await prisma.$transaction(async (tx) => {
       const created = await tx.ticket.create({
         data: {
@@ -38,7 +47,6 @@ export async function POST(request: Request) {
           projectId,
           moduleId,
           creatorId: session.user.id,
-          assigneeId,
           status: body.status ?? TicketStatus.DEVELOPING,
           repoBindings: {
             create: (body.repoPaths ?? [])
@@ -49,13 +57,12 @@ export async function POST(request: Request) {
         include: { repoBindings: true },
       });
 
-      await tx.ticketAssigneeHistory.create({
-        data: {
-          ticketId: created.id,
-          assigneeId,
-          changedById: session.user.id,
-        },
-      });
+      await replaceTicketAssignees(
+        tx,
+        created.id,
+        assigneeIds,
+        session.user.id
+      );
 
       await tx.ticketStatusHistory.create({
         data: {
@@ -83,8 +90,8 @@ export async function GET() {
       orderBy: { ticketNo: "desc" },
       include: {
         module: { include: { responsibility: true } },
-        assignee: {
-          select: { id: true, name: true, email: true, role: true },
+        assignees: {
+          include: { user: { select: assigneeUserSelect } },
         },
         repoBindings: true,
         commits: {
@@ -93,7 +100,12 @@ export async function GET() {
         },
       },
     });
-    return NextResponse.json({ tickets });
+    return NextResponse.json({
+      tickets: tickets.map((ticket) => ({
+        ...ticket,
+        assignees: ticket.assignees.map((item) => item.user),
+      })),
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
     return NextResponse.json({ error: message }, { status: 401 });

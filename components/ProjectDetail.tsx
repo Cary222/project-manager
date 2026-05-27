@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AssigneePicker, formatAssigneeNames } from "@/components/AssigneePicker";
 import { signOut, useSession } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -11,7 +12,7 @@ type Ticket = {
   description: string | null;
   progress: number;
   status: TicketStatus;
-  assignee: User | null;
+  assignees: User[];
 };
 
 type TicketStatus = "DEVELOPING" | "READY_FOR_TEST" | "DONE";
@@ -62,7 +63,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [loading, setLoading] = useState(true);
   const [selectedResponsibilityId, setSelectedResponsibilityId] = useState("");
   const [moduleId, setModuleId] = useState("");
-  const [assigneeId, setAssigneeId] = useState("");
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [newModuleName, setNewModuleName] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -140,7 +141,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       body: JSON.stringify({
         projectId,
         moduleId: targetModuleId,
-        assigneeId: assigneeId || undefined,
+        assigneeIds,
         title: title.trim(),
         description: description.trim(),
       }),
@@ -156,7 +157,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     setDescription("");
     setNewModuleName("");
     setModuleId("");
-    setAssigneeId("");
+    setAssigneeIds([]);
     setMessage("单子已创建");
     await loadProject();
   }
@@ -307,21 +308,14 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   />
                 </label>
               </div>
-              <label className="space-y-1 text-sm">
+              <div className="space-y-2 text-sm">
                 <span>指派给</span>
-                <select
-                  value={assigneeId}
-                  onChange={(e) => setAssigneeId(e.target.value)}
-                  className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2"
-                >
-                  <option value="">暂不指派</option>
-                  {users.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.name || user.email}（{user.role}）
-                    </option>
-                  ))}
-                </select>
-              </label>
+                <AssigneePicker
+                  users={users}
+                  value={assigneeIds}
+                  onChange={setAssigneeIds}
+                />
+              </div>
               <label className="space-y-1 text-sm">
                 <span>标题</span>
                 <input
@@ -398,7 +392,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                             </div>
                             <p className="mt-1 text-sm">{ticket.title}</p>
                             <p className="mt-1 text-xs text-zinc-500">
-                              指派：{ticket.assignee?.name || ticket.assignee?.email || "未指派"}
+                              指派：{formatAssigneeNames(ticket.assignees)}
                             </p>
                           </Link>
                           {isRoot ? (

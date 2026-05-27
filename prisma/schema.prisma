@@ -43,8 +43,7 @@ model User {
   accounts      Account[]
   sessions      Session[]
   createdTickets Ticket[] @relation("TicketCreator")
-  assignedTickets Ticket[] @relation("TicketAssignee")
-  assigneeHistoryTargets TicketAssigneeHistory[] @relation("AssigneeHistoryTarget")
+  ticketAssignments TicketAssignee[]
   assigneeHistoryChanges TicketAssigneeHistory[] @relation("AssigneeHistoryActor")
   statusHistoryChanges TicketStatusHistory[] @relation("StatusHistoryActor")
 
@@ -140,18 +139,28 @@ model Ticket {
   projectId   String
   moduleId    String
   creatorId   String
-  assigneeId  String?
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
   project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   module      Module            @relation(fields: [moduleId], references: [id], onDelete: Cascade)
   creator     User              @relation("TicketCreator", fields: [creatorId], references: [id], onDelete: Restrict)
-  assignee    User?             @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  assignees   TicketAssignee[]
   repoBindings TicketRepoBinding[]
   commits     TicketCommit[]
   assigneeHistory TicketAssigneeHistory[]
   statusHistory TicketStatusHistory[]
 
+  @@schema("pm")
+}
+
+model TicketAssignee {
+  ticketId  String
+  userId    String
+  createdAt DateTime @default(now())
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([ticketId, userId])
   @@schema("pm")
 }
 
@@ -171,11 +180,10 @@ model TicketStatusHistory {
 model TicketAssigneeHistory {
   id          String   @id @default(cuid())
   ticketId    String
-  assigneeId  String?
+  assigneeIds String[] @default([])
   changedById String
   createdAt   DateTime @default(now())
   ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  assignee    User?    @relation("AssigneeHistoryTarget", fields: [assigneeId], references: [id], onDelete: SetNull)
   changedBy   User     @relation("AssigneeHistoryActor", fields: [changedById], references: [id], onDelete: Restrict)
 
   @@index([ticketId, createdAt(sort: Desc)])
@@ -203,6 +211,7 @@ model TicketCommit {
   author     String
   committedAt DateTime
   subject    String
+  branches   String[] @default([])
   createdAt  DateTime @default(now())
   ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
