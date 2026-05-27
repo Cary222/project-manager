@@ -3,10 +3,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { prisma } from "@/lib/db";
+import { getCommitBranches } from "@/lib/git-sync/branches";
 import { parseTicketCommitSubject } from "@/lib/git-sync/parse";
 
 const execFileAsync = promisify(execFile);
 const ROOTS = ["/home/hxy/work/company", "/home/hxy/work/personal"];
+const SCAN_LIMIT = 500;
 
 export type RawCommit = {
   sha: string;
@@ -45,12 +47,31 @@ export async function listManagedRepos() {
   return repos.sort();
 }
 
-export async function getNewCommits(repoPath: string): Promise<RawCommit[]> {
-  const cursor = await prisma.syncCursor.findUnique({ where: { repoPath } });
-  const args = ["log", "--format=%H|%aI|%an|%s"];
+function parseLogLine(line: string): RawCommit | null {
+  const [sha, date, author, ...subjectParts] = line.split("|");
+  if (!sha) return null;
+  return {
+    sha,
+    committedAt: new Date(date ?? ""),
+    author: author ?? "unknown",
+    subject: subjectParts.join("|"),
+  };
+}
 
-  if (cursor?.lastCommitSha) {
-    args.push(`${cursor.lastCommitSha}..HEAD`);
+export async function getRecentCommitsAllBranches(
+  repoPath: string
+): Promise<RawCommit[]> {
+  const cursor = await prisma.syncCursor.findUnique({ where: { repoPath } });
+  const args = [
+    "log",
+    "--all",
+    `--max-count=${SCAN_LIMIT}`,
+    "--format=%H|%aI|%an|%s",
+  ];
+
+  if (cursor?.lastCommitAt) {
+    const since = new Date(cursor.lastCommitAt.getTime() - 3600_000);
+    args.push(`--since=${since.toISOString()}`);
   }
 
   const output = await git(repoPath, args).catch(() => "");
@@ -59,20 +80,12 @@ export async function getNewCommits(repoPath: string): Promise<RawCommit[]> {
   return output
     .split("\n")
     .filter(Boolean)
-    .map((line) => {
-      const [sha, date, author, ...subjectParts] = line.split("|");
-      return {
-        sha: sha ?? "",
-        committedAt: new Date(date ?? ""),
-        author: author ?? "unknown",
-        subject: subjectParts.join("|"),
-      };
-    })
-    .filter((item) => item.sha);
+    .map(parseLogLine)
+    .filter((item): item is RawCommit => !!item?.sha);
 }
 
 export async function syncRepoCommits(repoPath: string) {
-  const commits = await getNewCommits(repoPath);
+  const commits = await getRecentCommitsAllBranches(repoPath);
   if (commits.length === 0) return { repoPath, total: 0, linked: 0 };
 
   let linked = 0;
@@ -86,6 +99,8 @@ export async function syncRepoCommits(repoPath: string) {
     });
     if (!ticket) continue;
 
+    const branches = await getCommitBranches(repoPath, commit.sha);
+
     await prisma.ticketCommit.upsert({
       where: { repoPath_commitSha: { repoPath, commitSha: commit.sha } },
       update: {
@@ -94,6 +109,7 @@ export async function syncRepoCommits(repoPath: string) {
         subject: commit.subject,
         ticketNo: parsed.ticketNo,
         ticketId: ticket.id,
+        branches,
       },
       create: {
         repoPath,
@@ -103,6 +119,7 @@ export async function syncRepoCommits(repoPath: string) {
         subject: commit.subject,
         ticketNo: parsed.ticketNo,
         ticketId: ticket.id,
+        branches,
       },
     });
     linked += 1;
@@ -131,5 +148,27 @@ export async function syncAllManagedRepos() {
   for (const repoPath of repos) {
     result.push(await syncRepoCommits(repoPath));
   }
+  await backfillCommitBranches();
   return result;
 }
+
+export async function backfillCommitBranches() {
+  const commits = await prisma.ticketCommit.findMany({
+    select: { id: true, repoPath: true, commitSha: true, branches: true },
+  });
+
+  for (const commit of commits) {
+    const branches = await getCommitBranches(commit.repoPath, commit.commitSha);
+    const prev = commit.branches.join("\0");
+    const next = branches.join("\0");
+    if (prev !== next) {
+      await prisma.ticketCommit.update({
+        where: { id: commit.id },
+        data: { branches },
+      });
+    }
+  }
+}
+
+// Keep old export name for any external imports
+export const getNewCommits = getRecentCommitsAllBranches;

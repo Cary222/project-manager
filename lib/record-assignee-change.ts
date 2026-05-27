@@ -1,15 +1,10 @@
 import { prisma } from "@/lib/db";
+import { replaceTicketAssignees } from "@/lib/ticket-assignees";
 
 export async function recordAssigneeChange(
   ticketId: string,
-  assigneeId: string | null,
+  assigneeIds: string[],
   changedById: string
 ) {
-  await prisma.ticketAssigneeHistory.create({
-    data: {
-      ticketId,
-      assigneeId,
-      changedById,
-    },
-  });
+  await replaceTicketAssignees(prisma, ticketId, assigneeIds, changedById);
 }

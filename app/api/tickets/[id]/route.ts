@@ -1,6 +1,34 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import {
+  assigneeUserSelect,
+  loadUsersByIds,
+  mapAssigneeUsers,
+  normalizeAssigneeIds,
+  replaceTicketAssignees,
+} from "@/lib/ticket-assignees";
 import { requireRoot, requireSession } from "@/lib/permissions";
+
+async function enrichAssigneeHistory(
+  history: {
+    id: string;
+    assigneeIds: string[];
+    createdAt: Date;
+    changedBy: {
+      id: string;
+      name: string | null;
+      email: string;
+      role: string;
+    };
+  }[]
+) {
+  const allIds = normalizeAssigneeIds(history.flatMap((item) => item.assigneeIds));
+  const users = await loadUsersByIds(allIds);
+  return history.map((item) => ({
+    ...item,
+    assignees: mapAssigneeUsers(users, item.assigneeIds),
+  }));
+}
 
 export async function GET(
   _request: Request,
@@ -16,8 +44,10 @@ export async function GET(
         project: {
           select: { id: true, name: true },
         },
-        assignee: {
-          select: { id: true, name: true, email: true, role: true },
+        assignees: {
+          include: {
+            user: { select: assigneeUserSelect },
+          },
         },
         module: {
           include: {
@@ -30,20 +60,13 @@ export async function GET(
         assigneeHistory: {
           orderBy: { createdAt: "desc" },
           include: {
-            assignee: {
-              select: { id: true, name: true, email: true, role: true },
-            },
-            changedBy: {
-              select: { id: true, name: true, email: true, role: true },
-            },
+            changedBy: { select: assigneeUserSelect },
           },
         },
         statusHistory: {
           orderBy: { createdAt: "desc" },
           include: {
-            changedBy: {
-              select: { id: true, name: true, email: true, role: true },
-            },
+            changedBy: { select: assigneeUserSelect },
           },
         },
       },
@@ -53,7 +76,15 @@ export async function GET(
       return NextResponse.json({ error: "ticket not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ ticket });
+    const assigneeHistory = await enrichAssigneeHistory(ticket.assigneeHistory);
+
+    return NextResponse.json({
+      ticket: {
+        ...ticket,
+        assignees: ticket.assignees.map((item) => item.user),
+        assigneeHistory,
+      },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
     return NextResponse.json({ error: message }, { status: 401 });

@@ -5,6 +5,10 @@ import { signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { MarkdownContent } from "@/components/MarkdownContent";
+import { CommitDiffModal, type CommitSummary } from "@/components/CommitDiffModal";
+import { AssigneePicker } from "@/components/AssigneePicker";
+import { formatAssigneeList } from "@/lib/ticket-assignees";
+import { branchStyle, repoStyle } from "@/lib/repo-style";
 
 type UserBrief = {
   id: string;
@@ -21,7 +25,7 @@ type Ticket = {
   progress: number;
   status: TicketStatus;
   project: { id: string; name: string };
-  assignee: UserBrief | null;
+  assignees: UserBrief[];
   module: {
     name: string;
     responsibility: { kind: "PROGRAM" | "DESIGN" };
@@ -33,11 +37,12 @@ type Ticket = {
     committedAt: string;
     subject: string;
     repoPath: string;
+    branches: string[];
   }[];
   assigneeHistory: {
     id: string;
     createdAt: string;
-    assignee: UserBrief | null;
+    assignees: UserBrief[];
     changedBy: UserBrief;
   }[];
   statusHistory: {
@@ -74,8 +79,11 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   const [users, setUsers] = useState<UserBrief[]>([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<TicketStatus>("DEVELOPING");
-  const [assigneeId, setAssigneeId] = useState("");
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [message, setMessage] = useState("");
+  const [selectedCommit, setSelectedCommit] = useState<CommitSummary | null>(
+    null
+  );
 
   const loadTicket = useCallback(async () => {
     const res = await fetch(`/api/tickets/${ticketId}`);
@@ -86,7 +94,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     const data = (await res.json()) as { ticket: Ticket };
     setTicket(data.ticket);
     setStatus(data.ticket.status);
-    setAssigneeId(data.ticket.assignee?.id ?? "");
+    setAssigneeIds(data.ticket.assignees.map((user) => user.id));
   }, [ticketId]);
 
   useEffect(() => {
@@ -122,7 +130,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     const res = await fetch(`/api/tickets/${ticket.id}/assignee`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ assigneeId: assigneeId || null }),
+      body: JSON.stringify({ assigneeIds }),
     });
     if (!res.ok) {
       setMessage("指派人保存失败");
@@ -217,26 +225,19 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
         <section className="rounded-xl border border-zinc-200 bg-white p-5">
           <h2 className="mb-3 font-medium">指派</h2>
           <p className="mb-3 text-sm text-zinc-600">
-            当前指派：{userLabel(ticket.assignee)}
+            当前指派：{formatAssigneeList(ticket.assignees)}
           </p>
           {isRoot ? (
-            <div className="mb-4 flex items-center gap-2">
-              <select
-                value={assigneeId}
-                onChange={(e) => setAssigneeId(e.target.value)}
-                className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
-              >
-                <option value="">未指派</option>
-                {users.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.name || user.email}（{user.role}）
-                  </option>
-                ))}
-              </select>
+            <div className="mb-4 space-y-3">
+              <AssigneePicker
+                users={users}
+                value={assigneeIds}
+                onChange={setAssigneeIds}
+              />
               <button
                 type="button"
                 onClick={updateAssignee}
-                className="shrink-0 rounded-md bg-zinc-900 px-3 py-2 text-sm text-white"
+                className="rounded-md bg-zinc-900 px-3 py-2 text-sm text-white"
               >
                 保存
               </button>
@@ -255,7 +256,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                   className="rounded-lg border border-zinc-100 p-3 text-sm"
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <span>{userLabel(item.assignee)}</span>
+                    <span>{formatAssigneeList(item.assignees)}</span>
                     <span className="text-xs text-zinc-400">
                       {new Date(item.createdAt).toLocaleString()}
                     </span>
@@ -329,30 +330,54 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
             </p>
           ) : (
             <div className="space-y-2">
-              {ticket.commits.map((commit) => (
-                <div
+              {ticket.commits.map((commit) => {
+                const repo = repoStyle(commit.repoPath);
+                return (
+                <button
                   key={commit.id}
-                  className="rounded-lg border border-zinc-100 p-3 text-sm"
+                  type="button"
+                  onClick={() => setSelectedCommit(commit)}
+                  className={`w-full rounded-lg border border-zinc-100 border-l-4 ${repo.border} p-3 text-left text-sm transition hover:border-zinc-300 ${repo.card}`}
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <span className="font-mono text-xs text-zinc-500">
-                      {commit.commitSha.slice(0, 7)}
-                    </span>
-                    <span className="text-xs text-zinc-400">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${repo.badge}`}>
+                        {repo.name}
+                      </span>
+                      <span className="font-mono text-xs text-zinc-500">
+                        {commit.commitSha.slice(0, 7)}
+                      </span>
+                    </div>
+                    <span className="shrink-0 text-xs text-zinc-400">
                       {new Date(commit.committedAt).toLocaleString()}
                     </span>
                   </div>
-                  <p className="mt-1">{commit.subject}</p>
+                  {commit.branches.length > 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {commit.branches.map((branch) => (
+                        <span
+                          key={branch}
+                          className={`rounded px-2 py-0.5 text-xs ${branchStyle(branch)}`}
+                        >
+                          {branch}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  <p className="mt-2">{commit.subject}</p>
                   <p className="mt-1 text-xs text-zinc-500">{commit.author}</p>
-                  <p className="mt-1 truncate text-xs text-zinc-400">
-                    {commit.repoPath}
-                  </p>
-                </div>
-              ))}
+                </button>
+                );
+              })}
             </div>
           )}
         </section>
       </main>
+
+      <CommitDiffModal
+        commit={selectedCommit}
+        onClose={() => setSelectedCommit(null)}
+      />
     </div>
   );
 }

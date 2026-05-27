@@ -31,6 +31,20 @@ const STATUS_LABEL: Record<TicketStatus, string> = {
   DONE: "已完成",
 };
 
+const STATUS_ORDER: Record<TicketStatus, number> = {
+  DEVELOPING: 0,
+  READY_FOR_TEST: 1,
+  DONE: 2,
+};
+
+function sortMyTickets(tickets: MyTicket[]) {
+  return [...tickets].sort((a, b) => {
+    const statusDiff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
+    if (statusDiff !== 0) return statusDiff;
+    return b.ticketNo - a.ticketNo;
+  });
+}
+
 const KIND_LABEL: Record<"PROGRAM" | "DESIGN", string> = {
   PROGRAM: "程序",
   DESIGN: "设计",
@@ -83,6 +97,9 @@ export function Dashboard() {
       } else {
         map.set(key, { project: ticket.project, tickets: [ticket] });
       }
+    }
+    for (const group of map.values()) {
+      group.tickets = sortMyTickets(group.tickets);
     }
     return [...map.values()];
   }, [myTickets]);
@@ -256,15 +273,21 @@ export function Dashboard() {
                   </Link>
                 </div>
                 <ul className="space-y-2">
-                  {tickets.map((ticket) => (
+                  {tickets.map((ticket) => {
+                    const isDone = ticket.status === "DONE";
+                    return (
                     <li key={ticket.id}>
                       <Link
                         href={`/${ticket.ticketNo}`}
-                        className="block rounded-lg border border-zinc-100 px-3 py-2 transition hover:border-zinc-300 hover:bg-zinc-50"
+                        className={`block rounded-lg border px-3 py-2 transition ${
+                          isDone
+                            ? "border-zinc-100 bg-zinc-50 text-zinc-400 hover:border-zinc-200 hover:bg-zinc-100"
+                            : "border-zinc-100 hover:border-zinc-300 hover:bg-zinc-50"
+                        }`}
                       >
                         <div className="flex items-center justify-between gap-3">
                           <span className="font-medium">#{ticket.ticketNo}</span>
-                          <span className="text-sm text-zinc-500">
+                          <span className={`text-sm ${isDone ? "text-zinc-400" : "text-zinc-500"}`}>
                             {STATUS_LABEL[ticket.status]}
                           </span>
                         </div>
@@ -275,7 +298,8 @@ export function Dashboard() {
                         </p>
                       </Link>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               </section>
             ))}
