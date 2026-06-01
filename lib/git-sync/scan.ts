@@ -1,13 +1,11 @@
 import { execFile } from "node:child_process";
-import fs from "node:fs/promises";
-import path from "node:path";
 import { promisify } from "node:util";
 import { prisma } from "@/lib/db";
 import { getCommitBranches } from "@/lib/git-sync/branches";
 import { parseTicketCommitSubject } from "@/lib/git-sync/parse";
+import { listManagedRepos } from "@/lib/git-sync/repos";
 
 const execFileAsync = promisify(execFile);
-const ROOTS = ["/home/hxy/work/company", "/home/hxy/work/personal"];
 const SCAN_LIMIT = 500;
 
 export type RawCommit = {
@@ -23,28 +21,6 @@ async function git(repoPath: string, args: string[]) {
     maxBuffer: 20 * 1024 * 1024,
   });
   return stdout.trim();
-}
-
-async function hasGitDir(repoPath: string) {
-  try {
-    const stat = await fs.stat(path.join(repoPath, ".git"));
-    return stat.isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-export async function listManagedRepos() {
-  const repos: string[] = [];
-  for (const root of ROOTS) {
-    const entries = await fs.readdir(root, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const repoPath = path.join(root, entry.name);
-      if (await hasGitDir(repoPath)) repos.push(repoPath);
-    }
-  }
-  return repos.sort();
 }
 
 function parseLogLine(line: string): RawCommit | null {
@@ -70,9 +46,11 @@ export async function getRecentCommitsAllBranches(
   ];
 
   if (cursor?.lastCommitAt) {
+    // 增量：只拉上次同步时间之后（回退 1 小时避免边界遗漏）
     const since = new Date(cursor.lastCommitAt.getTime() - 3600_000);
     args.push(`--since=${since.toISOString()}`);
   }
+  // 无游标时仅取最近 SCAN_LIMIT 条，非全仓库历史
 
   const output = await git(repoPath, args).catch(() => "");
   if (!output) return [];
@@ -148,7 +126,6 @@ export async function syncAllManagedRepos() {
   for (const repoPath of repos) {
     result.push(await syncRepoCommits(repoPath));
   }
-  await backfillCommitBranches();
   return result;
 }
 
@@ -169,6 +146,8 @@ export async function backfillCommitBranches() {
     }
   }
 }
+
+export { listManagedRepos } from "@/lib/git-sync/repos";
 
 // Keep old export name for any external imports
 export const getNewCommits = getRecentCommitsAllBranches;
