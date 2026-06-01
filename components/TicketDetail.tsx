@@ -98,8 +98,21 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   }, [ticketId]);
 
   useEffect(() => {
-    loadTicket().finally(() => setLoading(false));
-  }, [loadTicket]);
+    let cancelled = false;
+
+    async function init() {
+      setLoading(true);
+      await fetch("/api/sync-commits", { method: "POST" });
+      if (cancelled) return;
+      await loadTicket();
+      if (!cancelled) setLoading(false);
+    }
+
+    init();
+    return () => {
+      cancelled = true;
+    };
+  }, [ticketId, loadTicket]);
 
   useEffect(() => {
     if (!isRoot) return;

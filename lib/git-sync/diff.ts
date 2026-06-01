@@ -1,20 +1,11 @@
 import { execFile } from "node:child_process";
-import fs from "node:fs/promises";
-import path from "node:path";
 import { promisify } from "node:util";
+import {
+  assertManagedRepoPath,
+  isManagedGitRepo,
+} from "@/lib/git-sync/repos";
 
 const execFileAsync = promisify(execFile);
-const ROOTS = ["/home/hxy/work/company", "/home/hxy/work/personal"];
-
-export function assertManagedRepoPath(repoPath: string) {
-  const resolved = path.resolve(repoPath);
-  const allowed = ROOTS.some((root) => {
-    const base = path.resolve(root);
-    return resolved === base || resolved.startsWith(`${base}${path.sep}`);
-  });
-  if (!allowed) throw new Error("FORBIDDEN_REPO");
-  return resolved;
-}
 
 async function git(repoPath: string, args: string[]) {
   const { stdout } = await execFileAsync("git", ["-C", repoPath, ...args], {
@@ -26,7 +17,9 @@ async function git(repoPath: string, args: string[]) {
 
 export async function getCommitDiff(repoPath: string, commitSha: string) {
   const resolved = assertManagedRepoPath(repoPath);
-  await fs.access(path.join(resolved, ".git"));
+  if (!(await isManagedGitRepo(resolved))) {
+    throw new Error("not a git repo");
+  }
   const diff = await git(resolved, [
     "show",
     "--format=",

@@ -8,6 +8,13 @@ async function testParse() {
   assert.equal(parseTicketCommitSubject("10002：新增模块")?.ticketNo, 10002);
   assert.equal(parseTicketCommitSubject("10008")?.ticketNo, 10008);
   assert.equal(parseTicketCommitSubject("#10008")?.ticketNo, 10008);
+  assert.equal(
+    parseTicketCommitSubject(
+      "#10013 feat(TextureImport): 为 Figma 资源添加纹理导入设置"
+    )?.ticketNo,
+    10013
+  );
+  assert.equal(parseTicketCommitSubject("10013 unity主页面")?.ticketNo, 10013);
   assert.equal(parseTicketCommitSubject("feat: no ticket"), null);
   assert.equal(parseTicketCommitSubject("1008"), null);
 }

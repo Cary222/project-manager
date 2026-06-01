@@ -1,5 +1,5 @@
-const TICKET_WITH_DESC_RE = /^#?(\d{5,})\s*[:：]\s*(.+)$/;
-const TICKET_ONLY_RE = /^#?(\d{5,})$/;
+// #10013 / 10013 开头，后面可跟冒号、空格或结束
+const TICKET_PREFIX_RE = /^#?(\d{5,})(?:\s*[:：]\s*|\s+)?(.*)$/;
 
 export type ParsedTicketCommit = {
   ticketNo: number;
@@ -8,21 +8,11 @@ export type ParsedTicketCommit = {
 
 export function parseTicketCommitSubject(subject: string): ParsedTicketCommit | null {
   const trimmed = subject.trim();
-  const withDesc = trimmed.match(TICKET_WITH_DESC_RE);
-  if (withDesc) {
-    return {
-      ticketNo: Number(withDesc[1]),
-      cleanSubject: withDesc[2]?.trim() ?? "",
-    };
-  }
+  const matched = trimmed.match(TICKET_PREFIX_RE);
+  if (!matched) return null;
 
-  const onlyNo = trimmed.match(TICKET_ONLY_RE);
-  if (onlyNo) {
-    return {
-      ticketNo: Number(onlyNo[1]),
-      cleanSubject: trimmed,
-    };
-  }
+  const ticketNo = Number(matched[1]);
+  const cleanSubject = matched[2]?.trim() || trimmed;
 
-  return null;
+  return { ticketNo, cleanSubject };
 }
