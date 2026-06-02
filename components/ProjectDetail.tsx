@@ -1,9 +1,10 @@
 "use client";
 
+import { ImageLightbox } from "@/components/ImageLightbox";
 import Link from "next/link";
 import { AssigneePicker, formatAssigneeNames } from "@/components/AssigneePicker";
 import { signOut, useSession } from "next-auth/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Ticket = {
   id: string;
@@ -67,8 +68,21 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [newModuleName, setNewModuleName] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [descriptionImages, setDescriptionImages] = useState<{ src: string; name: string }[]>([]);
+  const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
+  const isLightboxOpenRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
+
+  function openPreview(img: { src: string; name: string }) {
+    isLightboxOpenRef.current = true;
+    setPreviewImage(img);
+  }
+
+  function closePreview() {
+    setPreviewImage(null);
+    setTimeout(() => { isLightboxOpenRef.current = false; }, 0);
+  }
 
   const loadProject = useCallback(async () => {
     const res = await fetch(`/api/projects/${projectId}`);
@@ -121,8 +135,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         }),
       });
       if (!moduleRes.ok) {
+        const err = await moduleRes.json().catch(() => ({}));
         setSubmitting(false);
-        setMessage("创建模块失败");
+        setMessage(`创建模块失败: ${err.error ?? moduleRes.status}`);
         return;
       }
       const data = (await moduleRes.json()) as { module: Module };
@@ -135,6 +150,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       return;
     }
 
+    const imageMarkdown = descriptionImages
+      .map((img) => `![${img.name}](${img.src})`)
+      .join("\n");
+    const fullDescription = imageMarkdown
+      ? `${imageMarkdown}\n\n${description.trim()}`
+      : description.trim();
+
     const ticketRes = await fetch("/api/tickets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -143,18 +165,20 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         moduleId: targetModuleId,
         assigneeIds,
         title: title.trim(),
-        description: description.trim(),
+        description: fullDescription,
       }),
     });
 
     setSubmitting(false);
     if (!ticketRes.ok) {
-      setMessage("创建单子失败");
+      const err = await ticketRes.json().catch(() => ({}));
+      setMessage(`创建单子失败: ${err.error ?? ticketRes.status}`);
       return;
     }
 
     setTitle("");
     setDescription("");
+    setDescriptionImages([]);
     setNewModuleName("");
     setModuleId("");
     setAssigneeIds([]);
@@ -181,13 +205,17 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     reader.onload = () => {
       const src = String(reader.result ?? "");
       if (!src) return;
-      setDescription((current) => {
-        const prefix = current.trimEnd();
-        const imageMarkdown = `![${file.name}](${src})`;
-        return prefix ? `${prefix}\n\n${imageMarkdown}` : imageMarkdown;
-      });
+      setDescriptionImages((prev) => [...prev, { src, name: file.name }]);
     };
     reader.readAsDataURL(file);
+  }
+
+  function removeImage(index: number) {
+    if (isLightboxOpenRef.current) return;
+    setDescriptionImages((prev) => {
+      if (index < 0 || index >= prev.length) return prev;
+      return prev.filter((_, i) => i !== index);
+    });
   }
 
   if (loading) {
@@ -208,7 +236,20 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-900">
+    <>
+      {previewImage && (
+        <ImageLightbox
+          image={previewImage}
+          onClose={closePreview}
+          onDownload={() => {
+            const a = document.createElement("a");
+            a.href = previewImage.src;
+            a.download = previewImage.name || "image";
+            a.click();
+          }}
+        />
+      )}
+      <div className="min-h-screen bg-zinc-50 text-zinc-900">
       <header className="flex items-center justify-between border-b border-zinc-200 bg-white px-6 py-4">
         <div>
           <Link href="/" className="text-sm text-zinc-500 hover:text-zinc-900">
@@ -327,12 +368,57 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </label>
               <label className="space-y-1 text-sm">
                 <span>描述（Markdown）</span>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder={"支持 Markdown，例如：\n## 标题\n- 列表\n![图片](图片地址)"}
-                  className="min-h-32 w-full rounded-md border border-zinc-300 px-3 py-2 font-mono text-sm"
-                />
+                <div className="rounded-md border border-zinc-300 bg-white">
+                  {descriptionImages.length > 0 && (
+                    <div
+                      className="flex flex-wrap gap-2 border-b border-zinc-200 p-3"
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.nativeEvent.stopImmediatePropagation()}
+                    >
+                      {descriptionImages.map((img, i) => (
+                        <div
+                          key={i}
+                          className="group relative"
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.nativeEvent.stopImmediatePropagation()}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={img.src}
+                            alt={img.name}
+                            className="max-h-28 rounded-md border border-zinc-200 object-contain cursor-pointer hover:ring-2 hover:ring-blue-400"
+                            onClick={(e) => { e.stopPropagation(); openPreview(img); }}
+                          />
+                          <button
+                            type="button"
+                            onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); removeImage(i); }}
+                            className="absolute -top-2 -right-2 hidden group-hover:flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white hover:!bg-red-500 transition-opacity"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    onPaste={(e) => {
+                      const items = e.clipboardData.items;
+                      for (const item of items) {
+                        if (item.type.startsWith("image/")) {
+                          e.preventDefault();
+                          const file = item.getAsFile();
+                          if (file) insertImage(file);
+                          return;
+                        }
+                      }
+                    }}
+                    placeholder="输入描述（Markdown）..."
+                    className="w-full px-3 py-2 font-mono text-sm placeholder:text-zinc-400 focus:outline-none"
+                    style={{ minHeight: "120px", resize: "none" }}
+                  />
+                </div>
               </label>
               <label className="w-fit cursor-pointer rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm hover:bg-zinc-100">
                 插入图片
@@ -415,5 +501,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         </section>
       </main>
     </div>
+    </>
   );
 }

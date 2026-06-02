@@ -7,16 +7,19 @@ declare module "next-auth" {
     user: {
       id: string;
       role: UserRole;
+      banned?: boolean;
     } & NonNullable<DefaultSession["user"]>;
   }
 
   interface User {
     role: UserRole;
+    banned?: boolean;
   }
 }
 
 declare module "next-auth/jwt" {
   interface JWT {
     role?: UserRole;
+    banned?: boolean;
   }
 }

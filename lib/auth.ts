@@ -1,6 +1,7 @@
-import NextAuth from "next-auth";
-import Credentials from "next-auth/providers/credentials";
+import "server-only";
+import NextAuth, { CredentialsSignin } from "next-auth";
 import { PrismaAdapter } from "@auth/prisma-adapter";
+import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -10,10 +11,14 @@ const loginSchema = z.object({
   password: z.string().min(6),
 });
 
+class AccountBannedError extends CredentialsSignin {
+  constructor() {
+    super("账号已被封禁，请联系管理员");
+  }
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
-  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
-  trustHost: true,
   session: { strategy: "jwt" },
   pages: {
     signIn: "/login",
@@ -33,6 +38,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const user = await prisma.user.findUnique({ where: { email } });
         if (!user?.passwordHash) return null;
 
+        if (user.bannedAt) throw new AccountBannedError();
+
         const valid = await bcrypt.compare(password, user.passwordHash);
         if (!valid) return null;
 
@@ -46,17 +53,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
-    jwt({ token, user }) {
+    async jwt({ token, user }) {
       if (user?.id) {
         token.sub = user.id;
         token.role = user.role;
       }
       return token;
     },
-    session({ session, token }) {
-      if (session.user && token.sub && token.role) {
+    async session({ session, token }) {
+      if (session.user && token.sub) {
         session.user.id = token.sub;
-        session.user.role = token.role;
+        session.user.role = token.role as typeof session.user.role;
       }
       return session;
     },

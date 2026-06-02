@@ -1,8 +1,7 @@
 import { UserRole } from "@prisma/client";
-import { auth } from "@/lib/auth";
 
 export async function requireSession() {
-  const session = await auth();
+  const session = await import("@/lib/auth").then((m) => m.auth());
   if (!session?.user) {
     throw new Error("UNAUTHORIZED");
   }
@@ -15,4 +14,20 @@ export async function requireRoot() {
     throw new Error("FORBIDDEN");
   }
   return session;
+}
+
+export function isRoot(role?: UserRole | string | null): boolean {
+  return role === UserRole.ROOT || role === "ROOT";
+}
+
+export function isBanned(bannedAt: Date | null | undefined): boolean {
+  return bannedAt !== null && bannedAt !== undefined;
+}
+
+export function canManageUser(
+  actorRole?: UserRole | string | null,
+  targetRole?: UserRole | string | null
+): boolean {
+  if (!isRoot(actorRole)) return false;
+  return !isRoot(targetRole);
 }
