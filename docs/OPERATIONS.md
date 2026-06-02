@@ -1,5 +1,11 @@
 # 运维说明
 
+## 部署脚本
+
+如果你需要了解 `scripts/deploy.sh` 的实际执行流程、使用方式、风险与后续升级方向，请先阅读：
+
+- [scripts/deploy.sh 使用手册与运维说明](DEPLOY_SCRIPT_MANUAL.md)
+
 ## 环境变量
 
 复制 `.env.example` 为 `.env`：

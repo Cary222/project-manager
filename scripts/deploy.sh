@@ -6,7 +6,7 @@ set -e
 WORK="/home/hxy/work/personal/project-manager"
 LOG="/tmp/pm-deploy.log"
 PORT=3003
-START_PID_FILE="/tmp/pm-start.pid"
+DEPLOY_LOCK="/tmp/pm-deploy.lock"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG"
@@ -37,6 +37,12 @@ wait_for_port_free() {
     done
 }
 
+if ! ( set -o noclobber; : > "$DEPLOY_LOCK" ) 2>/dev/null; then
+    log "检测到另一个部署正在执行，跳过本次任务"
+    exit 0
+fi
+trap 'rm -f "$DEPLOY_LOCK"' EXIT
+
 log "=== 开始部署检查 ==="
 cd "$WORK"
 
@@ -46,38 +52,30 @@ git fetch origin
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse origin/main)
 
-NEED_BUILD=0
-if [ "$LOCAL" != "$REMOTE" ]; then
-    log "发现更新: $LOCAL → $REMOTE"
-    NEED_BUILD=1
-    log "拉取最新代码..."
-    git pull origin main
-else
+if [ "$LOCAL" = "$REMOTE" ]; then
     log "代码已是最新"
+    log "无需重启，保持当前服务运行"
+    log "=== 部署完成 ==="
+    exit 0
 fi
 
-if [ ! -f ".next/BUILD_ID" ]; then
-    log "未找到生产构建产物，准备重新构建"
-    NEED_BUILD=1
-fi
+log "发现更新: $LOCAL → $REMOTE"
+log "拉取最新代码..."
+git pull origin main
 
-if [ "$NEED_BUILD" = "1" ]; then
-    log "开始安装依赖与生成 Prisma Client..."
-    if ! npm install >> "$LOG" 2>&1; then
-        log "依赖安装失败！旧服务保持不变。查看日志: tail -60 $LOG"
-        exit 1
-    fi
-    if ! npx prisma generate >> "$LOG" 2>&1; then
-        log "Prisma Client 生成失败！旧服务保持不变。查看日志: tail -60 $LOG"
-        exit 1
-    fi
-    log "开始构建..."
-    if ! npm run build >> "$LOG" 2>&1; then
-        log "构建失败！旧服务保持不变。查看日志: tail -60 $LOG"
-        exit 1
-    fi
-else
-    log "生产构建已存在，跳过构建"
+log "开始安装依赖与生成 Prisma Client..."
+if ! npm install >> "$LOG" 2>&1; then
+    log "依赖安装失败！旧服务保持不变。查看日志: tail -60 $LOG"
+    exit 1
+fi
+if ! npx prisma generate >> "$LOG" 2>&1; then
+    log "Prisma Client 生成失败！旧服务保持不变。查看日志: tail -60 $LOG"
+    exit 1
+fi
+log "开始构建..."
+if ! npm run build >> "$LOG" 2>&1; then
+    log "构建失败！旧服务保持不变。查看日志: tail -60 $LOG"
+    exit 1
 fi
 
 log "检查并停止当前服务..."
@@ -88,18 +86,10 @@ wait_for_port_free "$PORT" 20 || {
 }
 
 log "启动服务..."
-rm -f "$START_PID_FILE"
 nohup npm run start >> "$LOG" 2>&1 &
-START_PID=$!
-echo "$START_PID" > "$START_PID_FILE"
 
 elapsed=0
 while ! ss -ltn | tail -n +2 | grep -q ":$PORT"; do
-    if ! kill -0 "$START_PID" 2>/dev/null; then
-        log "启动进程已退出，最近日志："
-        tail -60 "$LOG" | tee -a "$LOG"
-        exit 1
-    fi
     if [ "$elapsed" -ge 20 ]; then
         log "服务启动超时！最近日志："
         tail -60 "$LOG" | tee -a "$LOG"
@@ -109,5 +99,5 @@ while ! ss -ltn | tail -n +2 | grep -q ":$PORT"; do
     elapsed=$((elapsed + 1))
 done
 
-log "服务启动成功 (port ${PORT}, pid ${START_PID})"
+log "服务启动成功 (port ${PORT})"
 log "=== 部署完成 ==="
