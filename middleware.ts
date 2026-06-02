@@ -1,11 +1,14 @@
 import { auth } from "@/lib/auth";
+import { isRoot } from "@/lib/permissions";
 import { NextResponse } from "next/server";
 
 export default auth((req) => {
   const isLoggedIn = !!req.auth;
-  const isLoginPage = req.nextUrl.pathname === "/login";
-  const isApiAuth = req.nextUrl.pathname.startsWith("/api/auth");
-  const isRegisterApi = req.nextUrl.pathname === "/api/register";
+  const { pathname } = req.nextUrl;
+  const isLoginPage = pathname === "/login";
+  const isApiAuth = pathname.startsWith("/api/auth");
+  const isRegisterApi = pathname === "/api/register";
+  const isAdmin = pathname.startsWith("/admin");
 
   if (isApiAuth || isRegisterApi) return NextResponse.next();
 
@@ -14,6 +17,10 @@ export default auth((req) => {
   }
 
   if (isLoggedIn && isLoginPage) {
+    return NextResponse.redirect(new URL("/", req.url));
+  }
+
+  if (isAdmin && !isRoot(req.auth?.user?.role)) {
     return NextResponse.redirect(new URL("/", req.url));
   }
 

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { signOut, useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Project = {
@@ -54,6 +55,7 @@ type Tab = "projects" | "my-tickets";
 
 export function Dashboard() {
   const { data: session } = useSession();
+  const router = useRouter();
   const isRoot = session?.user?.role === "ROOT";
 
   const [tab, setTab] = useState<Tab>("projects");
@@ -79,9 +81,8 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
-    Promise.all([loadProjects(), loadMyTickets()]).finally(() =>
-      setLoading(false)
-    );
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    Promise.all([loadProjects(), loadMyTickets()]).finally(() => setLoading(false));
   }, [loadProjects, loadMyTickets]);
 
   const ticketsByProject = useMemo(() => {
@@ -147,9 +148,17 @@ export function Dashboard() {
           <span>
             {session?.user?.name} · {session?.user?.role}
           </span>
+          {isRoot ? (
+            <Link
+              href="/admin/users"
+              className="rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm text-amber-700 hover:bg-amber-100"
+            >
+              管理
+            </Link>
+          ) : null}
           <button
             type="button"
-            onClick={() => signOut({ callbackUrl: "/login" })}
+            onClick={() => signOut({ redirect: false, callbackUrl: "/login" })}
             className="rounded-md border border-zinc-300 px-3 py-1.5 text-zinc-700 hover:bg-zinc-100"
           >
             退出

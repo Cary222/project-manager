@@ -17,10 +17,15 @@ Project
 
 | 角色 | 能力 |
 |------|------|
-| ROOT | 创建/删除项目、模块、单子；改指派人 |
+| ROOT | 创建/删除项目、模块、单子；改指派人；用户管理（改角色、封禁/解封） |
 | USER | 查看、更新单子状态 |
 
-注册默认 USER。ROOT 需在数据库手动设置 `role = ROOT`。
+注册默认 USER。ROOT 需通过命令行设置 `npm run db:promote -- <邮箱>` 或在数据库手动设置 `role = ROOT`。
+
+### 用户封禁
+
+- `bannedAt != null` 表示用户被封禁，被封禁用户登录时直接返回 null（无法登录）
+- 所有管理操作记录到 `ModerationLog` 表（BAN_USER / UNBAN_USER / UPDATE_ROLE）
 
 ## 路由
 
