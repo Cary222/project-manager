@@ -74,6 +74,59 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
 
+  // Module editing state
+  const [editingModule, setEditingModule] = useState<Module | null>(null);
+  const [editModuleName, setEditModuleName] = useState("");
+  const [editModuleDesc, setEditModuleDesc] = useState("");
+  const [editingModuleSubmitting, setEditingModuleSubmitting] = useState(false);
+
+  function openEditModule(module: Module) {
+    setEditingModule(module);
+    setEditModuleName(module.name);
+    setEditModuleDesc(module.description || "");
+  }
+
+  function closeEditModule() {
+    setEditingModule(null);
+    setEditModuleName("");
+    setEditModuleDesc("");
+  }
+
+  async function saveModule() {
+    if (!editingModule) return;
+    setEditingModuleSubmitting(true);
+    const res = await fetch(`/api/modules/${editingModule.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: editModuleName.trim(),
+        description: editModuleDesc.trim(),
+      }),
+    });
+    setEditingModuleSubmitting(false);
+    if (res.ok) {
+      closeEditModule();
+      await loadProject();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      setMessage(`保存模块失败: ${err.error ?? res.status}`);
+    }
+  }
+
+  async function deleteModule(module: Module) {
+    if (!window.confirm(`确定删除模块 "${module.name}" 吗？该模块下的所有单子也会被删除。`)) {
+      return;
+    }
+    setMessage("");
+    const res = await fetch(`/api/modules/${module.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      setMessage("删除模块失败");
+      return;
+    }
+    setMessage("模块已删除");
+    await loadProject();
+  }
+
   function openPreview(img: { src: string; name: string }) {
     isLightboxOpenRef.current = true;
     setPreviewImage(img);
@@ -248,6 +301,51 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             a.click();
           }}
         />
+      )}
+      {editingModule && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <h3 className="mb-4 text-lg font-medium">编辑模块</h3>
+            <div className="space-y-4">
+              <label className="block space-y-1 text-sm">
+                <span className="font-medium">模块名称</span>
+                <input
+                  type="text"
+                  value={editModuleName}
+                  onChange={(e) => setEditModuleName(e.target.value)}
+                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
+                  required
+                />
+              </label>
+              <label className="block space-y-1 text-sm">
+                <span className="font-medium">描述</span>
+                <textarea
+                  value={editModuleDesc}
+                  onChange={(e) => setEditModuleDesc(e.target.value)}
+                  className="w-full rounded-md border border-zinc-300 px-3 py-2"
+                  style={{ minHeight: "80px", resize: "vertical" }}
+                />
+              </label>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeEditModule}
+                className="rounded-md border border-zinc-300 px-4 py-2 text-sm hover:bg-zinc-100"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={saveModule}
+                disabled={editingModuleSubmitting || !editModuleName.trim()}
+                className="rounded-md bg-zinc-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+              >
+                {editingModuleSubmitting ? "保存中..." : "保存"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       <div className="min-h-screen bg-zinc-50 text-zinc-900">
       <header className="flex items-center justify-between border-b border-zinc-200 bg-white px-6 py-4">
@@ -455,9 +553,29 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             <div className="space-y-5">
               {selectedResponsibility.modules.map((module) => (
                 <div key={module.id}>
-                  <p className="mb-2 text-xs font-medium text-zinc-500">
-                    {module.name}
-                  </p>
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-xs font-medium text-zinc-500">
+                      {module.name}
+                    </p>
+                    {isRoot && (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openEditModule(module)}
+                          className="text-xs text-zinc-400 hover:text-zinc-700"
+                        >
+                          编辑
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteModule(module)}
+                          className="text-xs text-red-500 hover:text-red-700"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   {module.tickets.length === 0 ? (
                     <p className="rounded-md border border-dashed border-zinc-200 px-3 py-2 text-sm text-zinc-400">
                       暂无
