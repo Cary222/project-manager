@@ -47,10 +47,10 @@ log "=== 开始部署检查 ==="
 cd "$WORK"
 
 log "获取远程更新..."
-git fetch origin
+git --git-dir="$WORK/.git" --work-tree="$WORK" fetch origin
 
-LOCAL=$(git rev-parse HEAD)
-REMOTE=$(git rev-parse origin/main)
+LOCAL=$(git --git-dir="$WORK/.git" --work-tree="$WORK" rev-parse HEAD)
+REMOTE=$(git --git-dir="$WORK/.git" --work-tree="$WORK" rev-parse origin/main)
 
 if [ "$LOCAL" = "$REMOTE" ]; then
     log "代码已是最新"
@@ -61,7 +61,7 @@ fi
 
 log "发现更新: $LOCAL → $REMOTE"
 log "拉取最新代码..."
-git pull origin main
+git --git-dir="$WORK/.git" --work-tree="$WORK" pull origin main
 
 log "开始安装依赖与生成 Prisma Client..."
 if ! npm install >> "$LOG" 2>&1; then

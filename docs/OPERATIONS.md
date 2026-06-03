@@ -6,6 +6,8 @@
 
 - [scripts/deploy.sh 使用手册与运维说明](DEPLOY_SCRIPT_MANUAL.md)
 
+**推送即部署**：push 到 bare repo 的 `main` 分支，post-receive hook 会自动执行 `scripts/deploy.sh`，无需手动操作。
+
 ## 环境变量
 
 复制 `.env.example` 为 `.env`：
