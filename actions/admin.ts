@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { requireRoot } from "@/lib/permissions";
 import { createModerationLog } from "@/lib/moderation";
-import { UserRole, ModerationAction } from "@prisma/client";
+import { UserRole, ModerationAction, TicketStatus } from "@prisma/client";
 
 export type UserSummary = {
   id: string;
@@ -14,6 +14,50 @@ export type UserSummary = {
   bannedAt: Date | null;
   createdAt: Date;
 };
+
+export async function getUserByIdAction(userId: string) {
+  await requireRoot();
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, name: true, email: true, role: true, bannedAt: true, createdAt: true },
+  });
+  if (!user) return null;
+  return user;
+}
+
+export type UserTicket = {
+  id: string;
+  ticketNo: number;
+  title: string;
+  status: TicketStatus;
+  project: { id: string; name: string };
+  module: { name: string; responsibility: { kind: "PROGRAM" | "DESIGN" } };
+};
+
+export async function getUserTicketsAction(userId: string, status?: TicketStatus) {
+  await requireRoot();
+  const tickets = await prisma.ticket.findMany({
+    where: {
+      assignees: { some: { userId } },
+      ...(status ? { status } : {}),
+    },
+    orderBy: [{ status: "asc" }, { ticketNo: "desc" }],
+    select: {
+      id: true,
+      ticketNo: true,
+      title: true,
+      status: true,
+      project: { select: { id: true, name: true } },
+      module: {
+        select: {
+          name: true,
+          responsibility: { select: { kind: true } },
+        },
+      },
+    },
+  });
+  return tickets;
+}
 
 export async function getUsersAction(params?: {
   search?: string;

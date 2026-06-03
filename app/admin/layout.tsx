@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { isRoot } from "@/lib/permissions";
 import { signOut } from "@/lib/auth";
 import { ReactNode } from "react";
+import { AdminRoleProvider } from "./AdminRoleProvider";
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const session = await auth();
@@ -58,7 +59,11 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           </div>
         </header>
 
-        <main className="p-6">{children}</main>
+        <main className="p-6">
+          <AdminRoleProvider role={session.user.role}>
+            {children}
+          </AdminRoleProvider>
+        </main>
       </div>
     </div>
   );

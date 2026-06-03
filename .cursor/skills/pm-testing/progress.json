@@ -1,0 +1,11 @@
+{
+  "created_at": "2026-06-03",
+  "learning": {
+    "stage0_intro": false,
+    "stage1_manual": false,
+    "stage2_vitest": false,
+    "stage3_playwright": false,
+    "stage4_ci": false
+  },
+  "completed_features": []
+}
