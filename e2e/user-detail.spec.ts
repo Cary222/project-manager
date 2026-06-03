@@ -22,13 +22,33 @@ test.describe("用户详情页 E2E", () => {
   // ----------------------------------------------------------
   // 前置条件：登录（每个测试前执行一次）
   // ----------------------------------------------------------
-  // 思路：用 page.goto() 直接进入 /admin/users，跳过登录页
-  // 真实场景下 Playwright 支持 storageState 保存登录状态，
-  // 这里用直接 URL 访问来简化教学。
+  // 先登录 ROOT 账号，再进入用户管理页面
   test.beforeEach(async ({ page }) => {
+    await page.goto("/login");
+    await expect(page.getByRole("heading", { name: "项目管理" })).toBeVisible({ timeout: 10000 });
+
+    // 确保在登录模式（不是注册模式）
+    const loginTab = page.getByRole("button", { name: "登录" }).first();
+    await loginTab.click();
+
+    // 清空并填写表单
+    const emailInput = page.getByLabel("邮箱");
+    const passwordInput = page.getByLabel("密码");
+    await emailInput.clear();
+    await passwordInput.clear();
+    await emailInput.fill("2428058380@qq.com");
+    await passwordInput.fill("123456");
+
+    // 点击提交按钮（表单的 submit 按钮，不是 tab 切换按钮）
+    await page.locator("button[type='submit']").click();
+
+    // 等待登录完成并跳转
+    await expect(page).toHaveURL("/", { timeout: 10000 });
+
+    // 进入用户管理页面
     await page.goto("/admin/users");
-    // 等待页面加载完毕（等待用户列表出现）
-    await expect(page.getByText("用户管理")).toBeVisible();
+    // 等待页面加载完毕（等待侧边栏"用户管理"链接出现）
+    await expect(page.getByText("用户管理")).toBeVisible({ timeout: 10000 });
   });
 
   // ----------------------------------------------------------
@@ -62,7 +82,7 @@ test.describe("用户详情页 E2E", () => {
     await expect(page).toHaveURL(/\/admin\/users\/.+/);
 
     // 等待单子列表加载
-    await expect(page.getByText("单子")).toBeVisible();
+    await expect(page.getByRole("heading", { name: /单子/ })).toBeVisible();
 
     // 查看默认"全部状态"下的所有单子数量
     // 找到"全部状态"的 select 元素
@@ -73,8 +93,8 @@ test.describe("用户详情页 E2E", () => {
     await select.selectOption({ label: "已完成" });
 
     // 等待页面更新（React 状态变化后 DOM 会变）
-    // 验证没有报错即可
-    await expect(select).toHaveValue(expect.stringContaining("DONE"));
+    // 验证 select 的值已变为 DONE
+    await expect(select).toHaveValue("DONE");
 
     // 切回"全部状态"
     await select.selectOption({ label: "全部状态" });
@@ -89,33 +109,32 @@ test.describe("用户详情页 E2E", () => {
     await page.getByText("查看单子").first().click();
     await expect(page).toHaveURL(/\/admin\/users\/.+/);
 
-    // 找第一个单号链接（格式为 #数字，如 #10001）
-    // getByText 加上正则匹配
-    const ticketLink = page.locator("text=/^#\\d+$/").first();
+    // 等待单子列表加载完毕
+    await expect(page.getByRole("heading", { name: /单子/ })).toBeVisible();
 
-    // 如果页面上有单号链接（可能有"暂无单子"的情况），则测试
-    const ticketCount = await page.locator("text=/^#\\d+$/").count();
-    if (ticketCount > 0) {
-      // 用 Promise.all 同时打开新标签
-      const [newPage] = await Promise.all([
-        page.context().waitForEvent("page"),
-        ticketLink.click(),
-      ]);
+    // 找第一个单号链接
+    const ticketLink = page.locator("a", { hasText: /^#\d+/ }).first();
+    await ticketLink.waitFor({ state: "visible", timeout: 10000 });
 
-      // 等待新标签加载完毕
-      await newPage.waitForLoadState("domcontentloaded");
+    // 获取链接的 URL
+    const ticketUrl = await ticketLink.getAttribute("href");
 
-      // 新页面 URL 应包含 ticketNo（纯数字路径）
-      // 预期格式如 /10001
-      const newUrl = newPage.url();
-      expect(newUrl).toMatch(/\/\d+$/);
+    // 在新标签页中打开单子详情
+    const newPage = await page.context().newPage();
+    await newPage.goto(ticketUrl!);
 
-      // 验证新页面加载了内容（非空白页）
-      await expect(newPage.locator("body")).not.toBeEmpty();
-    } else {
-      // 没单子的情况：验证"暂无单子"提示出现
-      await expect(page.getByText("暂无单子")).toBeVisible();
-    }
+    // 等待新标签加载完毕
+    await newPage.waitForLoadState("domcontentloaded");
+
+    // 验证新页面 URL 格式正确（/ticketNo）
+    const newUrl = newPage.url();
+    expect(newUrl).toMatch(/\/\d+$/);
+
+    // 验证新页面加载了内容（非空白页）
+    await expect(newPage.locator("body")).not.toBeEmpty();
+
+    // 关闭新标签页
+    await newPage.close();
   });
 
   // ----------------------------------------------------------
