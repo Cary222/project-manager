@@ -80,6 +80,17 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [editModuleDesc, setEditModuleDesc] = useState("");
   const [editingModuleSubmitting, setEditingModuleSubmitting] = useState(false);
 
+  // Module merge confirmation state
+  const [mergeConfirm, setMergeConfirm] = useState<{
+    sourceModule: Module;
+    targetModule: {
+      id: string;
+      name: string;
+      ticketCount: number;
+    };
+    targetTicketCount: number;
+  } | null>(null);
+
   function openEditModule(module: Module) {
     setEditingModule(module);
     setEditModuleName(module.name);
@@ -109,7 +120,37 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       await loadProject();
     } else {
       const err = await res.json().catch(() => ({}));
-      setMessage(`保存模块失败: ${err.error ?? res.status}`);
+      if (err.error === "MODULE_CONFLICT" && err.targetModule) {
+        setMergeConfirm({
+          sourceModule: editingModule,
+          targetModule: err.targetModule,
+          targetTicketCount: err.sourceModule?.ticketCount ?? 0,
+        });
+      } else {
+        setMessage(`保存模块失败: ${err.error ?? res.status}`);
+      }
+    }
+  }
+
+  async function confirmMerge() {
+    if (!mergeConfirm) return;
+    setEditingModuleSubmitting(true);
+    const res = await fetch(`/api/modules/${mergeConfirm.sourceModule.id}/merge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        targetModuleId: mergeConfirm.targetModule.id,
+        description: editModuleDesc.trim(),
+      }),
+    });
+    setEditingModuleSubmitting(false);
+    if (res.ok) {
+      setMergeConfirm(null);
+      closeEditModule();
+      await loadProject();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      setMessage(`合并失败: ${err.error ?? res.status}`);
     }
   }
 
@@ -342,6 +383,43 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 className="rounded-md bg-zinc-900 px-4 py-2 text-sm text-white disabled:opacity-50"
               >
                 {editingModuleSubmitting ? "保存中..." : "保存"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {mergeConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <h3 className="mb-4 text-lg font-medium">合并模块</h3>
+            <div className="mb-4 space-y-2 text-sm">
+              <p className="text-zinc-600">
+                模块「<span className="font-medium">{mergeConfirm.sourceModule.name}</span>」
+                将合并到「<span className="font-medium">{mergeConfirm.targetModule.name}</span>」
+              </p>
+              <p className="text-zinc-600">
+                {mergeConfirm.sourceModule.tickets.length} + {mergeConfirm.targetTicketCount} 个单子
+                将全部归到「{mergeConfirm.targetModule.name}」
+              </p>
+              <p className="font-medium text-amber-600">
+                此操作不可撤销，是否继续？
+              </p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setMergeConfirm(null)}
+                className="rounded-md border border-zinc-300 px-4 py-2 text-sm hover:bg-zinc-100"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={confirmMerge}
+                disabled={editingModuleSubmitting}
+                className="rounded-md bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {editingModuleSubmitting ? "合并中..." : "确认合并"}
               </button>
             </div>
           </div>
