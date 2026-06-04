@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireRoot } from "@/lib/permissions";
+import { createModerationLog } from "@/lib/moderation";
+import { ModerationAction } from "@prisma/client";
 
 export async function POST(request: Request) {
   try {
-    await requireRoot();
+    const session = await requireRoot();
     const body = (await request.json()) as {
       responsibilityId?: string;
       name?: string;
@@ -33,6 +35,14 @@ export async function POST(request: Request) {
         name,
         description: body.description?.trim() || null,
       },
+    });
+
+    await createModerationLog({
+      action: ModerationAction.CREATE_MODULE,
+      targetId: module.id,
+      targetType: "Module",
+      actorId: session.user.id,
+      reason: `创建模块: ${module.name}`,
     });
 
     return NextResponse.json({ module });

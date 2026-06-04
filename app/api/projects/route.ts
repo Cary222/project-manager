@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireRoot, requireSession } from "@/lib/permissions";
 import { ResponsibilityKind } from "@prisma/client";
+import { createModerationLog } from "@/lib/moderation";
+import { ModerationAction } from "@prisma/client";
 
 export async function GET() {
   try {
@@ -24,7 +26,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await requireRoot();
+    const session = await requireRoot();
     const body = (await request.json()) as { name?: string; description?: string };
     const name = body.name?.trim();
     if (!name) {
@@ -47,6 +49,14 @@ export async function POST(request: Request) {
       });
 
       return created;
+    });
+
+    await createModerationLog({
+      action: ModerationAction.CREATE_PROJECT,
+      targetId: project.id,
+      targetType: "Project",
+      actorId: session.user.id,
+      reason: `创建项目: ${project.name}`,
     });
 
     return NextResponse.json({ project });

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { TicketStatus } from "@prisma/client";
+import { TicketStatus, ModerationAction } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
   assigneeUserSelect,
@@ -8,6 +8,7 @@ import {
 } from "@/lib/ticket-assignees";
 import { requireRoot, requireSession } from "@/lib/permissions";
 import { allocateTicketNo } from "@/lib/ticket-counter";
+import { createModerationLog } from "@/lib/moderation";
 
 export async function POST(request: Request) {
   try {
@@ -73,6 +74,14 @@ export async function POST(request: Request) {
       });
 
       return created;
+    });
+
+    await createModerationLog({
+      action: ModerationAction.CREATE_TICKET,
+      targetId: ticket.ticketNo.toString(),
+      targetType: "Ticket",
+      actorId: session.user.id,
+      reason: `创建单子 #${ticket.ticketNo}: ${ticket.title}`,
     });
 
     return NextResponse.json({ ticket });

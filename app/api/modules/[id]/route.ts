@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireRoot } from "@/lib/permissions";
+import { createModerationLog } from "@/lib/moderation";
+import { ModerationAction } from "@prisma/client";
 
 type Params = Promise<{ id: string }>;
 
@@ -29,7 +31,7 @@ export async function GET(request: Request, { params }: { params: Params }) {
 
 export async function PUT(request: Request, { params }: { params: Params }) {
   try {
-    await requireRoot();
+    const session = await requireRoot();
     const { id } = await params;
     const body = (await request.json()) as {
       name?: string;
@@ -88,6 +90,14 @@ export async function PUT(request: Request, { params }: { params: Params }) {
       data: updateData,
     });
 
+    await createModerationLog({
+      action: ModerationAction.UPDATE_MODULE,
+      targetId: module.id,
+      targetType: "Module",
+      actorId: session.user.id,
+      reason: `更新模块: ${module.name}`,
+    });
+
     return NextResponse.json({ module });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
@@ -98,7 +108,7 @@ export async function PUT(request: Request, { params }: { params: Params }) {
 
 export async function DELETE(request: Request, { params }: { params: Params }) {
   try {
-    await requireRoot();
+    const session = await requireRoot();
     const { id } = await params;
 
     const existing = await prisma.module.findUnique({ where: { id } });
@@ -107,6 +117,14 @@ export async function DELETE(request: Request, { params }: { params: Params }) {
     }
 
     await prisma.module.delete({ where: { id } });
+
+    await createModerationLog({
+      action: ModerationAction.DELETE_MODULE,
+      targetId: existing.id,
+      targetType: "Module",
+      actorId: session.user.id,
+      reason: `删除模块: ${existing.name}`,
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

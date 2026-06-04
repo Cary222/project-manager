@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireRoot, requireSession } from "@/lib/permissions";
+import { createModerationLog } from "@/lib/moderation";
+import { ModerationAction } from "@prisma/client";
 
 export async function GET(
   _request: Request,
@@ -70,9 +72,24 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireRoot();
+    const session = await requireRoot();
     const { id } = await context.params;
+
+    const project = await prisma.project.findUnique({ where: { id } });
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
     await prisma.project.delete({ where: { id } });
+
+    await createModerationLog({
+      action: ModerationAction.DELETE_PROJECT,
+      targetId: id,
+      targetType: "Project",
+      actorId: session.user.id,
+      reason: `删除项目: ${project.name}`,
+    });
+
     return NextResponse.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";

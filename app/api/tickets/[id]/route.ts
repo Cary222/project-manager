@@ -8,6 +8,8 @@ import {
   replaceTicketAssignees,
 } from "@/lib/ticket-assignees";
 import { requireRoot, requireSession } from "@/lib/permissions";
+import { createModerationLog } from "@/lib/moderation";
+import { ModerationAction } from "@prisma/client";
 
 async function enrichAssigneeHistory(
   history: {
@@ -96,12 +98,33 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireRoot();
+    const session = await requireRoot();
     const { id } = await context.params;
     const ticketNo = Number(id);
+
+    // 获取单子信息用于审计日志
+    const ticket = await prisma.ticket.findUnique({
+      where: Number.isInteger(ticketNo) ? { ticketNo } : { id },
+      select: { id: true, ticketNo: true, title: true },
+    });
+
+    if (!ticket) {
+      return NextResponse.json({ error: "ticket not found" }, { status: 404 });
+    }
+
     await prisma.ticket.delete({
       where: Number.isInteger(ticketNo) ? { ticketNo } : { id },
     });
+
+    // 记录审计日志
+    await createModerationLog({
+      action: ModerationAction.DELETE_TICKET,
+      targetId: ticket.ticketNo.toString(),
+      targetType: "Ticket",
+      actorId: session.user.id,
+      reason: `删除单子 #${ticket.ticketNo}: ${ticket.title}`,
+    });
+
     return NextResponse.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
