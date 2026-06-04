@@ -6,6 +6,12 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 
+const baseUrl = process.env.NEXTAUTH_URL || process.env.AUTH_URL;
+
+if (baseUrl?.includes("0.0.0.0")) {
+  throw new Error("NEXTAUTH_URL / AUTH_URL 不能使用 0.0.0.0，请改为实际域名或 localhost");
+}
+
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
