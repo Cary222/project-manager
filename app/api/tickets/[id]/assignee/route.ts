@@ -9,6 +9,8 @@ import {
   sameAssigneeIds,
 } from "@/lib/ticket-assignees";
 import { requireRoot } from "@/lib/permissions";
+import { createModerationLog } from "@/lib/moderation";
+import { ModerationAction } from "@prisma/client";
 
 export async function PATCH(
   request: Request,
@@ -25,6 +27,7 @@ export async function PATCH(
       where: Number.isInteger(ticketNo) ? { ticketNo } : { id },
       select: {
         id: true,
+        ticketNo: true,
         assignees: { select: { userId: true } },
       },
     });
@@ -67,6 +70,20 @@ export async function PATCH(
           },
         },
       });
+    });
+
+    const newAssignees = await prisma.user.findMany({
+      where: { id: { in: nextAssigneeIds } },
+      select: { name: true, email: true },
+    });
+    const assigneeNames = newAssignees.map(u => u.name || u.email).join(", ");
+
+    await createModerationLog({
+      action: ModerationAction.UPDATE_TICKET_ASSIGNEE,
+      targetId: current.ticketNo.toString(),
+      targetType: "Ticket",
+      actorId: session.user.id,
+      reason: `指派变更为 ${assigneeNames || "无人"}`,
     });
 
     return NextResponse.json({

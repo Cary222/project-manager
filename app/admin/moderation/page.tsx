@@ -37,6 +37,11 @@ const ACTION_LABELS: Record<ModerationAction, string> = {
   MERGE_MODULE: "合并模块",
   CREATE_PROJECT: "创建项目",
   DELETE_PROJECT: "删除项目",
+  UPDATE_TICKET_STATUS: "修改状态",
+  UPDATE_TICKET_ASSIGNEE: "修改指派",
+  UPDATE_TICKET_PROGRESS: "修改进度",
+  EDIT_TICKET: "编辑单子",
+  CHANGE_TICKET_MODULE: "移动模块",
 };
 
 const ACTION_COLORS: Record<ModerationAction, string> = {
@@ -51,6 +56,11 @@ const ACTION_COLORS: Record<ModerationAction, string> = {
   MERGE_MODULE: "text-purple-600 bg-purple-50",
   CREATE_PROJECT: "text-green-600 bg-green-50",
   DELETE_PROJECT: "text-red-600 bg-red-50",
+  UPDATE_TICKET_STATUS: "text-blue-600 bg-blue-50",
+  UPDATE_TICKET_ASSIGNEE: "text-amber-600 bg-amber-50",
+  UPDATE_TICKET_PROGRESS: "text-cyan-600 bg-cyan-50",
+  EDIT_TICKET: "text-indigo-600 bg-indigo-50",
+  CHANGE_TICKET_MODULE: "text-violet-600 bg-violet-50",
 };
 
 export default function AdminModerationPage() {

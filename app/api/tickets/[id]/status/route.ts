@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { TicketStatus } from "@prisma/client";
+import { TicketStatus, ModerationAction } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/permissions";
+import { createModerationLog } from "@/lib/moderation";
 
 const STATUS_VALUES = new Set<string>(Object.values(TicketStatus));
 
@@ -22,7 +23,7 @@ export async function PATCH(
 
     const current = await prisma.ticket.findUnique({
       where: Number.isInteger(ticketNo) ? { ticketNo } : { id },
-      select: { id: true, status: true },
+      select: { id: true, ticketNo: true, status: true },
     });
     if (!current) {
       return NextResponse.json({ error: "ticket not found" }, { status: 404 });
@@ -48,6 +49,14 @@ export async function PATCH(
         },
       });
       return updated;
+    });
+
+    await createModerationLog({
+      action: ModerationAction.UPDATE_TICKET_STATUS,
+      targetId: current.ticketNo.toString(),
+      targetType: "Ticket",
+      actorId: session.user.id,
+      reason: `状态变更为 ${nextStatus}`,
     });
 
     return NextResponse.json({ ticket });
