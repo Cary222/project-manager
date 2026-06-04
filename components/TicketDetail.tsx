@@ -17,6 +17,17 @@ type UserBrief = {
   role: "ROOT" | "USER";
 };
 
+type Module = {
+  id: string;
+  name: string;
+};
+
+type Responsibility = {
+  id: string;
+  kind: "PROGRAM" | "DESIGN";
+  modules: Module[];
+};
+
 type Ticket = {
   id: string;
   ticketNo: number;
@@ -24,9 +35,10 @@ type Ticket = {
   description: string | null;
   progress: number;
   status: TicketStatus;
-  project: { id: string; name: string };
+  project: { id: string; name: string; responsibilities: Responsibility[] };
   assignees: UserBrief[];
   module: {
+    id: string;
     name: string;
     responsibility: { kind: "PROGRAM" | "DESIGN" };
   };
@@ -84,6 +96,11 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   const [selectedCommit, setSelectedCommit] = useState<CommitSummary | null>(
     null
   );
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [modules, setModules] = useState<{ id: string; name: string }[]>([]);
+  const [selectedModuleId, setSelectedModuleId] = useState("");
 
   const loadTicket = useCallback(async () => {
     const res = await fetch(`/api/tickets/${ticketId}`);
@@ -95,7 +112,13 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     setTicket(data.ticket);
     setStatus(data.ticket.status);
     setAssigneeIds(data.ticket.assignees.map((user) => user.id));
+    setEditTitle(data.ticket.title);
+    setEditDescription(data.ticket.description || "");
+    setSelectedModuleId(data.ticket.module.id);
   }, [ticketId]);
+
+  const isAssignee = ticket?.assignees.some(a => a.id === session?.user?.id) ?? false;
+  const canEdit = isRoot || isAssignee;
 
   useEffect(() => {
     let cancelled = false;
@@ -120,6 +143,54 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
       .then((res) => (res.ok ? res.json() : { users: [] }))
       .then((data: { users: UserBrief[] }) => setUsers(data.users));
   }, [isRoot]);
+
+  const allModules = ticket?.project.responsibilities.flatMap(r => r.modules) ?? [];
+
+  useEffect(() => {
+    if (!ticket || !isRoot) return;
+    const respKind = ticket.module.responsibility.kind;
+    const respModules = allModules.filter(m => {
+      const resp = ticket.project.responsibilities.find(r => r.kind === respKind);
+      return resp?.modules.some(rm => rm.id === m.id);
+    });
+    setModules(allModules.length > 0 ? allModules : respModules);
+  }, [ticket?.project, isRoot]);
+
+  async function saveTicketDetails() {
+    setMessage("");
+    if (!ticket) return;
+    const res = await fetch(`/api/tickets/${ticket.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: editTitle, description: editDescription }),
+    });
+    if (!res.ok) {
+      setMessage("保存失败");
+      return;
+    }
+    setMessage("详情已保存");
+    setIsEditing(false);
+    await loadTicket();
+  }
+
+  async function updateModule() {
+    setMessage("");
+    if (!ticket || !selectedModuleId) return;
+    const module = modules.find(m => m.id === selectedModuleId);
+    if (!module) return;
+    if (module.id === ticket.module.id) return;
+    const res = await fetch(`/api/tickets/${ticket.id}/module`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ moduleId: module.id }),
+    });
+    if (!res.ok) {
+      setMessage("移动模块失败");
+      return;
+    }
+    setMessage("模块已移动");
+    await loadTicket();
+  }
 
   async function updateStatus() {
     setMessage("");
@@ -151,18 +222,6 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     }
     setMessage("指派人已更新");
     await loadTicket();
-  }
-
-  async function deleteTicket() {
-    if (!ticket) return;
-    if (!window.confirm(`确定删除单子 #${ticket.ticketNo} 吗？`)) return;
-    const res = await fetch(`/api/tickets/${ticket.id}`, { method: "DELETE" });
-    if (!res.ok) {
-      setMessage("删除单子失败");
-      return;
-    }
-    router.push(`/projects/${ticket.project.id}`);
-    router.refresh();
   }
 
   if (loading) {
@@ -215,25 +274,92 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
 
         <section className="rounded-xl border border-zinc-200 bg-white p-5">
           <div className="flex items-start justify-between gap-4">
-            <h2 className="text-xl font-semibold">{ticket.title}</h2>
-            {isRoot ? (
-              <button
-                type="button"
-                onClick={deleteTicket}
-                className="shrink-0 rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
-              >
-                删除单子
-              </button>
-            ) : null}
+            {isEditing ? (
+              <input
+                type="text"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                className="flex-1 rounded-md border border-zinc-300 px-3 py-1 text-xl font-semibold"
+              />
+            ) : (
+              <h2 className="text-xl font-semibold">{ticket.title}</h2>
+            )}
+            <div className="flex gap-2">
+              {canEdit && !isEditing && (
+                <button
+                  type="button"
+                  onClick={() => setIsEditing(true)}
+                  className="shrink-0 rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100"
+                >
+                  编辑
+                </button>
+              )}
+            </div>
           </div>
           <div className="mt-4">
-            {ticket.description ? (
+            {isEditing ? (
+              <textarea
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                rows={4}
+                className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                placeholder="添加描述..."
+              />
+            ) : ticket.description ? (
               <MarkdownContent content={ticket.description} />
             ) : (
               <p className="text-sm text-zinc-500">暂无描述</p>
             )}
           </div>
+          {canEdit && isEditing && (
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={saveTicketDetails}
+                className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm text-white"
+              >
+                保存
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditing(false);
+                  setEditTitle(ticket.title);
+                  setEditDescription(ticket.description || "");
+                }}
+                className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100"
+              >
+                取消
+              </button>
+            </div>
+          )}
         </section>
+
+        {isRoot && (
+          <section className="rounded-xl border border-zinc-200 bg-white p-5">
+            <h2 className="mb-3 font-medium">移动到其他模块</h2>
+            <div className="flex items-center gap-3">
+              <select
+                value={selectedModuleId}
+                onChange={(e) => setSelectedModuleId(e.target.value)}
+                className="flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
+              >
+                {modules.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={updateModule}
+                className="rounded-md bg-zinc-900 px-3 py-2 text-sm text-white"
+              >
+                移动
+              </button>
+            </div>
+          </section>
+        )}
 
         <section className="rounded-xl border border-zinc-200 bg-white p-5">
           <h2 className="mb-3 font-medium">指派</h2>

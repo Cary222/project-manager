@@ -44,7 +44,17 @@ export async function GET(
       where: Number.isInteger(ticketNo) ? { ticketNo } : { id },
       include: {
         project: {
-          select: { id: true, name: true },
+          include: {
+            responsibilities: {
+              orderBy: { kind: "asc" },
+              include: {
+                modules: {
+                  orderBy: { name: "asc" },
+                  select: { id: true, name: true },
+                },
+              },
+            },
+          },
         },
         assignees: {
           include: {
@@ -126,6 +136,54 @@ export async function DELETE(
     });
 
     return NextResponse.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown";
+    const status = message === "FORBIDDEN" ? 403 : 401;
+    return NextResponse.json({ error: message }, { status });
+  }
+}
+
+export async function PUT(
+  request: Request,
+  context: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await requireSession();
+    const { id } = await context.params;
+    const ticketNo = Number(id);
+
+    const ticket = await prisma.ticket.findUnique({
+      where: Number.isInteger(ticketNo) ? { ticketNo } : { id },
+      include: { assignees: { select: { userId: true } } },
+    });
+    if (!ticket) {
+      return NextResponse.json({ error: "ticket not found" }, { status: 404 });
+    }
+
+    const isAssignee = ticket.assignees.some(a => a.userId === session.user.id);
+    const isRoot = session.user.role === "ROOT";
+    if (!isAssignee && !isRoot) {
+      return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+    }
+
+    const body = (await request.json()) as { title?: string; description?: string };
+    const updated = await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: {
+        title: body.title?.trim() || undefined,
+        description: body.description !== undefined ? (body.description.trim() || null) : undefined,
+      },
+    });
+
+    await createModerationLog({
+      action: ModerationAction.EDIT_TICKET,
+      targetId: ticket.ticketNo.toString(),
+      targetType: "Ticket",
+      actorId: session.user.id,
+      reason: `编辑单子详情: ${updated.title}`,
+    });
+
+    return NextResponse.json({ ticket: updated });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
     const status = message === "FORBIDDEN" ? 403 : 401;
