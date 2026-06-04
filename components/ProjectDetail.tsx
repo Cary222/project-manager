@@ -660,20 +660,26 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                     </p>
                   ) : (
                     <div className="grid gap-2 md:grid-cols-2">
-                      {module.tickets.map((ticket) => (
+                      {module.tickets.map((ticket) => {
+                        const isDone = ticket.status === "DONE";
+                        return (
                         <div
                           key={ticket.id}
-                          className="rounded-lg border border-zinc-200 px-3 py-2 transition hover:border-zinc-300 hover:bg-zinc-50"
+                          className={`rounded-lg border px-3 py-2 transition ${
+                            isDone
+                              ? "border-zinc-100 bg-zinc-50 text-zinc-400 hover:border-zinc-200 hover:bg-zinc-100"
+                              : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50"
+                          }`}
                         >
                           <Link href={`/${ticket.ticketNo}`} className="block">
                             <div className="flex items-center justify-between gap-3">
                               <span className="font-medium">#{ticket.ticketNo}</span>
-                              <span className="text-sm text-zinc-500">
+                              <span className={`text-sm ${isDone ? "text-zinc-400" : "text-zinc-500"}`}>
                                 {STATUS_LABEL[ticket.status]}
                               </span>
                             </div>
                             <p className="mt-1 text-sm">{ticket.title}</p>
-                            <p className="mt-1 text-xs text-zinc-500">
+                            <p className={`mt-1 text-xs ${isDone ? "text-zinc-400" : "text-zinc-500"}`}>
                               指派：{formatAssigneeNames(ticket.assignees)}
                             </p>
                           </Link>
@@ -687,7 +693,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                             </button>
                           ) : null}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
