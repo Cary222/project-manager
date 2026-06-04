@@ -36,7 +36,10 @@ export async function PUT(request: Request, { params }: { params: Params }) {
       description?: string;
     };
 
-    const existing = await prisma.module.findUnique({ where: { id } });
+    const existing = await prisma.module.findUnique({
+      where: { id },
+      include: { _count: { select: { tickets: true } } },
+    });
     if (!existing) {
       return NextResponse.json({ error: "Module not found" }, { status: 404 });
     }
@@ -57,10 +60,24 @@ export async function PUT(request: Request, { params }: { params: Params }) {
             name: body.name.trim(),
           },
         },
+        include: { _count: { select: { tickets: true } } },
       });
       if (conflict && conflict.id !== id) {
         return NextResponse.json(
-          { error: "Module name already exists in this responsibility" },
+          {
+            error: "MODULE_CONFLICT",
+            message: "此名称已存在，是否合并两个模块？",
+            sourceModule: {
+              id: existing.id,
+              name: existing.name,
+              ticketCount: existing._count.tickets,
+            },
+            targetModule: {
+              id: conflict.id,
+              name: conflict.name,
+              ticketCount: conflict._count.tickets,
+            },
+          },
           { status: 409 }
         );
       }
