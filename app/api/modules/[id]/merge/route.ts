@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireRoot } from "@/lib/permissions";
+import { createModerationLog } from "@/lib/moderation";
+import { ModerationAction } from "@prisma/client";
 
 type Params = Promise<{ id: string }>;
 
 export async function POST(request: Request, { params }: { params: Params }) {
   try {
-    await requireRoot();
+    const session = await requireRoot();
     const { id } = await params;
     const body = (await request.json()) as {
       targetModuleId: string;
@@ -68,6 +70,14 @@ export async function POST(request: Request, { params }: { params: Params }) {
 
       // 删除源模块
       await tx.module.delete({ where: { id } });
+    });
+
+    await createModerationLog({
+      action: ModerationAction.MERGE_MODULE,
+      targetId: id,
+      targetType: "Module",
+      actorId: session.user.id,
+      reason: `合并模块 ${sourceModule.name} 到 ${targetModule.name}`,
     });
 
     return NextResponse.json({

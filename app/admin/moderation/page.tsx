@@ -29,12 +29,28 @@ const ACTION_LABELS: Record<ModerationAction, string> = {
   BAN_USER: "封禁用户",
   UNBAN_USER: "解封用户",
   UPDATE_ROLE: "修改角色",
+  DELETE_TICKET: "删除单子",
+  CREATE_TICKET: "创建单子",
+  CREATE_MODULE: "创建模块",
+  UPDATE_MODULE: "更新模块",
+  DELETE_MODULE: "删除模块",
+  MERGE_MODULE: "合并模块",
+  CREATE_PROJECT: "创建项目",
+  DELETE_PROJECT: "删除项目",
 };
 
 const ACTION_COLORS: Record<ModerationAction, string> = {
   BAN_USER: "text-red-600 bg-red-50",
   UNBAN_USER: "text-green-600 bg-green-50",
   UPDATE_ROLE: "text-blue-600 bg-blue-50",
+  DELETE_TICKET: "text-orange-600 bg-orange-50",
+  CREATE_TICKET: "text-emerald-600 bg-emerald-50",
+  CREATE_MODULE: "text-green-600 bg-green-50",
+  UPDATE_MODULE: "text-blue-600 bg-blue-50",
+  DELETE_MODULE: "text-red-600 bg-red-50",
+  MERGE_MODULE: "text-purple-600 bg-purple-50",
+  CREATE_PROJECT: "text-green-600 bg-green-50",
+  DELETE_PROJECT: "text-red-600 bg-red-50",
 };
 
 export default function AdminModerationPage() {
