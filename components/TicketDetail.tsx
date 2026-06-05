@@ -1,14 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { signOut, useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { useCallback, useEffect, useState } from "react";
+import { AppShell } from "@/components/AppShell";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { CommitDiffModal, type CommitSummary } from "@/components/CommitDiffModal";
 import { AssigneePicker } from "@/components/AssigneePicker";
 import { formatAssigneeList } from "@/lib/ticket-assignees";
 import { branchStyle, repoStyle } from "@/lib/repo-style";
+import { IconArrowLeft, IconClock, IconEdit } from "@/components/icons";
 
 type UserBrief = {
   id: string;
@@ -78,13 +79,27 @@ const STATUS_LABEL: Record<TicketStatus, string> = {
   DONE: "已完成",
 };
 
+const STATUS_STYLE: Record<TicketStatus, string> = {
+  DEVELOPING: "bg-brand-50 text-brand-700",
+  READY_FOR_TEST: "bg-amber-50 text-warning",
+  DONE: "bg-emerald-50 text-emerald-600",
+};
+
 function userLabel(user: UserBrief | null) {
   if (!user) return "未指派";
   return `${user.name || user.email}（${user.role}）`;
 }
 
+function Avatar({ name }: { name?: string | null }) {
+  const initial = (name || "U").trim().charAt(0).toUpperCase();
+  return (
+    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700">
+      {initial}
+    </span>
+  );
+}
+
 export function TicketDetail({ ticketId }: { ticketId: string }) {
-  const router = useRouter();
   const { data: session } = useSession();
   const isRoot = session?.user?.role === "ROOT";
   const [ticket, setTicket] = useState<Ticket | null>(null);
@@ -93,9 +108,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   const [status, setStatus] = useState<TicketStatus>("DEVELOPING");
   const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [message, setMessage] = useState("");
-  const [selectedCommit, setSelectedCommit] = useState<CommitSummary | null>(
-    null
-  );
+  const [selectedCommit, setSelectedCommit] = useState<CommitSummary | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
@@ -117,7 +130,8 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     setSelectedModuleId(data.ticket.module.id);
   }, [ticketId]);
 
-  const isAssignee = ticket?.assignees.some(a => a.id === session?.user?.id) ?? false;
+  const isAssignee =
+    ticket?.assignees.some((a) => a.id === session?.user?.id) ?? false;
   const canEdit = isRoot || isAssignee;
 
   useEffect(() => {
@@ -144,16 +158,18 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
       .then((data: { users: UserBrief[] }) => setUsers(data.users));
   }, [isRoot]);
 
-  const allModules = ticket?.project.responsibilities.flatMap(r => r.modules) ?? [];
+  const allModules = ticket?.project.responsibilities.flatMap((r) => r.modules) ?? [];
 
   useEffect(() => {
     if (!ticket || !isRoot) return;
     const respKind = ticket.module.responsibility.kind;
-    const respModules = allModules.filter(m => {
-      const resp = ticket.project.responsibilities.find(r => r.kind === respKind);
-      return resp?.modules.some(rm => rm.id === m.id);
+    const respModules = allModules.filter((m) => {
+      const resp = ticket.project.responsibilities.find((r) => r.kind === respKind);
+      return resp?.modules.some((rm) => rm.id === m.id);
     });
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setModules(allModules.length > 0 ? allModules : respModules);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticket?.project, isRoot]);
 
   async function saveTicketDetails() {
@@ -176,13 +192,13 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   async function updateModule() {
     setMessage("");
     if (!ticket || !selectedModuleId) return;
-    const module = modules.find(m => m.id === selectedModuleId);
-    if (!module) return;
-    if (module.id === ticket.module.id) return;
+    const targetModule = modules.find((m) => m.id === selectedModuleId);
+    if (!targetModule) return;
+    if (targetModule.id === ticket.module.id) return;
     const res = await fetch(`/api/tickets/${ticket.id}/module`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ moduleId: module.id }),
+      body: JSON.stringify({ moduleId: targetModule.id }),
     });
     if (!res.ok) {
       setMessage("移动模块失败");
@@ -225,298 +241,333 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   }
 
   if (loading) {
-    return <main className="p-6 text-sm text-zinc-500">加载中...</main>;
+    return (
+      <AppShell>
+        <p className="py-12 text-center text-sm text-ink-400">加载中…</p>
+      </AppShell>
+    );
   }
 
   if (!ticket) {
     return (
-      <main className="p-6">
-        <Link href="/" className="text-sm text-zinc-500 hover:text-zinc-900">
-          返回项目
+      <AppShell>
+        <Link
+          href="/tasks"
+          className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-900"
+        >
+          <IconArrowLeft className="h-4 w-4" /> 返回任务列表
         </Link>
-        <p className="mt-6 rounded-xl border border-dashed border-zinc-300 bg-white p-10 text-center text-zinc-500">
+        <p className="mt-6 rounded-xl border border-dashed border-ink-200 bg-white p-12 text-center text-ink-400">
           单子不存在
         </p>
-      </main>
+      </AppShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-900">
-      <header className="flex items-center justify-between border-b border-zinc-200 bg-white px-6 py-4">
-        <div>
+    <AppShell
+      header={
+        <div className="flex items-center gap-3">
           <Link
             href={`/projects/${ticket.project.id}`}
-            className="text-sm text-zinc-500 hover:text-zinc-900"
+            className="rounded-lg p-1.5 text-ink-400 hover:bg-ink-100 hover:text-ink-700"
+            aria-label="返回项目"
           >
-            返回 {ticket.project.name}
+            <IconArrowLeft />
           </Link>
-          <h1 className="mt-1 text-lg font-semibold">#{ticket.ticketNo}</h1>
-          <p className="text-sm text-zinc-500">
-            {KIND_LABEL[ticket.module.responsibility.kind]} / {ticket.module.name}
-          </p>
+          <div>
+            <h1 className="text-lg font-semibold leading-tight">
+              #{ticket.ticketNo}
+            </h1>
+            <p className="text-xs text-ink-400">
+              {ticket.project.name} · {KIND_LABEL[ticket.module.responsibility.kind]} /{" "}
+              {ticket.module.name}
+            </p>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => signOut({ redirectTo: "/login" })}
-          className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100"
-        >
-          退出
-        </button>
-      </header>
-
-      <main className="mx-auto max-w-3xl space-y-5 p-6">
+      }
+    >
+      <div className="space-y-5 pm-fade-in">
         {message ? (
-          <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
             {message}
           </p>
         ) : null}
 
-        <section className="rounded-xl border border-zinc-200 bg-white p-5">
-          <div className="flex items-start justify-between gap-4">
-            {isEditing ? (
-              <input
-                type="text"
-                value={editTitle}
-                onChange={(e) => setEditTitle(e.target.value)}
-                className="flex-1 rounded-md border border-zinc-300 px-3 py-1 text-xl font-semibold"
-              />
-            ) : (
-              <h2 className="text-xl font-semibold">{ticket.title}</h2>
-            )}
-            <div className="flex gap-2">
-              {canEdit && !isEditing && (
-                <button
-                  type="button"
-                  onClick={() => setIsEditing(true)}
-                  className="shrink-0 rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100"
-                >
-                  编辑
-                </button>
+        <div className="grid gap-5 lg:grid-cols-3">
+          {/* 主区 */}
+          <div className="space-y-5 lg:col-span-2">
+            <section className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <span
+                    className={`mb-2 inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_STYLE[ticket.status]}`}
+                  >
+                    {STATUS_LABEL[ticket.status]}
+                  </span>
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      className="w-full rounded-lg border border-ink-200 px-3 py-1.5 text-xl font-semibold outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                    />
+                  ) : (
+                    <h2 className="text-xl font-semibold">{ticket.title}</h2>
+                  )}
+                </div>
+                {canEdit && !isEditing && (
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(true)}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink-200 px-3 py-1.5 text-sm text-ink-700 hover:bg-ink-100"
+                  >
+                    <IconEdit className="h-4 w-4" /> 编辑
+                  </button>
+                )}
+              </div>
+
+              <div className="mt-4">
+                {isEditing ? (
+                  <textarea
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    rows={6}
+                    className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                    placeholder="添加描述（Markdown）..."
+                  />
+                ) : ticket.description ? (
+                  <MarkdownContent content={ticket.description} />
+                ) : (
+                  <p className="text-sm text-ink-400">暂无描述</p>
+                )}
+              </div>
+
+              {canEdit && isEditing && (
+                <div className="mt-4 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={saveTicketDetails}
+                    className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+                  >
+                    保存
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditing(false);
+                      setEditTitle(ticket.title);
+                      setEditDescription(ticket.description || "");
+                    }}
+                    className="rounded-lg border border-ink-200 px-4 py-2 text-sm hover:bg-ink-100"
+                  >
+                    取消
+                  </button>
+                </div>
               )}
-            </div>
+            </section>
+
+            {/* 历史提交 */}
+            <section className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="font-medium">历史提交</h2>
+                <span className="rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-500">
+                  {ticket.commits.length}
+                </span>
+              </div>
+              {ticket.commits.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-ink-200 p-8 text-center text-sm text-ink-400">
+                  暂无关联提交
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {ticket.commits.map((commit) => {
+                    const repo = repoStyle(commit.repoPath);
+                    return (
+                      <button
+                        key={commit.id}
+                        type="button"
+                        onClick={() => setSelectedCommit(commit)}
+                        className={`w-full rounded-lg border border-ink-100 border-l-4 ${repo.border} p-3 text-left text-sm transition hover:border-ink-300 ${repo.card}`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <span
+                              className={`rounded px-2 py-0.5 text-xs font-medium ${repo.badge}`}
+                            >
+                              {repo.name}
+                            </span>
+                            <span className="font-mono text-xs text-ink-500">
+                              {commit.commitSha.slice(0, 7)}
+                            </span>
+                          </div>
+                          <span className="shrink-0 text-xs text-ink-400">
+                            {new Date(commit.committedAt).toLocaleString()}
+                          </span>
+                        </div>
+                        {commit.branches.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {commit.branches.map((branch) => (
+                              <span
+                                key={branch}
+                                className={`rounded px-2 py-0.5 text-xs ${branchStyle(branch)}`}
+                              >
+                                {branch}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                        <p className="mt-2 text-ink-700">{commit.subject}</p>
+                        <p className="mt-1 text-xs text-ink-400">{commit.author}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
           </div>
-          <div className="mt-4">
-            {isEditing ? (
-              <textarea
-                value={editDescription}
-                onChange={(e) => setEditDescription(e.target.value)}
-                rows={4}
-                className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                placeholder="添加描述..."
-              />
-            ) : ticket.description ? (
-              <MarkdownContent content={ticket.description} />
-            ) : (
-              <p className="text-sm text-zinc-500">暂无描述</p>
+
+          {/* 右侧栏 */}
+          <div className="space-y-5">
+            {/* 状态 */}
+            <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+              <h2 className="mb-3 font-medium">状态</h2>
+              <div className="mb-3 flex items-center gap-2">
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as TicketStatus)}
+                  className="flex-1 rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                >
+                  {Object.entries(STATUS_LABEL).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={updateStatus}
+                  className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"
+                >
+                  保存
+                </button>
+              </div>
+              <div className="space-y-2">
+                {ticket.statusHistory.length === 0 ? (
+                  <p className="text-xs text-ink-400">暂无状态变更记录</p>
+                ) : (
+                  ticket.statusHistory.slice(0, 5).map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-start gap-2 text-xs text-ink-500"
+                    >
+                      <IconClock className="mt-0.5 h-3.5 w-3.5 text-ink-300" />
+                      <div>
+                        <p>
+                          <span className="font-medium text-ink-700">
+                            {STATUS_LABEL[item.status]}
+                          </span>{" "}
+                          · {userLabel(item.changedBy)}
+                        </p>
+                        <p className="text-ink-400">
+                          {new Date(item.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+
+            {/* 指派 */}
+            <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+              <h2 className="mb-3 font-medium">参与人员</h2>
+              <div className="mb-3 flex flex-wrap gap-2">
+                {ticket.assignees.length === 0 ? (
+                  <span className="text-sm text-ink-400">未指派</span>
+                ) : (
+                  ticket.assignees.map((u) => (
+                    <span
+                      key={u.id}
+                      className="flex items-center gap-1.5 rounded-full bg-ink-100 py-1 pl-1 pr-2.5 text-xs"
+                    >
+                      <Avatar name={u.name} />
+                      {u.name || u.email}
+                    </span>
+                  ))
+                )}
+              </div>
+              {isRoot ? (
+                <div className="space-y-3">
+                  <AssigneePicker
+                    users={users}
+                    value={assigneeIds}
+                    onChange={setAssigneeIds}
+                  />
+                  <button
+                    type="button"
+                    onClick={updateAssignee}
+                    className="w-full rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"
+                  >
+                    保存指派
+                  </button>
+                </div>
+              ) : null}
+
+              {ticket.assigneeHistory.length > 0 ? (
+                <div className="mt-4 border-t border-ink-100 pt-3">
+                  <h3 className="mb-2 text-xs font-medium text-ink-500">指派历史</h3>
+                  <div className="space-y-2">
+                    {ticket.assigneeHistory.slice(0, 4).map((item) => (
+                      <div key={item.id} className="text-xs text-ink-500">
+                        <p className="text-ink-700">
+                          {formatAssigneeList(item.assignees)}
+                        </p>
+                        <p className="text-ink-400">
+                          {userLabel(item.changedBy)} ·{" "}
+                          {new Date(item.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </section>
+
+            {/* 移动模块 */}
+            {isRoot && (
+              <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+                <h2 className="mb-3 font-medium">移动到其他模块</h2>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedModuleId}
+                    onChange={(e) => setSelectedModuleId(e.target.value)}
+                    className="min-w-0 flex-1 rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                  >
+                    {modules.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={updateModule}
+                    className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"
+                  >
+                    移动
+                  </button>
+                </div>
+              </section>
             )}
           </div>
-          {canEdit && isEditing && (
-            <div className="mt-3 flex gap-2">
-              <button
-                type="button"
-                onClick={saveTicketDetails}
-                className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm text-white"
-              >
-                保存
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsEditing(false);
-                  setEditTitle(ticket.title);
-                  setEditDescription(ticket.description || "");
-                }}
-                className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100"
-              >
-                取消
-              </button>
-            </div>
-          )}
-        </section>
-
-        {isRoot && (
-          <section className="rounded-xl border border-zinc-200 bg-white p-5">
-            <h2 className="mb-3 font-medium">移动到其他模块</h2>
-            <div className="flex items-center gap-3">
-              <select
-                value={selectedModuleId}
-                onChange={(e) => setSelectedModuleId(e.target.value)}
-                className="flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
-              >
-                {modules.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={updateModule}
-                className="rounded-md bg-zinc-900 px-3 py-2 text-sm text-white"
-              >
-                移动
-              </button>
-            </div>
-          </section>
-        )}
-
-        <section className="rounded-xl border border-zinc-200 bg-white p-5">
-          <h2 className="mb-3 font-medium">指派</h2>
-          <p className="mb-3 text-sm text-zinc-600">
-            当前指派：{formatAssigneeList(ticket.assignees)}
-          </p>
-          {isRoot ? (
-            <div className="mb-4 space-y-3">
-              <AssigneePicker
-                users={users}
-                value={assigneeIds}
-                onChange={setAssigneeIds}
-              />
-              <button
-                type="button"
-                onClick={updateAssignee}
-                className="rounded-md bg-zinc-900 px-3 py-2 text-sm text-white"
-              >
-                保存
-              </button>
-            </div>
-          ) : null}
-          <h3 className="mb-2 text-sm font-medium text-zinc-500">指派历史</h3>
-          {ticket.assigneeHistory.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-zinc-200 p-6 text-center text-sm text-zinc-500">
-              暂无
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {ticket.assigneeHistory.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-lg border border-zinc-100 p-3 text-sm"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span>{formatAssigneeList(item.assignees)}</span>
-                    <span className="text-xs text-zinc-400">
-                      {new Date(item.createdAt).toLocaleString()}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    操作人：{userLabel(item.changedBy)}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="rounded-xl border border-zinc-200 bg-white p-5">
-          <h2 className="mb-3 font-medium">状态</h2>
-          <p className="mb-3 text-sm text-zinc-600">
-            当前状态：{STATUS_LABEL[ticket.status]}
-          </p>
-          <div className="mb-4 flex items-center gap-2">
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value as TicketStatus)}
-              className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
-            >
-              {Object.entries(STATUS_LABEL).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={updateStatus}
-              className="ml-auto rounded-md bg-zinc-900 px-3 py-2 text-sm text-white"
-            >
-              保存
-            </button>
-          </div>
-          <h3 className="mb-2 text-sm font-medium text-zinc-500">状态历史</h3>
-          {ticket.statusHistory.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-zinc-200 p-6 text-center text-sm text-zinc-500">
-              暂无
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {ticket.statusHistory.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-lg border border-zinc-100 p-3 text-sm"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span>{STATUS_LABEL[item.status]}</span>
-                    <span className="text-xs text-zinc-400">
-                      {new Date(item.createdAt).toLocaleString()}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    操作人：{userLabel(item.changedBy)}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="rounded-xl border border-zinc-200 bg-white p-5">
-          <h2 className="mb-3 font-medium">历史提交</h2>
-          {ticket.commits.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-zinc-200 p-8 text-center text-sm text-zinc-500">
-              暂无
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {ticket.commits.map((commit) => {
-                const repo = repoStyle(commit.repoPath);
-                return (
-                <button
-                  key={commit.id}
-                  type="button"
-                  onClick={() => setSelectedCommit(commit)}
-                  className={`w-full rounded-lg border border-zinc-100 border-l-4 ${repo.border} p-3 text-left text-sm transition hover:border-zinc-300 ${repo.card}`}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${repo.badge}`}>
-                        {repo.name}
-                      </span>
-                      <span className="font-mono text-xs text-zinc-500">
-                        {commit.commitSha.slice(0, 7)}
-                      </span>
-                    </div>
-                    <span className="shrink-0 text-xs text-zinc-400">
-                      {new Date(commit.committedAt).toLocaleString()}
-                    </span>
-                  </div>
-                  {commit.branches.length > 0 ? (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {commit.branches.map((branch) => (
-                        <span
-                          key={branch}
-                          className={`rounded px-2 py-0.5 text-xs ${branchStyle(branch)}`}
-                        >
-                          {branch}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                  <p className="mt-2">{commit.subject}</p>
-                  <p className="mt-1 text-xs text-zinc-500">{commit.author}</p>
-                </button>
-                );
-              })}
-            </div>
-          )}
-        </section>
-      </main>
+        </div>
+      </div>
 
       <CommitDiffModal
         commit={selectedCommit}
         onClose={() => setSelectedCommit(null)}
       />
-    </div>
+    </AppShell>
   );
 }
