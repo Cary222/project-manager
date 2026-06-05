@@ -10,12 +10,14 @@ type Props = { params: Promise<{ userId: string }> };
 const STATUS_ORDER: Record<TicketStatus, number> = {
   DEVELOPING: 0,
   READY_FOR_TEST: 1,
-  DONE: 2,
+  DELIVERED: 2,
+  DONE: 3,
 };
 
 const STATUS_LABEL: Record<TicketStatus, string> = {
   DEVELOPING: "开发中",
   READY_FOR_TEST: "待测试",
+  DELIVERED: "已交付",
   DONE: "已完成",
 };
 
@@ -149,9 +151,10 @@ export default function UserDetailPage({ params }: Props) {
               onChange={(e) => setStatusFilter(e.target.value as TicketStatus | "")}
             >
               <option value="">全部状态</option>
-              <option value={TicketStatus.DEVELOPING}>开发中</option>
-              <option value={TicketStatus.READY_FOR_TEST}>待测试</option>
-              <option value={TicketStatus.DONE}>已完成</option>
+              <option value="DEVELOPING">开发中</option>
+              <option value="READY_FOR_TEST">待测试</option>
+              <option value="DELIVERED">已交付</option>
+              <option value="DONE">已完成</option>
             </select>
           </div>
 
@@ -175,7 +178,7 @@ export default function UserDetailPage({ params }: Props) {
                   </div>
                   <ul className="space-y-2">
                     {tickets.map((ticket) => {
-                      const isDone = ticket.status === TicketStatus.DONE;
+                      const isDone = ticket.status === "DONE";
                       return (
                         <li key={ticket.id}>
                           <Link
