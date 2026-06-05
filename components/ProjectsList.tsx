@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useMemo, useState } from "react";
-import useSWR, { mutate, type SWRConfiguration } from "swr";
+import useSWR, { mutate } from "swr";
 import { AppShell } from "@/components/AppShell";
 import { IconPlus, IconSearch, IconTrash } from "@/components/icons";
 import { fetchJson } from "@/lib/fetch-json";
+import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
 
 type Project = {
   id: string;
@@ -25,12 +26,6 @@ const STATUS_LABEL: Record<string, string> = {
   ACTIVE: "进行中",
   MAINTENANCE: "维护中",
   ARCHIVED: "已归档",
-};
-
-const PROJECTS_SWR_OPTIONS: SWRConfiguration = {
-  revalidateOnFocus: false,
-  revalidateIfStale: false,
-  keepPreviousData: true,
 };
 
 function ProjectsTableSkeleton() {
@@ -81,7 +76,7 @@ function ProjectsTable({
   const { data, error, isLoading } = useSWR<{ projects: Project[] }>(
     "/api/projects",
     fetchJson,
-    PROJECTS_SWR_OPTIONS
+    STALE_SWR_OPTIONS
   );
 
   const projects = useMemo(() => data?.projects ?? [], [data]);
@@ -192,6 +187,102 @@ function ProjectsTable({
   );
 }
 
+function ProjectsToolbar({
+  isRoot,
+  message,
+  onMessage,
+  onQueryChange,
+}: {
+  isRoot: boolean;
+  message: string;
+  onMessage: (message: string) => void;
+  onQueryChange: (query: string) => void;
+}) {
+  const [queryInput, setQueryInput] = useState("");
+  const [projectName, setProjectName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+
+  async function createProject(e: React.FormEvent) {
+    e.preventDefault();
+    if (!projectName.trim()) return;
+    setCreating(true);
+    onMessage("");
+    const res = await fetch("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: projectName.trim() }),
+    });
+    setCreating(false);
+    if (!res.ok) {
+      onMessage("创建失败");
+      return;
+    }
+    setProjectName("");
+    setShowForm(false);
+    onMessage("项目已创建");
+    await mutate("/api/projects");
+  }
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="relative w-full max-w-sm">
+          <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+          <input
+            value={queryInput}
+            onChange={(e) => {
+              const nextQuery = e.target.value;
+              setQueryInput(nextQuery);
+              onQueryChange(nextQuery);
+            }}
+            placeholder="搜索项目名称、描述…"
+            className="w-full rounded-lg border border-ink-200 bg-white py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+          />
+        </div>
+        {isRoot ? (
+          <button
+            type="button"
+            onClick={() => setShowForm((v) => !v)}
+            className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700"
+          >
+            <IconPlus className="h-4 w-4" />
+            新建项目
+          </button>
+        ) : null}
+      </div>
+
+      {message ? (
+        <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          {message}
+        </p>
+      ) : null}
+
+      {isRoot && showForm ? (
+        <form
+          onSubmit={createProject}
+          className="flex gap-2 rounded-xl border border-ink-200 bg-white p-4 shadow-soft"
+        >
+          <input
+            className="min-w-0 flex-1 rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+            placeholder="新项目名称"
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+            autoFocus
+          />
+          <button
+            type="submit"
+            disabled={creating || !projectName.trim()}
+            className="shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {creating ? "创建中…" : "创建"}
+          </button>
+        </form>
+      ) : null}
+    </>
+  );
+}
+
 function ProjectsPageHeader() {
   return (
     <div>
@@ -205,84 +296,17 @@ export function ProjectsList() {
   const { data: session } = useSession();
   const isRoot = session?.user?.role === "ROOT";
   const [query, setQuery] = useState("");
-  const [projectName, setProjectName] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [showForm, setShowForm] = useState(false);
   const [message, setMessage] = useState("");
-
-  async function createProject(e: React.FormEvent) {
-    e.preventDefault();
-    if (!projectName.trim()) return;
-    setCreating(true);
-    setMessage("");
-    const res = await fetch("/api/projects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: projectName.trim() }),
-    });
-    setCreating(false);
-    if (!res.ok) {
-      setMessage("创建失败");
-      return;
-    }
-    setProjectName("");
-    setShowForm(false);
-    setMessage("项目已创建");
-    await mutate("/api/projects");
-  }
 
   return (
     <AppShell header={<ProjectsPageHeader />}>
       <div className="space-y-5 pm-fade-in">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="relative w-full max-w-sm">
-            <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="搜索项目名称、描述…"
-              className="w-full rounded-lg border border-ink-200 bg-white py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
-            />
-          </div>
-          {isRoot ? (
-            <button
-              type="button"
-              onClick={() => setShowForm((v) => !v)}
-              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700"
-            >
-              <IconPlus className="h-4 w-4" />
-              新建项目
-            </button>
-          ) : null}
-        </div>
-
-        {message ? (
-          <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            {message}
-          </p>
-        ) : null}
-
-        {isRoot && showForm ? (
-          <form
-            onSubmit={createProject}
-            className="flex gap-2 rounded-xl border border-ink-200 bg-white p-4 shadow-soft"
-          >
-            <input
-              className="min-w-0 flex-1 rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
-              placeholder="新项目名称"
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              autoFocus
-            />
-            <button
-              type="submit"
-              disabled={creating || !projectName.trim()}
-              className="shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-            >
-              {creating ? "创建中…" : "创建"}
-            </button>
-          </form>
-        ) : null}
+        <ProjectsToolbar
+          isRoot={isRoot}
+          message={message}
+          onMessage={setMessage}
+          onQueryChange={setQuery}
+        />
 
         <ProjectsTable
           query={query}

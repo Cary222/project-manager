@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/permissions";
-
-const PRIVATE_LIST_CACHE_CONTROL = "private, max-age=30, stale-while-revalidate=60";
+import { PRIVATE_LIST_CACHE_CONTROL } from "@/lib/cache-control";
 
 export async function GET() {
   try {

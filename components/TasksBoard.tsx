@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import useSWR, { type SWRConfiguration } from "swr";
+import useSWR from "swr";
 import { AppShell } from "@/components/AppShell";
 import { IconSearch } from "@/components/icons";
 import { fetchJson } from "@/lib/fetch-json";
+import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
 
 type TicketStatus = "DEVELOPING" | "READY_FOR_TEST" | "DELIVERED" | "DONE";
 
@@ -54,12 +55,6 @@ const KIND_LABEL: Record<"PROGRAM" | "DESIGN", string> = {
   DESIGN: "设计",
 };
 
-const TASKS_SWR_OPTIONS: SWRConfiguration = {
-  revalidateOnFocus: false,
-  revalidateIfStale: false,
-  keepPreviousData: true,
-};
-
 function TasksColumnsSkeleton() {
   return (
     <div className="grid gap-4 lg:grid-cols-4">
@@ -99,7 +94,7 @@ function TasksColumns({ query }: { query: string }) {
   const { data, error, isLoading } = useSWR<{ tickets: MyTicket[] }>(
     "/api/tickets/mine",
     fetchJson,
-    TASKS_SWR_OPTIONS
+    STALE_SWR_OPTIONS
   );
 
   const tickets = useMemo(() => data?.tickets ?? [], [data]);

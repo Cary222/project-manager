@@ -1,6 +1,12 @@
-import { TicketDetail } from "@/components/TicketDetail";
+import dynamic from "next/dynamic";
+import { TicketDetailLoading } from "@/components/TicketDetail";
 
-export const dynamic = "force-dynamic";
+const TicketDetail = dynamic(
+  () => import("@/components/TicketDetail").then((mod) => mod.TicketDetail),
+  {
+    loading: () => <TicketDetailLoading />,
+  }
+);
 
 export default async function TicketNoPage({
   params,

@@ -11,6 +11,68 @@ import { formatAssigneeList } from "@/lib/ticket-assignees";
 import { branchStyle, repoStyle } from "@/lib/repo-style";
 import { IconArrowLeft, IconClock, IconEdit } from "@/components/icons";
 
+function TicketDetailHeaderSkeleton() {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="h-8 w-8 animate-pulse rounded-lg bg-ink-200" />
+      <div className="space-y-2">
+        <div className="h-5 w-24 animate-pulse rounded bg-ink-200" />
+        <div className="h-3 w-56 animate-pulse rounded bg-ink-100" />
+      </div>
+    </div>
+  );
+}
+
+function TicketDetailContentSkeleton() {
+  return (
+    <div className="space-y-5 pm-fade-in">
+      <div className="grid gap-5 lg:grid-cols-3">
+        <div className="space-y-5 lg:col-span-2">
+          <section className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="h-6 w-20 animate-pulse rounded-full bg-ink-100" />
+                <div className="h-7 w-3/4 animate-pulse rounded bg-ink-200" />
+              </div>
+              <div className="h-9 w-20 animate-pulse rounded-lg bg-ink-100" />
+            </div>
+            <div className="mt-5 space-y-3">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div key={index} className="h-4 animate-pulse rounded bg-ink-100" />
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">
+            <div className="h-5 w-28 animate-pulse rounded bg-ink-200" />
+            <div className="mt-4 space-y-3">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div key={index} className="h-20 animate-pulse rounded-xl bg-ink-100" />
+              ))}
+            </div>
+          </section>
+        </div>
+
+        <div className="space-y-5">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <section
+              key={index}
+              className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft"
+            >
+              <div className="h-4 w-24 animate-pulse rounded bg-ink-200" />
+              <div className="mt-4 space-y-3">
+                <div className="h-10 animate-pulse rounded bg-ink-100" />
+                <div className="h-10 animate-pulse rounded bg-ink-100" />
+                <div className="h-10 animate-pulse rounded bg-ink-100" />
+              </div>
+            </section>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type UserBrief = {
   id: string;
   name: string | null;
@@ -98,6 +160,14 @@ function Avatar({ name }: { name?: string | null }) {
     <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700">
       {initial}
     </span>
+  );
+}
+
+export function TicketDetailLoading() {
+  return (
+    <AppShell header={<TicketDetailHeaderSkeleton />}>
+      <TicketDetailContentSkeleton />
+    </AppShell>
   );
 }
 
@@ -251,11 +321,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   }
 
   if (loading) {
-    return (
-      <AppShell>
-        <p className="py-12 text-center text-sm text-ink-400">加载中…</p>
-      </AppShell>
-    );
+    return <TicketDetailLoading />;
   }
 
   if (!ticket) {

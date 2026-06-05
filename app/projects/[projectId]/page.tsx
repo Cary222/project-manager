@@ -1,6 +1,12 @@
-import { ProjectDetail } from "@/components/ProjectDetail";
+import dynamic from "next/dynamic";
+import { ProjectDetailLoading } from "@/components/ProjectDetail";
 
-export const dynamic = "force-dynamic";
+const ProjectDetail = dynamic(
+  () => import("@/components/ProjectDetail").then((mod) => mod.ProjectDetail),
+  {
+    loading: () => <ProjectDetailLoading />,
+  }
+);
 
 export default async function ProjectDetailPage({
   params,

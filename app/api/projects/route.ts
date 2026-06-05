@@ -4,8 +4,8 @@ import { requireRoot, requireSession } from "@/lib/permissions";
 import { ResponsibilityKind } from "@prisma/client";
 import { createModerationLog } from "@/lib/moderation";
 import { ModerationAction } from "@prisma/client";
+import { PRIVATE_LIST_CACHE_CONTROL } from "@/lib/cache-control";
 
-const PRIVATE_LIST_CACHE_CONTROL = "private, max-age=30, stale-while-revalidate=60";
 
 export async function GET() {
   try {

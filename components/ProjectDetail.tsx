@@ -8,6 +8,81 @@ import { useSession } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconArrowLeft, IconEdit, IconPlus, IconTrash } from "@/components/icons";
 
+function ProjectDetailHeaderSkeleton() {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="h-8 w-8 animate-pulse rounded-lg bg-ink-200" />
+      <div className="space-y-2">
+        <div className="h-5 w-40 animate-pulse rounded bg-ink-200" />
+        <div className="h-3 w-56 animate-pulse rounded bg-ink-100" />
+      </div>
+    </div>
+  );
+}
+
+function ProjectDetailContentSkeleton() {
+  return (
+    <div className="space-y-5 pm-fade-in">
+      <section className="grid gap-4 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div
+            key={index}
+            className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft"
+          >
+            <div className="h-3 w-16 animate-pulse rounded bg-ink-100" />
+            <div className="mt-3 h-8 w-20 animate-pulse rounded bg-ink-200" />
+            <div className="mt-2 h-3 w-24 animate-pulse rounded bg-ink-100" />
+          </div>
+        ))}
+      </section>
+
+      <div className="grid gap-5 lg:grid-cols-3">
+        <div className="space-y-5 lg:col-span-2">
+          <div className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div className="space-y-2">
+                <div className="h-5 w-32 animate-pulse rounded bg-ink-200" />
+                <div className="h-3 w-48 animate-pulse rounded bg-ink-100" />
+              </div>
+              <div className="h-10 w-24 animate-pulse rounded-lg bg-ink-100" />
+            </div>
+            <div className="space-y-3">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <div key={index} className="h-4 animate-pulse rounded bg-ink-100" />
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">
+            <div className="h-5 w-28 animate-pulse rounded bg-ink-200" />
+            <div className="mt-4 space-y-3">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div key={index} className="h-16 animate-pulse rounded-xl bg-ink-100" />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-5">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div
+              key={index}
+              className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft"
+            >
+              <div className="h-4 w-24 animate-pulse rounded bg-ink-200" />
+              <div className="mt-4 space-y-3">
+                <div className="h-10 animate-pulse rounded bg-ink-100" />
+                <div className="h-10 animate-pulse rounded bg-ink-100" />
+                <div className="h-10 animate-pulse rounded bg-ink-100" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type Ticket = {
   id: string;
   ticketNo: number;
@@ -63,6 +138,14 @@ const STATUS_STYLE: Record<TicketStatus, string> = {
   READY_FOR_TEST: "bg-amber-50 text-warning",
   DONE: "bg-emerald-50 text-emerald-600",
 };
+
+export function ProjectDetailLoading() {
+  return (
+    <AppShell header={<ProjectDetailHeaderSkeleton />}>
+      <ProjectDetailContentSkeleton />
+    </AppShell>
+  );
+}
 
 export function ProjectDetail({ projectId }: { projectId: string }) {
   const { data: session } = useSession();
@@ -342,11 +425,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   }
 
   if (loading) {
-    return (
-      <AppShell>
-        <p className="py-12 text-center text-sm text-ink-400">加载中…</p>
-      </AppShell>
-    );
+    return <ProjectDetailLoading />;
   }
 
   if (!project) {
