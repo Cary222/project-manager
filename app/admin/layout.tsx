@@ -1,10 +1,17 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { ReactNode } from "react";
 import { auth } from "@/lib/auth";
 import { isRoot } from "@/lib/permissions";
-import { signOut } from "@/lib/auth";
-import { ReactNode } from "react";
+import { AppShell } from "@/components/AppShell";
+import { IconChevronRight, IconSettings } from "@/components/icons";
 import { AdminRoleProvider } from "./AdminRoleProvider";
+
+const ADMIN_NAV_ITEMS = [
+  { href: "/settings", label: "设置中心" },
+  { href: "/admin/users", label: "用户管理" },
+  { href: "/admin/moderation", label: "审计日志" },
+];
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const session = await auth();
@@ -13,69 +20,54 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   if (!isRoot(session.user.role)) redirect("/");
 
   return (
-    <div className="flex min-h-screen bg-zinc-50">
-      <aside className="w-44 flex-shrink-0 border-r border-zinc-200 bg-white">
-        <div className="flex h-full flex-col">
-          <div className="border-b border-zinc-200 px-4 py-4">
-            <h2 className="text-sm font-semibold text-zinc-900">管理后台</h2>
+    <AdminRoleProvider role={session.user.role}>
+      <AppShell
+        header={
+          <div className="min-w-0">
+            <div className="mt-1 flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+                <IconSettings className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="truncate text-lg font-semibold leading-tight text-ink-900">
+                  设置与管理
+                </h1>
+                <p className="truncate text-xs text-ink-400">
+                  Settings Center · 账号、安全、系统配置与管理员能力入口
+                </p>
+              </div>
+            </div>
           </div>
-          <nav className="flex-1 space-y-1 px-3 py-4">
-            <NavLink href="/admin/users">用户管理</NavLink>
-            <NavLink href="/admin/moderation">审计日志</NavLink>
-          </nav>
-          <div className="border-t border-zinc-200 px-4 py-4">
-            <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-700">
-              ← 返回首页
-            </Link>
-          </div>
+        }
+      >
+        <div className="space-y-6 pm-fade-in">
+          <section className="rounded-2xl border border-ink-200 bg-white p-4 shadow-soft sm:p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-sm font-medium text-ink-900">
+                  {session.user.name || session.user.email}
+                </p>
+                <p className="mt-1 text-sm text-ink-500">
+                  你当前拥有 ROOT 管理权限，可访问系统设置、用户管理与审计日志。
+                </p>
+              </div>
+              <nav className="flex flex-wrap gap-2">
+                {ADMIN_NAV_ITEMS.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className="rounded-lg border border-ink-200 bg-ink-100/70 px-3 py-2 text-sm font-medium text-ink-600 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700"
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </nav>
+            </div>
+          </section>
+
+          {children}
         </div>
-      </aside>
-
-      <div className="flex flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-zinc-200 bg-white px-6 py-4">
-          <div className="flex items-center gap-4">
-            <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-900">
-              首页
-            </Link>
-            <span className="text-zinc-300">/</span>
-          </div>
-          <div className="flex items-center gap-3 text-sm text-zinc-500">
-            <span>
-              {session.user.name} · {session.user.role}
-            </span>
-            <form
-              action={async () => {
-                "use server";
-                await signOut({ redirectTo: "/login" });
-              }}
-            >
-              <button
-                type="submit"
-                className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100"
-              >
-                退出
-              </button>
-            </form>
-          </div>
-        </header>
-
-        <main className="p-6">
-          <AdminRoleProvider role={session.user.role}>
-            {children}
-          </AdminRoleProvider>
-        </main>
-      </div>
-    </div>
-  );
-}
-
-function NavLink({ href, children }: { href: string; children: ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className="block rounded-md px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100"
-    >
-      {children}
-    </Link>
+      </AppShell>
+    </AdminRoleProvider>
   );
 }

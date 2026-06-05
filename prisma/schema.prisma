@@ -19,6 +19,9 @@ enum ModerationAction {
   BAN_USER
   UNBAN_USER
   UPDATE_ROLE
+  UPDATE_PROFILE
+  UPDATE_PASSWORD
+  UPDATE_SYSTEM_SETTINGS
   DELETE_TICKET
   CREATE_TICKET
   CREATE_MODULE
@@ -69,6 +72,7 @@ model User {
   assigneeHistoryChanges TicketAssigneeHistory[] @relation("AssigneeHistoryActor")
   statusHistoryChanges TicketStatusHistory[] @relation("StatusHistoryActor")
   moderationLogs ModerationLog[] @relation("ModerationActor")
+  updatedSystemSettings SystemSetting[] @relation("SystemSettingUpdater")
 
   @@schema("pm")
 }
@@ -272,6 +276,20 @@ model Counter {
   key       String @id
   nextValue Int
   updatedAt DateTime @updatedAt
+
+  @@schema("pm")
+}
+
+model SystemSetting {
+  id              String   @id @default(cuid())
+  siteName        String   @default("ProjectHub")
+  siteDescription String?  
+  logoUrl         String?
+  welcomeMessage  String?
+  updatedById     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  updatedBy       User?    @relation("SystemSettingUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@schema("pm")
 }

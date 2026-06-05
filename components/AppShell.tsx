@@ -64,11 +64,10 @@ const NAV_ITEMS: NavItem[] = [
     match: (p) => p.startsWith("/reports"),
   },
   {
-    href: "/admin/users",
+    href: "/settings",
     label: "设置",
     icon: IconSettings,
-    match: (p) => p.startsWith("/admin"),
-    rootOnly: true,
+    match: (p) => p === "/settings",
   },
 ];
 
@@ -98,7 +97,6 @@ export function AppShell({
 
   return (
     <div className="flex min-h-screen bg-ink-100 text-ink-900">
-      {/* 移动端遮罩 */}
       {mobileOpen ? (
         <div
           className="fixed inset-0 z-30 bg-black/30 lg:hidden"
@@ -106,7 +104,6 @@ export function AppShell({
         />
       ) : null}
 
-      {/* 侧边栏 */}
       <aside
         className={`fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r border-ink-200 bg-white transition-transform lg:static lg:translate-x-0 ${
           mobileOpen ? "translate-x-0" : "-translate-x-full"
@@ -157,7 +154,6 @@ export function AppShell({
         </div>
       </aside>
 
-      {/* 右侧主区 */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-ink-200 bg-white/90 px-4 backdrop-blur sm:px-6">
           <button

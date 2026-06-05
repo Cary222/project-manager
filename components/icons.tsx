@@ -86,6 +86,13 @@ export const IconSettings = (p: IconProps) => (
   </svg>
 );
 
+export const IconShield = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M12 3 5 6v6c0 5 3.4 7.74 7 9 3.6-1.26 7-4 7-9V6l-7-3Z" />
+    <path d="m9.5 12 1.8 1.8 3.2-3.6" />
+  </svg>
+);
+
 export const IconBell = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
