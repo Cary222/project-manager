@@ -23,8 +23,8 @@ function ProjectDetailHeaderSkeleton() {
 function ProjectDetailContentSkeleton() {
   return (
     <div className="space-y-5 pm-fade-in">
-      <section className="grid gap-4 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, index) => (
+      <section className="grid gap-4 lg:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, index) => (
           <div
             key={index}
             className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft"
@@ -93,7 +93,7 @@ type Ticket = {
   assignees: User[];
 };
 
-type TicketStatus = "DEVELOPING" | "READY_FOR_TEST" | "DONE";
+type TicketStatus = "DEVELOPING" | "READY_FOR_TEST" | "DELIVERED" | "DONE";
 
 type User = {
   id: string;
@@ -130,13 +130,22 @@ const KIND_LABEL: Record<Responsibility["kind"], string> = {
 const STATUS_LABEL: Record<TicketStatus, string> = {
   DEVELOPING: "开发中",
   READY_FOR_TEST: "待测试",
+  DELIVERED: "已交付",
   DONE: "已完成",
 };
 
 const STATUS_STYLE: Record<TicketStatus, string> = {
   DEVELOPING: "bg-brand-50 text-brand-700",
   READY_FOR_TEST: "bg-amber-50 text-warning",
+  DELIVERED: "bg-violet-50 text-violet-700",
   DONE: "bg-emerald-50 text-emerald-600",
+};
+
+const STATUS_ORDER: Record<TicketStatus, number> = {
+  DEVELOPING: 0,
+  READY_FOR_TEST: 1,
+  DELIVERED: 2,
+  DONE: 3,
 };
 
 export function ProjectDetailLoading() {
@@ -307,7 +316,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   const tickets = useMemo(() => {
     if (!selectedResponsibility) return [];
-    return selectedResponsibility.modules.flatMap((module) => module.tickets);
+    return selectedResponsibility.modules
+      .flatMap((module) => module.tickets)
+      .sort((a, b) => {
+        const statusDiff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
+        if (statusDiff !== 0) return statusDiff;
+        return b.ticketNo - a.ticketNo;
+      });
   }, [selectedResponsibility]);
 
   const stats = useMemo(() => {
@@ -317,9 +332,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       ) ?? [];
     const dev = all.filter((t) => t.status === "DEVELOPING").length;
     const test = all.filter((t) => t.status === "READY_FOR_TEST").length;
+    const delivered = all.filter((t) => t.status === "DELIVERED").length;
     const done = all.filter((t) => t.status === "DONE").length;
     const rate = all.length ? Math.round((done / all.length) * 100) : 0;
-    return { total: all.length, dev, test, done, rate };
+    return { total: all.length, dev, test, delivered, done, rate };
   }, [project]);
 
   async function createTicket(e: React.FormEvent) {
@@ -563,7 +579,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
       <div className="space-y-6 pm-fade-in">
         {/* 概览统计 */}
-        <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <section className="grid grid-cols-2 gap-4 lg:grid-cols-5">
           <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
             <p className="text-sm text-ink-500">任务完成率</p>
             <p className="mt-2 text-3xl font-semibold text-brand-600">{stats.rate}%</p>
@@ -583,6 +599,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             <p className="text-sm text-ink-500">待测试任务</p>
             <p className="mt-2 text-3xl font-semibold text-warning">{stats.test}</p>
             <p className="mt-1 text-xs text-ink-400">等待验收</p>
+          </div>
+          <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+            <p className="text-sm text-ink-500">已交付任务</p>
+            <p className="mt-2 text-3xl font-semibold text-violet-700">{stats.delivered}</p>
+            <p className="mt-1 text-xs text-ink-400">等待确认完成</p>
           </div>
           <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
             <p className="text-sm text-ink-500">已完成任务</p>
@@ -804,7 +825,14 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 </p>
               ) : (
                 <div className="space-y-6">
-                  {selectedResponsibility.modules.map((module) => (
+                  {selectedResponsibility.modules.map((module) => {
+                    const moduleTickets = [...module.tickets].sort((a, b) => {
+                      const statusDiff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
+                      if (statusDiff !== 0) return statusDiff;
+                      return b.ticketNo - a.ticketNo;
+                    });
+
+                    return (
                     <div key={module.id}>
                       <div className="mb-2 flex items-center justify-between">
                         <p className="flex items-center gap-2 text-xs font-medium text-ink-500">
@@ -834,19 +862,21 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                           </div>
                         )}
                       </div>
-                      {module.tickets.length === 0 ? (
+                      {moduleTickets.length === 0 ? (
                         <p className="rounded-lg border border-dashed border-ink-200 px-3 py-2 text-sm text-ink-400">
                           暂无单子
                         </p>
                       ) : (
                         <div className="grid gap-2 md:grid-cols-2">
-                          {module.tickets.map((ticket) => {
+                          {moduleTickets.map((ticket) => {
+                            const isDelivered = ticket.status === "DELIVERED";
                             const isDone = ticket.status === "DONE";
+                            const isClosed = isDelivered || isDone;
                             return (
                               <div
                                 key={ticket.id}
                                 className={`rounded-lg border p-3 transition ${
-                                  isDone
+                                  isClosed
                                     ? "border-ink-100 bg-ink-100/40"
                                     : "border-ink-200 hover:border-brand-200 hover:shadow-soft"
                                 }`}
@@ -864,8 +894,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                                   </div>
                                   <p
                                     className={`mt-1.5 text-sm font-medium ${
-                                      isDone ? "text-ink-400 line-through" : ""
-                                    }`}
+                                      isClosed ? "text-ink-400" : ""
+                                    } ${isDone ? "line-through" : ""}`}
                                   >
                                     {ticket.title}
                                   </p>
@@ -888,7 +918,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                         </div>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
