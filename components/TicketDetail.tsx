@@ -66,7 +66,7 @@ type Ticket = {
   }[];
 };
 
-type TicketStatus = "DEVELOPING" | "READY_FOR_TEST" | "DONE";
+type TicketStatus = "DEVELOPING" | "READY_FOR_TEST" | "DELIVERED" | "DONE";
 
 const KIND_LABEL: Record<"PROGRAM" | "DESIGN", string> = {
   PROGRAM: "程序",
@@ -76,12 +76,14 @@ const KIND_LABEL: Record<"PROGRAM" | "DESIGN", string> = {
 const STATUS_LABEL: Record<TicketStatus, string> = {
   DEVELOPING: "开发中",
   READY_FOR_TEST: "待测试",
+  DELIVERED: "已交付",
   DONE: "已完成",
 };
 
 const STATUS_STYLE: Record<TicketStatus, string> = {
   DEVELOPING: "bg-brand-50 text-brand-700",
   READY_FOR_TEST: "bg-amber-50 text-warning",
+  DELIVERED: "bg-violet-50 text-purple",
   DONE: "bg-emerald-50 text-emerald-600",
 };
 
@@ -211,17 +213,25 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   async function updateStatus() {
     setMessage("");
     if (!ticket) return;
-    const res = await fetch(`/api/tickets/${ticket.id}/status`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    if (!res.ok) {
-      setMessage("状态保存失败");
-      return;
+
+    try {
+      const res = await fetch(`/api/tickets/${ticket.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        setMessage(data?.error ? `状态保存失败：${data.error}` : "状态保存失败");
+        return;
+      }
+
+      setMessage("状态已保存");
+      await loadTicket();
+    } catch (error) {
+      setMessage(error instanceof Error ? `状态保存失败：${error.message}` : "状态保存失败");
     }
-    setMessage("状态已保存");
-    await loadTicket();
   }
 
   async function updateAssignee() {
@@ -438,7 +448,10 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                   onChange={(e) => setStatus(e.target.value as TicketStatus)}
                   className="flex-1 rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
                 >
-                  {Object.entries(STATUS_LABEL).map(([value, label]) => (
+                  {(isRoot
+                    ? Object.entries(STATUS_LABEL)
+                    : Object.entries(STATUS_LABEL).filter(([value]) => value !== "DONE")
+                  ).map(([value, label]) => (
                     <option key={value} value={value}>
                       {label}
                     </option>

@@ -19,7 +19,7 @@ type Project = {
   status: string;
 };
 
-type TicketStatus = "DEVELOPING" | "READY_FOR_TEST" | "DONE";
+type TicketStatus = "DEVELOPING" | "READY_FOR_TEST" | "DELIVERED" | "DONE";
 
 type MyTicket = {
   id: string;
@@ -36,24 +36,28 @@ type MyTicket = {
 const STATUS_LABEL: Record<TicketStatus, string> = {
   DEVELOPING: "开发中",
   READY_FOR_TEST: "待测试",
+  DELIVERED: "已交付",
   DONE: "已完成",
 };
 
 const STATUS_ORDER: Record<TicketStatus, number> = {
   DEVELOPING: 0,
   READY_FOR_TEST: 1,
-  DONE: 2,
+  DELIVERED: 2,
+  DONE: 3,
 };
 
 const STATUS_STYLE: Record<TicketStatus, string> = {
   DEVELOPING: "bg-brand-50 text-brand-700",
   READY_FOR_TEST: "bg-amber-50 text-amber-600",
+  DELIVERED: "bg-violet-50 text-violet-700",
   DONE: "bg-emerald-50 text-emerald-600",
 };
 
 const STATUS_DOT: Record<TicketStatus, string> = {
   DEVELOPING: "bg-brand-500",
   READY_FOR_TEST: "bg-warning",
+  DELIVERED: "bg-purple",
   DONE: "bg-success",
 };
 
@@ -143,14 +147,16 @@ export function Dashboard() {
   const counts = useMemo(() => {
     const developing = myTickets.filter((t) => t.status === "DEVELOPING").length;
     const test = myTickets.filter((t) => t.status === "READY_FOR_TEST").length;
+    const delivered = myTickets.filter((t) => t.status === "DELIVERED").length;
     const done = myTickets.filter((t) => t.status === "DONE").length;
     return {
       projects: projects.length,
       myTickets: myTickets.length,
       developing,
       test,
+      delivered,
       done,
-      pending: developing + test,
+      pending: developing + test + delivered,
     };
   }, [projects, myTickets]);
 
@@ -170,6 +176,12 @@ export function Dashboard() {
       label: "待测试",
       count: counts.test,
       pct: Math.round((counts.test / total) * 100),
+    },
+    {
+      key: "DELIVERED",
+      label: "已交付",
+      count: counts.delivered,
+      pct: Math.round((counts.delivered / total) * 100),
     },
     {
       key: "DONE",
@@ -236,7 +248,7 @@ export function Dashboard() {
           <StatCard
             label="我的任务"
             value={loading ? "—" : counts.myTickets}
-            hint={`进行中 ${counts.developing} · 待测试 ${counts.test}`}
+            hint={`进行中 ${counts.developing} · 待测试 ${counts.test} · 已交付 ${counts.delivered}`}
             tone="purple"
             icon={<IconTask className="h-5 w-5" />}
           />

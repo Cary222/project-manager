@@ -49,7 +49,17 @@ enum ResponsibilityKind {
 enum TicketStatus {
   DEVELOPING
   READY_FOR_TEST
+  DELIVERED
   DONE
+
+  @@schema("pm")
+}
+
+enum NotificationType {
+  TICKET_ASSIGNED
+  TICKET_DELIVERED
+  TICKET_COMPLETED
+  TICKET_STATUS_CHANGED
 
   @@schema("pm")
 }
@@ -73,6 +83,8 @@ model User {
   statusHistoryChanges TicketStatusHistory[] @relation("StatusHistoryActor")
   moderationLogs ModerationLog[] @relation("ModerationActor")
   updatedSystemSettings SystemSetting[] @relation("SystemSettingUpdater")
+  notifications Notification[] @relation("NotificationRecipient")
+  actorNotifications Notification[] @relation("NotificationActor")
 
   @@schema("pm")
 }
@@ -191,6 +203,7 @@ model Ticket {
   commits     TicketCommit[]
   assigneeHistory TicketAssigneeHistory[]
   statusHistory TicketStatusHistory[]
+  notifications Notification[]
 
   @@schema("pm")
 }
@@ -215,6 +228,25 @@ model TicketStatusHistory {
   ticket      Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   changedBy   User         @relation("StatusHistoryActor", fields: [changedById], references: [id], onDelete: Restrict)
 
+  @@index([ticketId, createdAt(sort: Desc)])
+  @@schema("pm")
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  content   String
+  ticketId  String?
+  actorId   String?
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  user      User             @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  ticket    Ticket?          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  actor     User?            @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, read, createdAt(sort: Desc)])
   @@index([ticketId, createdAt(sort: Desc)])
   @@schema("pm")
 }

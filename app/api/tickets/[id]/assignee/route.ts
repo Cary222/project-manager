@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import {
   assigneeUserSelect,
-  loadUsersByIds,
-  mapAssigneeUsers,
   normalizeAssigneeIds,
   replaceTicketAssignees,
   sameAssigneeIds,
@@ -11,6 +9,11 @@ import {
 import { requireRoot } from "@/lib/permissions";
 import { createModerationLog } from "@/lib/moderation";
 import { ModerationAction } from "@prisma/client";
+import {
+  buildAssignedNotification,
+  createManyNotifications,
+  listRootUserIds,
+} from "@/lib/notifications";
 
 export async function PATCH(
   request: Request,
@@ -28,6 +31,7 @@ export async function PATCH(
       select: {
         id: true,
         ticketNo: true,
+        title: true,
         assignees: { select: { userId: true } },
       },
     });
@@ -56,12 +60,7 @@ export async function PATCH(
     }
 
     const ticket = await prisma.$transaction(async (tx) => {
-      await replaceTicketAssignees(
-        tx,
-        current.id,
-        nextAssigneeIds,
-        session.user.id
-      );
+      await replaceTicketAssignees(tx, current.id, nextAssigneeIds, session.user.id);
       return tx.ticket.findUnique({
         where: { id: current.id },
         include: {
@@ -74,9 +73,39 @@ export async function PATCH(
 
     const newAssignees = await prisma.user.findMany({
       where: { id: { in: nextAssigneeIds } },
-      select: { name: true, email: true },
+      select: { id: true, name: true, email: true },
     });
-    const assigneeNames = newAssignees.map(u => u.name || u.email).join(", ");
+    const assigneeNames = newAssignees.map((u) => u.name || u.email).join(", ");
+
+    const addedAssigneeIds = nextAssigneeIds.filter((userId) => !currentAssigneeIds.includes(userId));
+    if (addedAssigneeIds.length > 0) {
+      const actorName = session.user.name || session.user.email || "管理员";
+      const notification = buildAssignedNotification({
+        ticketNo: current.ticketNo,
+        title: current.title,
+        actorName,
+      });
+      await createManyNotifications({
+        userIds: addedAssigneeIds,
+        type: "TICKET_ASSIGNED",
+        title: notification.title,
+        content: notification.content,
+        ticketId: current.id,
+        actorId: session.user.id,
+      });
+    }
+
+    const rootUserIds = await listRootUserIds(session.user.id);
+    if (rootUserIds.length > 0) {
+      await createManyNotifications({
+        userIds: rootUserIds,
+        type: "TICKET_STATUS_CHANGED",
+        title: `单子 #${current.ticketNo} 派单已更新`,
+        content: `${session.user.name || session.user.email || "管理员"} 已将「${current.title}」指派为：${assigneeNames || "无人"}`,
+        ticketId: current.id,
+        actorId: session.user.id,
+      });
+    }
 
     await createModerationLog({
       action: ModerationAction.UPDATE_TICKET_ASSIGNEE,
