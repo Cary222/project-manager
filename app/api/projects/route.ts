@@ -5,6 +5,8 @@ import { ResponsibilityKind } from "@prisma/client";
 import { createModerationLog } from "@/lib/moderation";
 import { ModerationAction } from "@prisma/client";
 
+const PRIVATE_LIST_CACHE_CONTROL = "private, max-age=30, stale-while-revalidate=60";
+
 export async function GET() {
   try {
     await requireSession();
@@ -17,7 +19,14 @@ export async function GET() {
         status: true,
       },
     });
-    return NextResponse.json({ projects });
+    return NextResponse.json(
+      { projects },
+      {
+        headers: {
+          "Cache-Control": PRIVATE_LIST_CACHE_CONTROL,
+        },
+      }
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
     return NextResponse.json({ error: message }, { status: 401 });

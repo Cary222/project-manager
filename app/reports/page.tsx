@@ -1,8 +1,6 @@
 import { AppShell } from "@/components/AppShell";
 import { IconTrend } from "@/components/icons";
 
-export const dynamic = "force-dynamic";
-
 const KPIS = [
   { label: "进行中项目", value: "18", delta: "+2", up: true, tone: "text-brand-600" },
   { label: "按期完成率", value: "78%", delta: "+5%", up: true, tone: "text-emerald-600" },

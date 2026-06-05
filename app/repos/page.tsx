@@ -1,8 +1,6 @@
 import { AppShell } from "@/components/AppShell";
 import { IconRepo } from "@/components/icons";
 
-export const dynamic = "force-dynamic";
-
 const REPOS = [
   {
     name: "solar-platform-backend",

@@ -113,6 +113,7 @@ export function AppShell({
   const [notifications, setNotifications] = useState<NotificationListItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
+  const [notificationsLoaded, setNotificationsLoaded] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const notificationRef = useRef<HTMLDivElement | null>(null);
 
@@ -142,15 +143,11 @@ export function AppShell({
       ]);
       setNotifications(items);
       setUnreadCount(count);
+      setNotificationsLoaded(true);
     } finally {
       setLoadingNotifications(false);
     }
   }
-
-  useEffect(() => {
-    if (!session?.user?.id) return;
-    loadNotifications();
-  }, [session?.user?.id]);
 
   const unreadItems = useMemo(() => notifications.filter((item) => !item.read).length, [notifications]);
 
@@ -158,7 +155,7 @@ export function AppShell({
     const nextOpen = !notificationsOpen;
     setNotificationsOpen(nextOpen);
     setUserMenuOpen(false);
-    if (nextOpen) {
+    if (nextOpen && !notificationsLoaded) {
       await loadNotifications();
     }
   }

@@ -1,7 +1,5 @@
 import { AppShell } from "@/components/AppShell";
 
-export const dynamic = "force-dynamic";
-
 const MEMBERS = [
   { name: "张三", role: "后端负责人", skills: ["Go", "PostgreSQL", "Redis"], tone: "bg-brand-50 text-brand-600" },
   { name: "cary", role: "全栈工程师", skills: ["Vue", "Go", "Docker"], tone: "bg-emerald-50 text-emerald-600" },

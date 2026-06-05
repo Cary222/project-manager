@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
+import useSWR, { type SWRConfiguration } from "swr";
 import { AppShell } from "@/components/AppShell";
 import {
   IconClock,
@@ -11,6 +12,7 @@ import {
   IconSearch,
   IconTask,
 } from "@/components/icons";
+import { fetchJson } from "@/lib/fetch-json";
 
 type Project = {
   id: string;
@@ -116,33 +118,43 @@ function StatCard({
   );
 }
 
+const DASHBOARD_PROJECTS_SWR_OPTIONS: SWRConfiguration = {
+  revalidateOnFocus: false,
+  revalidateIfStale: false,
+  keepPreviousData: true,
+};
+
+const DASHBOARD_TICKETS_SWR_OPTIONS: SWRConfiguration = {
+  revalidateOnFocus: false,
+  revalidateIfStale: false,
+  keepPreviousData: true,
+};
+
 export function Dashboard() {
   const { data: session } = useSession();
+  const {
+    data: projectsData,
+    error: projectsError,
+    isLoading: projectsLoading,
+  } = useSWR<{ projects: Project[] }>(
+    "/api/projects",
+    fetchJson,
+    DASHBOARD_PROJECTS_SWR_OPTIONS
+  );
+  const {
+    data: myTicketsData,
+    error: myTicketsError,
+    isLoading: myTicketsLoading,
+  } = useSWR<{ tickets: MyTicket[] }>(
+    "/api/tickets/mine",
+    fetchJson,
+    DASHBOARD_TICKETS_SWR_OPTIONS
+  );
 
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [myTickets, setMyTickets] = useState<MyTicket[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const loadProjects = useCallback(async () => {
-    const res = await fetch("/api/projects");
-    if (!res.ok) return;
-    const data = (await res.json()) as { projects: Project[] };
-    setProjects(data.projects);
-  }, []);
-
-  const loadMyTickets = useCallback(async () => {
-    const res = await fetch("/api/tickets/mine");
-    if (!res.ok) return;
-    const data = (await res.json()) as { tickets: MyTicket[] };
-    setMyTickets(data.tickets);
-  }, []);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    Promise.all([loadProjects(), loadMyTickets()]).finally(() =>
-      setLoading(false)
-    );
-  }, [loadProjects, loadMyTickets]);
+  const projects = useMemo(() => projectsData?.projects ?? [], [projectsData]);
+  const myTickets = useMemo(() => myTicketsData?.tickets ?? [], [myTicketsData]);
+  const loading = projectsLoading || myTicketsLoading;
+  const hasError = Boolean(projectsError || myTicketsError);
 
   const counts = useMemo(() => {
     const developing = myTickets.filter((t) => t.status === "DEVELOPING").length;
@@ -355,6 +367,11 @@ export function Dashboard() {
         </section>
 
         {/* 我的任务列表 */}
+        {hasError ? (
+          <p className="rounded-lg border border-danger/20 bg-red-50 px-5 py-3 text-sm text-danger">
+            数据加载失败，请稍后刷新页面。
+          </p>
+        ) : null}
         <section className="rounded-xl border border-ink-200 bg-white shadow-soft">
           <div className="flex items-center justify-between border-b border-ink-100 px-5 py-4">
             <h2 className="font-medium">我的任务</h2>

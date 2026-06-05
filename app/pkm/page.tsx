@@ -1,8 +1,6 @@
 import { AppShell } from "@/components/AppShell";
 import { IconPkm, IconTag } from "@/components/icons";
 
-export const dynamic = "force-dynamic";
-
 const NOTES = [
   {
     title: "Redis 缓存穿透解决方案",

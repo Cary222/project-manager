@@ -1,8 +1,6 @@
 import { AppShell } from "@/components/AppShell";
 import { IconBook, IconSearch } from "@/components/icons";
 
-export const dynamic = "force-dynamic";
-
 const SPACES = [
   { name: "光伏云平台", docs: 42, color: "bg-brand-50 text-brand-600" },
   { name: "物联网网关服务", docs: 28, color: "bg-emerald-50 text-emerald-600" },

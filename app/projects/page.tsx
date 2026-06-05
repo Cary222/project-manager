@@ -1,6 +1,12 @@
-import { ProjectsList } from "@/components/ProjectsList";
+import dynamic from "next/dynamic";
+import { ProjectsListLoading } from "@/components/ProjectsList";
 
-export const dynamic = "force-dynamic";
+const ProjectsList = dynamic(
+  () => import("@/components/ProjectsList").then((mod) => mod.ProjectsList),
+  {
+    loading: () => <ProjectsListLoading />,
+  }
+);
 
 export default function ProjectsPage() {
   return <ProjectsList />;

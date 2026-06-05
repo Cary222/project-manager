@@ -1,6 +1,12 @@
-import { TasksBoard } from "@/components/TasksBoard";
+import dynamic from "next/dynamic";
+import { TasksBoardLoading } from "@/components/TasksBoard";
 
-export const dynamic = "force-dynamic";
+const TasksBoard = dynamic(
+  () => import("@/components/TasksBoard").then((mod) => mod.TasksBoard),
+  {
+    loading: () => <TasksBoardLoading />,
+  }
+);
 
 export default function TasksPage() {
   return <TasksBoard />;
