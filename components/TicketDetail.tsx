@@ -9,6 +9,7 @@ import { CommitDiffModal, type CommitSummary } from "@/components/CommitDiffModa
 import { AssigneePicker } from "@/components/AssigneePicker";
 import {
   TicketCreateForm,
+  type TicketCreateInitialValues,
   type TicketCreateResponsibility,
   type TicketCreateUser,
 } from "@/components/TicketCreateForm";
@@ -186,6 +187,33 @@ type ProgramPushDraft = {
   newModuleName?: string;
 };
 
+type PushRecordStatus = "FAILED" | "SUCCEEDED" | "PENDING";
+
+type PushRecordTargetTicket = {
+  id: string;
+  ticketNo: number;
+  title: string;
+};
+
+type PushRecordSnapshot = {
+  status: PushRecordStatus;
+  errorMessage: string | null;
+  draftTitle: string;
+  draftDescription: string | null;
+  programAssigneeIds: string[];
+  designAssigneeIds: string[];
+  targetTicket?: PushRecordTargetTicket | null;
+};
+
+type PushResolveMode = "bound" | "candidate" | "unbound";
+
+type PushResolveResponse = {
+  mode: PushResolveMode;
+  record?: PushRecordSnapshot | null;
+  targetTicket?: PushRecordTargetTicket | null;
+  candidateTicket?: PushRecordTargetTicket | null;
+};
+
 export function TicketDetail({ ticketId }: { ticketId: string }) {
   const { data: session } = useSession();
   const isRoot = session?.user?.role === "ROOT";
@@ -203,14 +231,13 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   const [selectedModuleId, setSelectedModuleId] = useState("");
   const [pendingDoneConfirm, setPendingDoneConfirm] = useState(false);
   const [showProgramTicketForm, setShowProgramTicketForm] = useState(false);
-  const [pushState, setPushState] = useState<"idle" | "submitting" | "failed" | "succeeded">("idle");
-  const [pushErrorMessage, setPushErrorMessage] = useState("");
   const [retryDraft, setRetryDraft] = useState<ProgramPushDraft | null>(null);
-  const [pushedProgramTicket, setPushedProgramTicket] = useState<{
-    id: string;
-    ticketNo: number;
-    title: string;
-  } | null>(null);
+  const [pushRecord, setPushRecord] = useState<PushRecordSnapshot | null>(null);
+  const [pushResolveMode, setPushResolveMode] = useState<PushResolveMode>("unbound");
+  const [candidateProgramTicket, setCandidateProgramTicket] =
+    useState<PushRecordTargetTicket | null>(null);
+  const [editingBoundProgramTicket, setEditingBoundProgramTicket] = useState(false);
+  const [pushedProgramTicket, setPushedProgramTicket] = useState<PushRecordTargetTicket | null>(null);
 
   const loadTicket = useCallback(async () => {
     const res = await fetch(`/api/tickets/${ticketId}`);
@@ -287,59 +314,53 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
 
   useEffect(() => {
     if (!ticket) return;
-    if (ticket.creatorId !== session?.user?.id) return;
+    if (ticket.creatorId !== session?.user?.id && !isRoot) return;
     if (!isDesignTicket) {
-      setPushState("idle");
-      setPushErrorMessage("");
       setRetryDraft(null);
+      setPushRecord(null);
+      setPushResolveMode("unbound");
+      setCandidateProgramTicket(null);
       setPushedProgramTicket(null);
       return;
     }
 
-    fetch(`/api/tickets/${ticket.id}/push-record`)
+    fetch(`/api/tickets/${ticket.ticketNo}/push-record`)
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: {
-        record?: {
-          status: "FAILED" | "SUCCEEDED" | "PENDING";
-          errorMessage: string | null;
-          draftTitle: string;
-          draftDescription: string | null;
-          programAssigneeIds: string[];
-          designAssigneeIds: string[];
-          targetTicket?: { id: string; ticketNo: number; title: string } | null;
-        } | null;
-      } | null) => {
+      .then((data: { record?: PushRecordSnapshot | null } | null) => {
         const record = data?.record;
-        if (!record) {
-          setPushState("idle");
-          setPushErrorMessage("");
-          setRetryDraft(null);
+        setPushRecord(record ?? null);
+        if (!record?.targetTicket) {
+          setRetryDraft(record
+            ? {
+                title: record.draftTitle,
+                description: record.draftDescription || "",
+                designAssigneeIds: record.designAssigneeIds,
+                programAssigneeIds: record.programAssigneeIds,
+              }
+            : null);
+          setPushResolveMode("unbound");
+          setCandidateProgramTicket(null);
           setPushedProgramTicket(null);
-          return;
-        }
-        if (record.status === "SUCCEEDED" && record.targetTicket) {
-          setPushState("succeeded");
-          setPushedProgramTicket(record.targetTicket);
-          setRetryDraft(null);
-          setPushErrorMessage("");
           setShowProgramTicketForm(false);
           return;
         }
-        if (record.status === "FAILED") {
-          setPushState("failed");
-          setPushErrorMessage(record.errorMessage || "推单失败");
-          setRetryDraft({
-            title: record.draftTitle,
-            description: record.draftDescription || "",
-            designAssigneeIds: record.designAssigneeIds,
-            programAssigneeIds: record.programAssigneeIds,
-          });
-          return;
-        }
-        setPushState("idle");
+
+        setPushResolveMode("bound");
+        setCandidateProgramTicket(null);
+        setPushedProgramTicket(record.targetTicket);
+        setRetryDraft({
+          title: record.draftTitle,
+          description: record.draftDescription || "",
+          designAssigneeIds: record.designAssigneeIds,
+          programAssigneeIds: record.programAssigneeIds,
+        });
+        setShowProgramTicketForm(false);
       })
       .catch(() => {
-        setPushState("idle");
+        setPushRecord(null);
+        setPushResolveMode("unbound");
+        setCandidateProgramTicket(null);
+        setPushedProgramTicket(null);
       });
   }, [ticket, session?.user?.id, isDesignTicket]);
 
@@ -424,25 +445,183 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     }
   }
 
+  async function resolveProgramPush() {
+    if (!ticket) return null;
+
+    const response = await fetch(`/api/tickets/${ticket.ticketNo}/push-record/resolve`);
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(data?.error || "推单记录查询失败");
+    }
+
+    return (await response.json()) as PushResolveResponse;
+  }
+
   async function openProgramPushForm() {
     if (!ticket) return;
     setPendingDoneConfirm(false);
-    setPushErrorMessage("");
     setMessage("");
 
     const completed = await persistStatus("DONE");
     if (!completed) return;
 
-    setPushState("idle");
-    setRetryDraft((current) =>
-      current ?? {
+    const nextDraft =
+      retryDraft ?? {
         title: ticket.title,
         description: ticket.description || "",
         designAssigneeIds: ticket.assignees.map((user) => user.id),
         programAssigneeIds: [],
+      };
+
+    setRetryDraft(nextDraft);
+
+    try {
+      const resolved = await resolveProgramPush();
+      if (!resolved) return;
+
+      setPushRecord(resolved.record ?? null);
+      setPushedProgramTicket(resolved.targetTicket ?? resolved.record?.targetTicket ?? null);
+      setCandidateProgramTicket(resolved.candidateTicket ?? null);
+      setEditingBoundProgramTicket(false);
+
+      if (resolved.mode === "bound") {
+        setPushResolveMode("bound");
+        setShowProgramTicketForm(false);
+        return;
       }
-    );
-    setShowProgramTicketForm(true);
+
+      if (resolved.mode === "candidate") {
+        setPushResolveMode("candidate");
+        setShowProgramTicketForm(false);
+        return;
+      }
+
+      setPushResolveMode("unbound");
+      setCandidateProgramTicket(null);
+      setShowProgramTicketForm(true);
+    } catch (error) {
+      setPushResolveMode("unbound");
+      setCandidateProgramTicket(null);
+      setShowProgramTicketForm(true);
+      setMessage(error instanceof Error ? error.message : "推单记录查询失败");
+    }
+  }
+
+  async function handleBindExistingProgramTicket(targetTicket: PushRecordTargetTicket) {
+    if (!ticket) return;
+
+    const draft =
+      retryDraft ?? {
+        title: ticket.title,
+        description: ticket.description || "",
+        designAssigneeIds: ticket.assignees.map((user) => user.id),
+        programAssigneeIds: [],
+      };
+
+    const response = await fetch(`/api/tickets/${ticket.ticketNo}/push-record/update`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        targetTicketId: targetTicket.id,
+        draftTitle: draft.title,
+        draftDescription: draft.description,
+        programAssigneeIds: draft.programAssigneeIds,
+        designAssigneeIds: draft.designAssigneeIds,
+        errorMessage: null,
+      }),
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      setMessage(data?.error ? `绑定程序单失败：${data.error}` : "绑定程序单失败");
+      return;
+    }
+
+    const data = (await response.json()) as { record: PushRecordSnapshot };
+    setPushRecord(data.record);
+    setPushResolveMode("bound");
+    setCandidateProgramTicket(null);
+    setEditingBoundProgramTicket(false);
+    setPushedProgramTicket(targetTicket);
+    setShowProgramTicketForm(false);
+    setMessage(`已绑定程序单 #${targetTicket.ticketNo}`);
+  }
+
+  async function handleUpdateBoundProgramTicket(draft: TicketCreateInitialValues) {
+    if (!ticket || !pushedProgramTicket) return;
+
+    const title = draft.title?.trim();
+    if (!title) {
+      setMessage("标题不能为空");
+      return;
+    }
+
+    const description = draft.description?.trim() ?? "";
+    const programAssigneeIds = draft.programAssigneeIds ?? [];
+    const designAssigneeIds = draft.designAssigneeIds ?? ticket.assignees.map((user) => user.id);
+
+    const detailResponse = await fetch(`/api/tickets/${pushedProgramTicket.ticketNo}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title,
+        description,
+      }),
+    });
+
+    if (!detailResponse.ok) {
+      const data = (await detailResponse.json().catch(() => null)) as { error?: string } | null;
+      setMessage(data?.error ? `更新程序单失败：${data.error}` : "更新程序单失败");
+      return;
+    }
+
+    const assigneeResponse = await fetch(`/api/tickets/${pushedProgramTicket.ticketNo}/assignee`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assigneeIds: programAssigneeIds }),
+    });
+
+    if (!assigneeResponse.ok) {
+      const data = (await assigneeResponse.json().catch(() => null)) as { error?: string } | null;
+      setMessage(data?.error ? `更新程序指派失败：${data.error}` : "更新程序指派失败");
+      return;
+    }
+
+    const recordResponse = await fetch(`/api/tickets/${ticket.ticketNo}/push-record/update`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        status: "SUCCEEDED",
+        errorMessage: null,
+        draftTitle: title,
+        draftDescription: description,
+        programAssigneeIds,
+        designAssigneeIds,
+        targetTicketId: pushedProgramTicket.id,
+      }),
+    });
+
+    if (!recordResponse.ok) {
+      const data = (await recordResponse.json().catch(() => null)) as { error?: string } | null;
+      setMessage(data?.error ? `推单记录保存失败：${data.error}` : "推单记录保存失败");
+      return;
+    }
+
+    const data = (await recordResponse.json()) as { record: PushRecordSnapshot };
+    setPushRecord(data.record);
+    setRetryDraft({
+      title,
+      description,
+      designAssigneeIds,
+      programAssigneeIds,
+      moduleId: draft.moduleId,
+      newModuleName: draft.newModuleName,
+    });
+    setPushResolveMode("bound");
+    setEditingBoundProgramTicket(false);
+    setShowProgramTicketForm(false);
+    setMessage(`程序单 #${pushedProgramTicket.ticketNo} 已更新`);
+    await loadTicket();
   }
 
   async function handleProgramTicketCreated(payload: {
@@ -451,10 +630,12 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     designAssigneeIds: string[];
     title: string;
     description: string;
+    moduleId?: string;
+    newModuleName?: string;
   }) {
     if (!ticket) return;
 
-    await fetch(`/api/tickets/${ticket.id}/push-record/update`, {
+    const response = await fetch(`/api/tickets/${ticket.ticketNo}/push-record/update`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -468,12 +649,35 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
       }),
     });
 
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      setMessage(data?.error ? `绑定程序单失败：${data.error}` : "绑定程序单失败");
+      return;
+    }
+
+    const nextRecord: PushRecordSnapshot = {
+      status: "SUCCEEDED",
+      errorMessage: null,
+      draftTitle: payload.title,
+      draftDescription: payload.description,
+      programAssigneeIds: payload.programAssigneeIds,
+      designAssigneeIds: payload.designAssigneeIds,
+      targetTicket: payload.ticket,
+    };
+
+    setPushRecord(nextRecord);
     setPushedProgramTicket(payload.ticket);
-    setPushState("succeeded");
-    setPushErrorMessage("");
-    setRetryDraft(null);
+    setPushResolveMode("bound");
+    setRetryDraft({
+      title: payload.title,
+      description: payload.description,
+      designAssigneeIds: payload.designAssigneeIds,
+      programAssigneeIds: payload.programAssigneeIds,
+      moduleId: payload.moduleId,
+      newModuleName: payload.newModuleName,
+    });
     setShowProgramTicketForm(false);
-    setMessage(`程序新单 #${payload.ticket.ticketNo} 已创建`);
+    setMessage(`程序新单 #${payload.ticket.ticketNo} 已创建并绑定`);
   }
 
   async function handleProgramTicketCreateFailed(
@@ -498,12 +702,12 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
       newModuleName: draft.newModuleName,
     };
 
-    await fetch(`/api/tickets/${ticket.id}/push-record/update`, {
+    await fetch(`/api/tickets/${ticket.ticketNo}/push-record/update`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        status: "FAILED",
-        errorMessage,
+        status: "PENDING",
+        errorMessage: null,
         draftTitle: safeDraft.title,
         draftDescription: safeDraft.description,
         programAssigneeIds: safeDraft.programAssigneeIds,
@@ -513,16 +717,27 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     });
 
     setRetryDraft(safeDraft);
-    setPushState("failed");
-    setPushErrorMessage(errorMessage);
+    setPushRecord({
+      status: "PENDING",
+      errorMessage: null,
+      draftTitle: safeDraft.title,
+      draftDescription: safeDraft.description,
+      programAssigneeIds: safeDraft.programAssigneeIds,
+      designAssigneeIds: safeDraft.designAssigneeIds,
+      targetTicket: null,
+    });
+    setPushResolveMode("unbound");
     setShowProgramTicketForm(false);
     setMessage(errorMessage);
   }
 
   function reopenProgramPushForm() {
-    if (pushState === "succeeded") return;
+    if (pushResolveMode === "candidate") return;
+    if (pushedProgramTicket) {
+      setEditingBoundProgramTicket(true);
+    }
     setShowProgramTicketForm(true);
-    setPushErrorMessage("");
+    setPushResolveMode(pushedProgramTicket ? "bound" : "unbound");
     setMessage("");
   }
 
@@ -543,73 +758,124 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   }
 
   const renderPushStatusCard = () => {
-    if (!ticket || ticket.creatorId !== session?.user?.id) return null;
+    if (!ticket || (ticket.creatorId !== session?.user?.id && !isRoot) || ticket.status !== "DONE") return null;
+
+    const draft = retryDraft ?? programPushDraft;
+    if (!draft) return null;
+
+    const summaryDescription = pushedProgramTicket
+      ? `已绑定程序单 #${pushedProgramTicket.ticketNo}，后续推单操作都将在这张单上继续。`
+      : candidateProgramTicket
+        ? `程序目录下已找到程序单 #${candidateProgramTicket.ticketNo}，可直接绑定。`
+        : "当前还没有绑定程序单，可创建并绑定到该设计单。";
 
     return (
       <section className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <h2 className="font-medium">推单状态 / 重试入口</h2>
-            <p className="mt-1 text-sm text-ink-400">
-              设计单完成后，可在这里推送程序新单。
-            </p>
+            <h2 className="font-medium">推单绑定</h2>
+            <p className="mt-1 text-sm text-ink-400">{summaryDescription}</p>
           </div>
-          {pushState === "succeeded" && pushedProgramTicket ? (
+          {pushedProgramTicket ? (
             <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-600">
-              已推送
+              已绑定 #{pushedProgramTicket.ticketNo}
+            </span>
+          ) : candidateProgramTicket ? (
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-warning">
+              待绑定
             </span>
           ) : null}
         </div>
 
-        {pushState === "succeeded" && pushedProgramTicket ? (
-          <div className="space-y-3">
-            <p className="text-sm text-emerald-600">
-              已推送程序新单 #{pushedProgramTicket.ticketNo}
+        {pushResolveMode === "candidate" && candidateProgramTicket ? (
+          <div className="space-y-4 rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+            <p className="text-sm text-ink-700">
+              检索到程序目录下已有单子 #{candidateProgramTicket.ticketNo}，可直接绑定到当前设计单。
             </p>
-            <Link
-              href={`/${pushedProgramTicket.ticketNo}`}
-              className="text-sm font-medium text-brand-600 hover:text-brand-700"
-            >
-              查看程序新单
-            </Link>
-            <button
-              type="button"
-              disabled
-              className="w-full rounded-lg bg-ink-200 px-3 py-2 text-sm font-medium text-ink-500"
-            >
-              已推送
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => handleBindExistingProgramTicket(candidateProgramTicket)}
+                className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"
+              >
+                绑定 #${candidateProgramTicket.ticketNo}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCandidateProgramTicket(null);
+                  setPushResolveMode("unbound");
+                  setShowProgramTicketForm(true);
+                }}
+                className="rounded-lg border border-ink-200 px-3 py-2 text-sm text-ink-700 hover:bg-ink-100"
+              >
+                创建新程序单
+              </button>
+            </div>
           </div>
-        ) : showProgramTicketForm && programResponsibility && (retryDraft ?? programPushDraft) ? (
-          <TicketCreateForm
-            projectId={ticket.project.id}
-            responsibility={programResponsibility}
-            users={users}
-            currentUserId={session?.user?.id}
-            showDesignAssignees
-            editableDesignAssignees
-            initialValues={retryDraft ?? programPushDraft ?? undefined}
-            submitLabel="创建程序新单"
-            onMessage={setMessage}
-            onCreated={handleProgramTicketCreated}
-            onCancel={() => setShowProgramTicketForm(false)}
-            onCreateFailed={handleProgramTicketCreateFailed}
-            className="grid gap-3 rounded-xl border border-ink-100 bg-ink-100/40 p-4"
-          />
+        ) : showProgramTicketForm && programResponsibility ? (
+          <div className="space-y-4">
+            {pushedProgramTicket ? (
+              <div className="rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-3 text-sm text-ink-700">
+                当前正在更新已绑定程序单 #{pushedProgramTicket.ticketNo}。
+              </div>
+            ) : null}
+            <TicketCreateForm
+              projectId={ticket.project.id}
+              responsibility={programResponsibility}
+              users={users}
+              currentUserId={session?.user?.id}
+              showDesignAssignees
+              editableDesignAssignees
+              initialValues={draft}
+              submitLabel={pushedProgramTicket ? "更新程序单" : "创建并绑定程序单"}
+              submitMode={pushedProgramTicket ? "edit" : "create"}
+              onMessage={setMessage}
+              onCreated={pushedProgramTicket ? handleUpdateBoundProgramTicket : handleProgramTicketCreated}
+              onCancel={() => {
+                setShowProgramTicketForm(false);
+                setEditingBoundProgramTicket(false);
+              }}
+              onCreateFailed={handleProgramTicketCreateFailed}
+              className="grid gap-3 rounded-xl border border-ink-100 bg-ink-100/40 p-4"
+            />
+          </div>
+        ) : pushedProgramTicket ? (
+          <div className="space-y-4 rounded-xl border border-ink-100 bg-ink-50 p-4">
+            <div className="space-y-2 text-sm text-ink-600">
+              <p>
+                <span className="font-medium text-ink-800">已绑定程序单：</span>#
+                {pushedProgramTicket.ticketNo}
+              </p>
+              <p>
+                <span className="font-medium text-ink-800">标题：</span>
+                {pushRecord?.draftTitle || pushedProgramTicket.title}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href={`/${pushedProgramTicket.ticketNo}`}
+                className="inline-flex rounded-lg px-3 py-2 text-sm font-medium text-brand-600 hover:text-brand-700"
+              >
+                查看程序单
+              </Link>
+              <button
+                type="button"
+                onClick={reopenProgramPushForm}
+                className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"
+              >
+                在原单上继续推单
+              </button>
+            </div>
+          </div>
         ) : (
-          <div className="space-y-3">
-            <p className="text-sm text-ink-500">
-              {pushState === "failed"
-                ? `上次推单失败：${pushErrorMessage || "请重试"}`
-                : "设计单完成后，可在这里推送程序新单。"}
-            </p>
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={reopenProgramPushForm}
-              disabled={pushState === "submitting" || pushState === "succeeded"}
-              className="w-full rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={openProgramPushForm}
+              className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"
             >
-              {pushState === "failed" ? "重新推单" : "推送程序新单"}
+              检索或创建推单
             </button>
           </div>
         )}

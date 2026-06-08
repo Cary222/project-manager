@@ -7,7 +7,7 @@ import {
   replaceTicketAssignees,
 } from "@/lib/ticket-assignees";
 import { requireRoot, requireSession } from "@/lib/permissions";
-import { allocateTicketNo } from "@/lib/ticket-counter";
+import { allocateTicketNo, syncTicketCounterAfterCreate } from "@/lib/ticket-counter";
 import { createModerationLog } from "@/lib/moderation";
 import {
   buildAssignedNotification,
@@ -79,6 +79,8 @@ export async function POST(request: Request) {
 
       return created;
     });
+
+    await syncTicketCounterAfterCreate(ticket.ticketNo);
 
     if (assigneeIds.length > 0) {
       const actorName = session.user.name || session.user.email || "管理员";

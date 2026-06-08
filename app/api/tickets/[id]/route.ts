@@ -9,6 +9,7 @@ import {
 } from "@/lib/ticket-assignees";
 import { requireRoot, requireSession } from "@/lib/permissions";
 import { createModerationLog } from "@/lib/moderation";
+import { syncTicketCounterAfterDelete } from "@/lib/ticket-counter";
 import { ModerationAction } from "@prisma/client";
 
 async function enrichAssigneeHistory(
@@ -126,9 +127,19 @@ export async function DELETE(
       return NextResponse.json({ error: "ticket not found" }, { status: 404 });
     }
 
-    await prisma.ticket.delete({
-      where: Number.isInteger(ticketNo) ? { ticketNo } : { id },
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
+        DELETE FROM pm."TicketPushRecord"
+        WHERE "sourceTicketId" = ${ticket.id}
+           OR "targetTicketId" = ${ticket.id}
+      `;
+
+      await tx.ticket.delete({
+        where: Number.isInteger(ticketNo) ? { ticketNo } : { id },
+      });
     });
+
+    await syncTicketCounterAfterDelete();
 
     // 记录审计日志
     await createModerationLog({

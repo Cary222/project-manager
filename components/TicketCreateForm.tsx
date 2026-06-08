@@ -48,6 +48,7 @@ type TicketCreateFormProps = {
   users: TicketCreateUser[];
   initialValues?: TicketCreateInitialValues;
   submitLabel?: string;
+  submitMode?: "create" | "edit";
   onCreated?: (payload: CreatedTicketPayload) => Promise<void> | void;
   onCreateFailed?: (draft: TicketCreateInitialValues, errorMessage: string) => Promise<void> | void;
   onCancel?: () => void;
@@ -64,6 +65,7 @@ export function TicketCreateForm({
   users,
   initialValues,
   submitLabel = "创建单子",
+  submitMode = "create",
   onCreated,
   onCreateFailed,
   onCancel,
@@ -167,6 +169,24 @@ export function TicketCreateForm({
     const fullDescription = imageMarkdown
       ? `${imageMarkdown}\n\n${description.trim()}`
       : description.trim();
+
+    if (submitMode === "edit") {
+      setSubmitting(false);
+      await onCreated?.({
+        ticket: {
+          id: "",
+          ticketNo: 0,
+          title: title.trim(),
+        },
+        programAssigneeIds: effectiveProgramAssigneeIds,
+        designAssigneeIds,
+        title: title.trim(),
+        description: fullDescription,
+        moduleId: targetModuleId,
+        newModuleName: newModuleName.trim(),
+      });
+      return;
+    }
 
     const ticketRes = await fetch("/api/tickets", {
       method: "POST",

@@ -3,21 +3,40 @@ import { prisma } from "@/lib/db";
 const COUNTER_KEY = "ticketNo";
 const INITIAL_TICKET_NO = 10000;
 
-export async function allocateTicketNo() {
-  const ticketNo = await prisma.$transaction(async (tx) => {
-    const current = await tx.counter.upsert({
-      where: { key: COUNTER_KEY },
-      update: {},
-      create: { key: COUNTER_KEY, nextValue: INITIAL_TICKET_NO },
-    });
-
-    await tx.counter.update({
-      where: { key: COUNTER_KEY },
-      data: { nextValue: current.nextValue + 1 },
-    });
-
-    return current.nextValue;
+async function getNextTicketNoFromMax() {
+  const maxTicket = await prisma.ticket.findFirst({
+    orderBy: { ticketNo: "desc" },
+    select: { ticketNo: true },
   });
 
-  return ticketNo;
+  return (maxTicket?.ticketNo ?? INITIAL_TICKET_NO - 1) + 1;
+}
+
+export async function allocateTicketNo() {
+  return getNextTicketNoFromMax();
+}
+
+export async function syncTicketCounterAfterCreate(ticketNo: number) {
+  await prisma.counter.upsert({
+    where: { key: COUNTER_KEY },
+    update: {
+      nextValue: ticketNo + 1,
+    },
+    create: { key: COUNTER_KEY, nextValue: ticketNo + 1 },
+  });
+}
+
+export async function syncTicketCounterAfterDelete() {
+  const nextValue = await getNextTicketNoFromMax();
+
+  await prisma.counter.upsert({
+    where: { key: COUNTER_KEY },
+    update: {
+      nextValue,
+    },
+    create: {
+      key: COUNTER_KEY,
+      nextValue,
+    },
+  });
 }
