@@ -33,6 +33,17 @@ const USER_ALLOWED_STATUSES = new Set<TicketStatus>([
   TicketStatus.DELIVERED,
 ]);
 
+const DESIGN_USER_ALLOWED_STATUSES = new Set<TicketStatus>([
+  TicketStatus.DEVELOPING,
+  TicketStatus.DELIVERED,
+]);
+
+const DESIGN_ALLOWED_STATUSES = new Set<TicketStatus>([
+  TicketStatus.DEVELOPING,
+  TicketStatus.DELIVERED,
+  TicketStatus.DONE,
+]);
+
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> }
@@ -57,6 +68,16 @@ export async function PATCH(
         title: true,
         status: true,
         assignees: { select: { userId: true } },
+        module: {
+          select: {
+            responsibility: {
+              select: {
+                kind: true,
+              },
+            },
+          },
+        },
+        creatorId: true,
       },
     });
     if (!current) {
@@ -68,8 +89,19 @@ export async function PATCH(
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
     }
 
-    if (!isRoot && !USER_ALLOWED_STATUSES.has(nextStatus)) {
+    const isDesignTicket = current.module.responsibility.kind === "DESIGN";
+
+    if (isDesignTicket && !DESIGN_ALLOWED_STATUSES.has(nextStatus)) {
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+    }
+
+    if (!isRoot) {
+      const allowedStatuses = isDesignTicket
+        ? DESIGN_USER_ALLOWED_STATUSES
+        : USER_ALLOWED_STATUSES;
+      if (!allowedStatuses.has(nextStatus)) {
+        return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+      }
     }
 
     if (!isRoot && nextStatus === TicketStatus.DONE) {
@@ -119,17 +151,18 @@ export async function PATCH(
           });
         }
       } else if (nextStatus === TicketStatus.DONE) {
-        const assigneeIds = current.assignees
-          .map((item) => item.userId)
-          .filter((userId) => userId !== session.user.id);
-        if (assigneeIds.length > 0) {
+        const notifyUserIds = [...new Set([
+          ...current.assignees.map((item) => item.userId),
+          current.creatorId,
+        ])].filter((userId) => userId !== session.user.id);
+        if (notifyUserIds.length > 0) {
           const notification = buildCompletedNotification({
             ticketNo: current.ticketNo,
             title: current.title,
             actorName,
           });
           await createManyNotifications({
-            userIds: assigneeIds,
+            userIds: notifyUserIds,
             type: "TICKET_COMPLETED",
             title: notification.title,
             content: notification.content,

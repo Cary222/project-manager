@@ -2,11 +2,16 @@
 
 import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { CommitDiffModal, type CommitSummary } from "@/components/CommitDiffModal";
 import { AssigneePicker } from "@/components/AssigneePicker";
+import {
+  TicketCreateForm,
+  type TicketCreateResponsibility,
+  type TicketCreateUser,
+} from "@/components/TicketCreateForm";
 import { formatAssigneeList } from "@/lib/ticket-assignees";
 import { branchStyle, repoStyle } from "@/lib/repo-style";
 import { IconArrowLeft, IconClock, IconEdit } from "@/components/icons";
@@ -98,6 +103,7 @@ type Ticket = {
   description: string | null;
   progress: number;
   status: TicketStatus;
+  creatorId: string;
   project: { id: string; name: string; responsibilities: Responsibility[] };
   assignees: UserBrief[];
   module: {
@@ -171,11 +177,20 @@ export function TicketDetailLoading() {
   );
 }
 
+type ProgramPushDraft = {
+  title: string;
+  description: string;
+  designAssigneeIds: string[];
+  programAssigneeIds: string[];
+  moduleId?: string;
+  newModuleName?: string;
+};
+
 export function TicketDetail({ ticketId }: { ticketId: string }) {
   const { data: session } = useSession();
   const isRoot = session?.user?.role === "ROOT";
   const [ticket, setTicket] = useState<Ticket | null>(null);
-  const [users, setUsers] = useState<UserBrief[]>([]);
+  const [users, setUsers] = useState<TicketCreateUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<TicketStatus>("DEVELOPING");
   const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
@@ -186,6 +201,16 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   const [editDescription, setEditDescription] = useState("");
   const [modules, setModules] = useState<{ id: string; name: string }[]>([]);
   const [selectedModuleId, setSelectedModuleId] = useState("");
+  const [pendingDoneConfirm, setPendingDoneConfirm] = useState(false);
+  const [showProgramTicketForm, setShowProgramTicketForm] = useState(false);
+  const [pushState, setPushState] = useState<"idle" | "submitting" | "failed" | "succeeded">("idle");
+  const [pushErrorMessage, setPushErrorMessage] = useState("");
+  const [retryDraft, setRetryDraft] = useState<ProgramPushDraft | null>(null);
+  const [pushedProgramTicket, setPushedProgramTicket] = useState<{
+    id: string;
+    ticketNo: number;
+    title: string;
+  } | null>(null);
 
   const loadTicket = useCallback(async () => {
     const res = await fetch(`/api/tickets/${ticketId}`);
@@ -205,6 +230,34 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   const isAssignee =
     ticket?.assignees.some((a) => a.id === session?.user?.id) ?? false;
   const canEdit = isRoot || isAssignee;
+  const isDesignTicket = ticket?.module.responsibility.kind === "DESIGN";
+  const allowedStatuses = useMemo(() => {
+    if (!ticket) return [] as TicketStatus[];
+    if (ticket.module.responsibility.kind === "DESIGN") {
+      return isRoot
+        ? (["DEVELOPING", "DELIVERED", "DONE"] as TicketStatus[])
+        : (["DEVELOPING", "DELIVERED"] as TicketStatus[]);
+    }
+    return isRoot
+      ? (["DEVELOPING", "READY_FOR_TEST", "DELIVERED", "DONE"] as TicketStatus[])
+      : (["DEVELOPING", "READY_FOR_TEST", "DELIVERED"] as TicketStatus[]);
+  }, [ticket, isRoot]);
+  const programResponsibility = useMemo(() => {
+    return (
+      (ticket?.project.responsibilities.find(
+        (responsibility) => responsibility.kind === "PROGRAM"
+      ) as TicketCreateResponsibility | undefined) ?? null
+    );
+  }, [ticket]);
+  const programPushDraft = useMemo((): ProgramPushDraft | null => {
+    if (!ticket) return null;
+    return {
+      title: ticket.title,
+      description: ticket.description || "",
+      designAssigneeIds: ticket.assignees.map((user) => user.id),
+      programAssigneeIds: [],
+    };
+  }, [ticket]);
 
   useEffect(() => {
     let cancelled = false;
@@ -233,16 +286,62 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   const allModules = ticket?.project.responsibilities.flatMap((r) => r.modules) ?? [];
 
   useEffect(() => {
-    if (!ticket || !isRoot) return;
-    const respKind = ticket.module.responsibility.kind;
-    const respModules = allModules.filter((m) => {
-      const resp = ticket.project.responsibilities.find((r) => r.kind === respKind);
-      return resp?.modules.some((rm) => rm.id === m.id);
-    });
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setModules(allModules.length > 0 ? allModules : respModules);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticket?.project, isRoot]);
+    if (!ticket) return;
+    if (ticket.creatorId !== session?.user?.id) return;
+    if (!isDesignTicket) {
+      setPushState("idle");
+      setPushErrorMessage("");
+      setRetryDraft(null);
+      setPushedProgramTicket(null);
+      return;
+    }
+
+    fetch(`/api/tickets/${ticket.id}/push-record`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: {
+        record?: {
+          status: "FAILED" | "SUCCEEDED" | "PENDING";
+          errorMessage: string | null;
+          draftTitle: string;
+          draftDescription: string | null;
+          programAssigneeIds: string[];
+          designAssigneeIds: string[];
+          targetTicket?: { id: string; ticketNo: number; title: string } | null;
+        } | null;
+      } | null) => {
+        const record = data?.record;
+        if (!record) {
+          setPushState("idle");
+          setPushErrorMessage("");
+          setRetryDraft(null);
+          setPushedProgramTicket(null);
+          return;
+        }
+        if (record.status === "SUCCEEDED" && record.targetTicket) {
+          setPushState("succeeded");
+          setPushedProgramTicket(record.targetTicket);
+          setRetryDraft(null);
+          setPushErrorMessage("");
+          setShowProgramTicketForm(false);
+          return;
+        }
+        if (record.status === "FAILED") {
+          setPushState("failed");
+          setPushErrorMessage(record.errorMessage || "推单失败");
+          setRetryDraft({
+            title: record.draftTitle,
+            description: record.draftDescription || "",
+            designAssigneeIds: record.designAssigneeIds,
+            programAssigneeIds: record.programAssigneeIds,
+          });
+          return;
+        }
+        setPushState("idle");
+      })
+      .catch(() => {
+        setPushState("idle");
+      });
+  }, [ticket, session?.user?.id, isDesignTicket]);
 
   async function saveTicketDetails() {
     setMessage("");
@@ -280,28 +379,151 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     await loadTicket();
   }
 
+  async function persistStatus(nextStatus: TicketStatus) {
+    if (!ticket) return false;
+
+    const res = await fetch(`/api/tickets/${ticket.id}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: nextStatus }),
+    });
+
+    if (!res.ok) {
+      const data = (await res.json().catch(() => null)) as { error?: string } | null;
+      setMessage(data?.error ? `状态保存失败：${data.error}` : "状态保存失败");
+      return false;
+    }
+
+    setMessage("状态已保存");
+    await loadTicket();
+    return true;
+  }
+
   async function updateStatus() {
     setMessage("");
     if (!ticket) return;
 
+    if (isDesignTicket && isRoot && status === "DONE") {
+      setPendingDoneConfirm(true);
+      return;
+    }
+
     try {
-      const res = await fetch(`/api/tickets/${ticket.id}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as { error?: string } | null;
-        setMessage(data?.error ? `状态保存失败：${data.error}` : "状态保存失败");
-        return;
-      }
-
-      setMessage("状态已保存");
-      await loadTicket();
+      await persistStatus(status);
     } catch (error) {
       setMessage(error instanceof Error ? `状态保存失败：${error.message}` : "状态保存失败");
     }
+  }
+
+  async function confirmDoneWithoutPush() {
+    setPendingDoneConfirm(false);
+    try {
+      await persistStatus("DONE");
+    } catch (error) {
+      setMessage(error instanceof Error ? `状态保存失败：${error.message}` : "状态保存失败");
+    }
+  }
+
+  async function openProgramPushForm() {
+    if (!ticket) return;
+    setPendingDoneConfirm(false);
+    setPushErrorMessage("");
+    setMessage("");
+
+    const completed = await persistStatus("DONE");
+    if (!completed) return;
+
+    setPushState("idle");
+    setRetryDraft((current) =>
+      current ?? {
+        title: ticket.title,
+        description: ticket.description || "",
+        designAssigneeIds: ticket.assignees.map((user) => user.id),
+        programAssigneeIds: [],
+      }
+    );
+    setShowProgramTicketForm(true);
+  }
+
+  async function handleProgramTicketCreated(payload: {
+    ticket: { id: string; ticketNo: number; title: string };
+    programAssigneeIds: string[];
+    designAssigneeIds: string[];
+    title: string;
+    description: string;
+  }) {
+    if (!ticket) return;
+
+    await fetch(`/api/tickets/${ticket.id}/push-record/update`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        status: "SUCCEEDED",
+        errorMessage: null,
+        draftTitle: payload.title,
+        draftDescription: payload.description,
+        programAssigneeIds: payload.programAssigneeIds,
+        designAssigneeIds: payload.designAssigneeIds,
+        targetTicketId: payload.ticket.id,
+      }),
+    });
+
+    setPushedProgramTicket(payload.ticket);
+    setPushState("succeeded");
+    setPushErrorMessage("");
+    setRetryDraft(null);
+    setShowProgramTicketForm(false);
+    setMessage(`程序新单 #${payload.ticket.ticketNo} 已创建`);
+  }
+
+  async function handleProgramTicketCreateFailed(
+    draft: {
+      moduleId?: string;
+      newModuleName?: string;
+      programAssigneeIds?: string[];
+      designAssigneeIds?: string[];
+      title?: string;
+      description?: string;
+    },
+    errorMessage: string
+  ) {
+    if (!ticket) return;
+
+    const safeDraft: ProgramPushDraft = {
+      title: draft.title ?? ticket.title,
+      description: draft.description ?? ticket.description ?? "",
+      designAssigneeIds: draft.designAssigneeIds ?? ticket.assignees.map((user) => user.id),
+      programAssigneeIds: draft.programAssigneeIds ?? [],
+      moduleId: draft.moduleId,
+      newModuleName: draft.newModuleName,
+    };
+
+    await fetch(`/api/tickets/${ticket.id}/push-record/update`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        status: "FAILED",
+        errorMessage,
+        draftTitle: safeDraft.title,
+        draftDescription: safeDraft.description,
+        programAssigneeIds: safeDraft.programAssigneeIds,
+        designAssigneeIds: safeDraft.designAssigneeIds,
+        targetTicketId: null,
+      }),
+    });
+
+    setRetryDraft(safeDraft);
+    setPushState("failed");
+    setPushErrorMessage(errorMessage);
+    setShowProgramTicketForm(false);
+    setMessage(errorMessage);
+  }
+
+  function reopenProgramPushForm() {
+    if (pushState === "succeeded") return;
+    setShowProgramTicketForm(true);
+    setPushErrorMessage("");
+    setMessage("");
   }
 
   async function updateAssignee() {
@@ -319,6 +541,81 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     setMessage("指派人已更新");
     await loadTicket();
   }
+
+  const renderPushStatusCard = () => {
+    if (!ticket || ticket.creatorId !== session?.user?.id) return null;
+
+    return (
+      <section className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="font-medium">推单状态 / 重试入口</h2>
+            <p className="mt-1 text-sm text-ink-400">
+              设计单完成后，可在这里推送程序新单。
+            </p>
+          </div>
+          {pushState === "succeeded" && pushedProgramTicket ? (
+            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-600">
+              已推送
+            </span>
+          ) : null}
+        </div>
+
+        {pushState === "succeeded" && pushedProgramTicket ? (
+          <div className="space-y-3">
+            <p className="text-sm text-emerald-600">
+              已推送程序新单 #{pushedProgramTicket.ticketNo}
+            </p>
+            <Link
+              href={`/${pushedProgramTicket.ticketNo}`}
+              className="text-sm font-medium text-brand-600 hover:text-brand-700"
+            >
+              查看程序新单
+            </Link>
+            <button
+              type="button"
+              disabled
+              className="w-full rounded-lg bg-ink-200 px-3 py-2 text-sm font-medium text-ink-500"
+            >
+              已推送
+            </button>
+          </div>
+        ) : showProgramTicketForm && programResponsibility && (retryDraft ?? programPushDraft) ? (
+          <TicketCreateForm
+            projectId={ticket.project.id}
+            responsibility={programResponsibility}
+            users={users}
+            currentUserId={session?.user?.id}
+            showDesignAssignees
+            editableDesignAssignees
+            initialValues={retryDraft ?? programPushDraft ?? undefined}
+            submitLabel="创建程序新单"
+            onMessage={setMessage}
+            onCreated={handleProgramTicketCreated}
+            onCancel={() => setShowProgramTicketForm(false)}
+            onCreateFailed={handleProgramTicketCreateFailed}
+            className="grid gap-3 rounded-xl border border-ink-100 bg-ink-100/40 p-4"
+          />
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-ink-500">
+              {pushState === "failed"
+                ? `上次推单失败：${pushErrorMessage || "请重试"}`
+                : "设计单完成后，可在这里推送程序新单。"}
+            </p>
+            <button
+              type="button"
+              onClick={reopenProgramPushForm}
+              disabled={pushState === "submitting" || pushState === "succeeded"}
+              className="w-full rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {pushState === "failed" ? "重新推单" : "推送程序新单"}
+            </button>
+          </div>
+        )}
+      </section>
+    );
+  };
 
   if (loading) {
     return <TicketDetailLoading />;
@@ -443,64 +740,67 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
               )}
             </section>
 
-            {/* 历史提交 */}
-            <section className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="font-medium">历史提交</h2>
-                <span className="rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-500">
-                  {ticket.commits.length}
-                </span>
-              </div>
-              {ticket.commits.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-ink-200 p-8 text-center text-sm text-ink-400">
-                  暂无关联提交
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {ticket.commits.map((commit) => {
-                    const repo = repoStyle(commit.repoPath);
-                    return (
-                      <button
-                        key={commit.id}
-                        type="button"
-                        onClick={() => setSelectedCommit(commit)}
-                        className={`w-full rounded-lg border border-ink-100 border-l-4 ${repo.border} p-3 text-left text-sm transition hover:border-ink-300 ${repo.card}`}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex min-w-0 flex-wrap items-center gap-2">
-                            <span
-                              className={`rounded px-2 py-0.5 text-xs font-medium ${repo.badge}`}
-                            >
-                              {repo.name}
-                            </span>
-                            <span className="font-mono text-xs text-ink-500">
-                              {commit.commitSha.slice(0, 7)}
-                            </span>
-                          </div>
-                          <span className="shrink-0 text-xs text-ink-400">
-                            {new Date(commit.committedAt).toLocaleString()}
-                          </span>
-                        </div>
-                        {commit.branches.length > 0 ? (
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {commit.branches.map((branch) => (
-                              <span
-                                key={branch}
-                                className={`rounded px-2 py-0.5 text-xs ${branchStyle(branch)}`}
-                              >
-                                {branch}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-                        <p className="mt-2 text-ink-700">{commit.subject}</p>
-                        <p className="mt-1 text-xs text-ink-400">{commit.author}</p>
-                      </button>
-                    );
-                  })}
+            {isDesignTicket ? (
+              renderPushStatusCard()
+            ) : (
+              <section className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="font-medium">历史提交</h2>
+                  <span className="rounded-full bg-ink-100 px-2 py-0.5 text-xs text-ink-500">
+                    {ticket.commits.length}
+                  </span>
                 </div>
-              )}
-            </section>
+                {ticket.commits.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-ink-200 p-8 text-center text-sm text-ink-400">
+                    暂无关联提交
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {ticket.commits.map((commit) => {
+                      const repo = repoStyle(commit.repoPath);
+                      return (
+                        <button
+                          key={commit.id}
+                          type="button"
+                          onClick={() => setSelectedCommit(commit)}
+                          className={`w-full rounded-lg border border-ink-100 border-l-4 ${repo.border} p-3 text-left text-sm transition hover:border-ink-300 ${repo.card}`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex min-w-0 flex-wrap items-center gap-2">
+                              <span
+                                className={`rounded px-2 py-0.5 text-xs font-medium ${repo.badge}`}
+                              >
+                                {repo.name}
+                              </span>
+                              <span className="font-mono text-xs text-ink-500">
+                                {commit.commitSha.slice(0, 7)}
+                              </span>
+                            </div>
+                            <span className="shrink-0 text-xs text-ink-400">
+                              {new Date(commit.committedAt).toLocaleString()}
+                            </span>
+                          </div>
+                          {commit.branches.length > 0 ? (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {commit.branches.map((branch) => (
+                                <span
+                                  key={branch}
+                                  className={`rounded px-2 py-0.5 text-xs ${branchStyle(branch)}`}
+                                >
+                                  {branch}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+                          <p className="mt-2 text-ink-700">{commit.subject}</p>
+                          <p className="mt-1 text-xs text-ink-400">{commit.author}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            )}
           </div>
 
           {/* 右侧栏 */}
@@ -514,12 +814,9 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                   onChange={(e) => setStatus(e.target.value as TicketStatus)}
                   className="flex-1 rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
                 >
-                  {(isRoot
-                    ? Object.entries(STATUS_LABEL)
-                    : Object.entries(STATUS_LABEL).filter(([value]) => value !== "DONE")
-                  ).map(([value, label]) => (
+                  {allowedStatuses.map((value) => (
                     <option key={value} value={value}>
-                      {label}
+                      {STATUS_LABEL[value]}
                     </option>
                   ))}
                 </select>
@@ -613,8 +910,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
               ) : null}
             </section>
 
-            {/* 移动模块 */}
-            {isRoot && (
+            {isRoot ? (
               <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
                 <h2 className="mb-3 font-medium">移动到其他模块</h2>
                 <div className="flex items-center gap-2">
@@ -638,10 +934,47 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                   </button>
                 </div>
               </section>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
+
+      {pendingDoneConfirm && ticket ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-elevated">
+            <h3 className="text-lg font-medium">确认完成设计单</h3>
+            <p className="mt-3 text-sm text-ink-600">
+              确认将设计单 #{ticket.ticketNo}「{ticket.title}」标记为已完成？
+            </p>
+            <p className="mt-2 text-sm text-ink-500">
+              你也可以先推送一个程序新单，创建成功后系统会自动完成当前设计单。
+            </p>
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingDoneConfirm(false)}
+                className="rounded-lg border border-ink-200 px-4 py-2 text-sm hover:bg-ink-100"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={confirmDoneWithoutPush}
+                className="rounded-lg border border-ink-200 px-4 py-2 text-sm text-ink-700 hover:bg-ink-100"
+              >
+                仅完成设计单
+              </button>
+              <button
+                type="button"
+                onClick={openProgramPushForm}
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+              >
+                推送程序新单
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <CommitDiffModal
         commit={selectedCommit}

@@ -85,6 +85,7 @@ model User {
   updatedSystemSettings SystemSetting[] @relation("SystemSettingUpdater")
   notifications Notification[] @relation("NotificationRecipient")
   actorNotifications Notification[] @relation("NotificationActor")
+  pushRecords        TicketPushRecord[]
 
   @@schema("pm")
 }
@@ -184,27 +185,51 @@ model Module {
 }
 
 model Ticket {
-  id          String            @id @default(cuid())
-  ticketNo    Int               @unique
-  title       String
-  description String?
-  progress    Int               @default(0)
-  status      TicketStatus      @default(DEVELOPING)
-  projectId   String
-  moduleId    String
-  creatorId   String
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-  project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  module      Module            @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-  creator     User              @relation("TicketCreator", fields: [creatorId], references: [id], onDelete: Restrict)
-  assignees   TicketAssignee[]
-  repoBindings TicketRepoBinding[]
-  commits     TicketCommit[]
+  id            String                @id @default(cuid())
+  ticketNo      Int                   @unique
+  title         String
+  description   String?
+  progress      Int                   @default(0)
+  status        TicketStatus          @default(DEVELOPING)
+  projectId     String
+  moduleId      String
+  creatorId     String
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  project       Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  module        Module                @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  creator       User                  @relation("TicketCreator", fields: [creatorId], references: [id], onDelete: Restrict)
+  assignees     TicketAssignee[]
+  repoBindings  TicketRepoBinding[]
+  commits       TicketCommit[]
   assigneeHistory TicketAssigneeHistory[]
   statusHistory TicketStatusHistory[]
   notifications Notification[]
+  pushSources   TicketPushRecord[]    @relation("PushSourceTicket")
+  pushTargets   TicketPushRecord[]    @relation("PushTargetTicket")
 
+  @@schema("pm")
+}
+
+model TicketPushRecord {
+  id                 String   @id @default(cuid())
+  sourceTicketId     String
+  targetTicketId     String?
+  createdById        String
+  status             String
+  errorMessage       String?
+  draftTitle         String
+  draftDescription   String?
+  programAssigneeIds String[] @default([])
+  designAssigneeIds  String[] @default([])
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  sourceTicket       Ticket   @relation("PushSourceTicket", fields: [sourceTicketId], references: [id], onDelete: Cascade)
+  targetTicket       Ticket?  @relation("PushTargetTicket", fields: [targetTicketId], references: [id], onDelete: SetNull)
+  createdBy          User     @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([sourceTicketId])
+  @@index([createdById, createdAt(sort: Desc)])
   @@schema("pm")
 }
 

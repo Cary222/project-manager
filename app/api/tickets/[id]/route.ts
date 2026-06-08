@@ -56,6 +56,9 @@ export async function GET(
             },
           },
         },
+        creator: {
+          select: { id: true },
+        },
         assignees: {
           include: {
             user: { select: assigneeUserSelect },
@@ -93,6 +96,7 @@ export async function GET(
     return NextResponse.json({
       ticket: {
         ...ticket,
+        creatorId: ticket.creator.id,
         assignees: ticket.assignees.map((item) => item.user),
         assigneeHistory,
       },

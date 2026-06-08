@@ -9,6 +9,10 @@ import {
 import { requireRoot, requireSession } from "@/lib/permissions";
 import { allocateTicketNo } from "@/lib/ticket-counter";
 import { createModerationLog } from "@/lib/moderation";
+import {
+  buildAssignedNotification,
+  createManyNotifications,
+} from "@/lib/notifications";
 
 export async function POST(request: Request) {
   try {
@@ -75,6 +79,23 @@ export async function POST(request: Request) {
 
       return created;
     });
+
+    if (assigneeIds.length > 0) {
+      const actorName = session.user.name || session.user.email || "管理员";
+      const notification = buildAssignedNotification({
+        ticketNo: ticket.ticketNo,
+        title: ticket.title,
+        actorName,
+      });
+      await createManyNotifications({
+        userIds: assigneeIds,
+        type: "TICKET_ASSIGNED",
+        title: notification.title,
+        content: notification.content,
+        ticketId: ticket.id,
+        actorId: session.user.id,
+      });
+    }
 
     await createModerationLog({
       action: ModerationAction.CREATE_TICKET,
