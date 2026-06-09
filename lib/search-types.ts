@@ -78,17 +78,24 @@ export type SearchDocumentTicketRecord = {
 
 export type SearchDocumentCommitRecord = {
   id: string;
-  ticketNo: number;
+  commitSha: string;
   subject: string;
   author: string;
-  repoPath: string;
-  commitSha: string;
-  committedAt: Date;
+  body?: string | null;
   branches: string[];
+  committedAt: Date;
+  ticketNo: number;
   ticket: {
     project: { id: string; name: string };
     module: { name: string };
   };
+};
+
+export type SearchDocumentPkmAttachmentRecord = {
+  name: string;
+  url: string;
+  mimeType: string;
+  size: number;
 };
 
 export type SearchDocumentPkmNoteRecord = {
@@ -96,6 +103,7 @@ export type SearchDocumentPkmNoteRecord = {
   title: string;
   content: string;
   tags: string[];
+  attachments?: SearchDocumentPkmAttachmentRecord[] | null;
   userId: string;
   projectId: string | null;
   user: { id: string; name: string | null; email: string };

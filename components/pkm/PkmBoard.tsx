@@ -1,7 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ImageLightbox } from "@/components/ImageLightbox";
+import { MarkdownContent } from "@/components/MarkdownContent";
 import { IconPkm, IconPlus, IconTag, IconTrash } from "@/components/icons";
+import {
+  normalizePkmAttachments,
+  PKM_ATTACHMENT_MAX_COUNT,
+  PKM_ATTACHMENT_MAX_SIZE,
+  type PkmAttachment,
+} from "@/lib/pkm";
 
 type ProjectOption = {
   id: string;
@@ -13,6 +21,7 @@ type PkmNote = {
   title: string;
   content: string;
   tags: string[];
+  attachments?: PkmAttachment[] | null;
   projectId: string | null;
   project: ProjectOption | null;
   createdAt: string;
@@ -68,8 +77,32 @@ function parseTags(value: string) {
   );
 }
 
+function summarizeContent(content: string) {
+  return content
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "[图片]")
+    .replace(/\[[^\]]+\]\([^)]*\)/g, "$1")
+    .replace(/[#>*_`~-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function formatBytes(size: number) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isImageFile(file: File) {
+  return file.type.startsWith("image/");
+}
+
 export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProps) {
-  const [notes, setNotes] = useState(initialNotes);
+  const [notes, setNotes] = useState(() =>
+    initialNotes.map((note) => ({
+      ...note,
+      attachments: normalizePkmAttachments(note.attachments),
+    }))
+  );
   const [selectedId, setSelectedId] = useState<string | null>(initialNoteId || initialNotes[0]?.id || null);
   const [showForm, setShowForm] = useState(initialNotes.length === 0);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -77,6 +110,10 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
   const [content, setContent] = useState(EMPTY_FORM.content);
   const [tagsInput, setTagsInput] = useState(EMPTY_FORM.tagsInput);
   const [projectId, setProjectId] = useState(EMPTY_FORM.projectId);
+  const [contentImages, setContentImages] = useState<{ src: string; name: string }[]>([]);
+  const [attachments, setAttachments] = useState<PkmAttachment[]>([]);
+  const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
+  const isLightboxOpenRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [flash, setFlash] = useState<FlashState>(null);
@@ -110,6 +147,8 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
     setContent(EMPTY_FORM.content);
     setTagsInput(EMPTY_FORM.tagsInput);
     setProjectId(EMPTY_FORM.projectId);
+    setContentImages([]);
+    setAttachments([]);
     setEditingId(null);
   }
 
@@ -125,9 +164,76 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
     setContent(note.content);
     setTagsInput(tagsToInput(note.tags));
     setProjectId(note.projectId || "");
+    setContentImages([]);
+    setAttachments(normalizePkmAttachments(note.attachments));
     setShowForm(true);
     setFlash(null);
     setSelectedId(note.id);
+  }
+
+  function openPreview(img: { src: string; name: string }) {
+    isLightboxOpenRef.current = true;
+    setPreviewImage(img);
+  }
+
+  function closePreview() {
+    setPreviewImage(null);
+    setTimeout(() => {
+      isLightboxOpenRef.current = false;
+    }, 0);
+  }
+
+  function insertImage(file: File) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = String(reader.result ?? "");
+      if (!src) return;
+      setContentImages((prev) => [...prev, { src, name: file.name }]);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function removeImage(index: number) {
+    if (isLightboxOpenRef.current) return;
+    setContentImages((prev) => {
+      if (index < 0 || index >= prev.length) return prev;
+      return prev.filter((_, i) => i !== index);
+    });
+  }
+
+  function appendAttachment(file: File) {
+    if (attachments.length >= PKM_ATTACHMENT_MAX_COUNT) {
+      setFlash({ type: "error", message: `最多上传 ${PKM_ATTACHMENT_MAX_COUNT} 个附件` });
+      return;
+    }
+
+    if (file.size > PKM_ATTACHMENT_MAX_SIZE) {
+      setFlash({ type: "error", message: `附件 ${file.name} 超过 ${formatBytes(PKM_ATTACHMENT_MAX_SIZE)} 限制` });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result ?? "");
+      if (!url) return;
+
+      setAttachments((prev) =>
+        normalizePkmAttachments([
+          ...prev,
+          {
+            name: file.name,
+            url,
+            mimeType: file.type || "application/octet-stream",
+            size: file.size,
+          },
+        ])
+      );
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function removeAttachment(index: number) {
+    setAttachments((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -137,15 +243,19 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
     setSaving(true);
     setFlash(null);
 
+    const imageMarkdown = contentImages.map((img) => `![${img.name}](${img.src})`).join("\n");
+    const fullContent = imageMarkdown ? `${imageMarkdown}\n\n${content.trim()}` : content.trim();
+
     try {
       const response = await fetch(editingId ? `/api/pkm/notes/${editingId}` : "/api/pkm/notes", {
         method: editingId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title,
-          content,
+          content: fullContent,
           tags: parseTags(tagsInput),
           projectId: projectId || null,
+          attachments,
         }),
       });
 
@@ -154,13 +264,18 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
         throw new Error(data.error || "保存失败");
       }
 
+      const nextNote = {
+        ...data.note,
+        attachments: normalizePkmAttachments(data.note.attachments),
+      };
+
       setNotes((current) => {
         const next = editingId
-          ? current.map((note) => (note.id === data.note?.id ? data.note : note))
-          : [data.note!, ...current];
+          ? current.map((note) => (note.id === nextNote.id ? nextNote : note))
+          : [nextNote, ...current];
         return next.sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt));
       });
-      setSelectedId(data.note.id);
+      setSelectedId(nextNote.id);
       setShowForm(false);
       resetForm();
       setFlash({ type: "success", message: editingId ? "笔记已更新" : "笔记已创建" });
@@ -202,235 +317,413 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
   }
 
   return (
-    <div className="space-y-5 pm-fade-in">
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-brand-100 bg-brand-50/60 px-4 py-3 text-sm text-ink-600">
-        <div>
-          <p className="font-medium text-ink-800">PKM 已接入个人笔记闭环</p>
-          <p className="mt-1 text-xs text-ink-500">保存后会自动写入搜索索引与 embedding，随后可在 `/knowledge` 搜索到。</p>
-        </div>
-        <button
-          type="button"
-          onClick={openCreateForm}
-          className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"
-        >
-          <IconPlus className="h-4 w-4" />
-          新建笔记
-        </button>
-      </div>
+    <>
+      {previewImage ? (
+        <ImageLightbox
+          image={previewImage}
+          onClose={closePreview}
+          onDownload={() => {
+            const anchor = document.createElement("a");
+            anchor.href = previewImage.src;
+            anchor.download = previewImage.name || "image";
+            anchor.click();
+          }}
+        />
+      ) : null}
 
-      {flash ? <p className={`rounded-lg border px-3 py-2 text-sm ${toneClass(flash.type)}`}>{flash.message}</p> : null}
-
-      <div className="grid gap-5 lg:grid-cols-4">
-        <aside className="space-y-3 lg:col-span-1">
-          <div className="rounded-xl border border-ink-200 bg-white p-4 shadow-soft">
-            <h2 className="mb-3 text-sm font-medium text-ink-500">概览</h2>
-            <ul className="space-y-2 text-sm text-ink-600">
-              <li className="flex items-center justify-between rounded-lg bg-brand-50 px-3 py-2 text-brand-700">
-                <span>全部笔记</span>
-                <span className="text-xs font-medium">{notes.length}</span>
-              </li>
-              <li className="flex items-center justify-between rounded-lg px-3 py-2">
-                <span>关联项目</span>
-                <span className="text-xs text-ink-400">{notes.filter((note) => note.projectId).length}</span>
-              </li>
-              <li className="flex items-center justify-between rounded-lg px-3 py-2">
-                <span>标签数</span>
-                <span className="text-xs text-ink-400">{tagSummary.length}</span>
-              </li>
-            </ul>
+      <div className="space-y-5 pm-fade-in">
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-brand-100 bg-brand-50/60 px-4 py-3 text-sm text-ink-600">
+          <div>
+            <p className="font-medium text-ink-800">PKM 已接入个人笔记闭环</p>
+            <p className="mt-1 text-xs text-ink-500">保存后会自动写入搜索索引与 embedding，随后可在 `/knowledge` 搜索到。</p>
           </div>
+          <button
+            type="button"
+            onClick={openCreateForm}
+            className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"
+          >
+            <IconPlus className="h-4 w-4" />
+            新建笔记
+          </button>
+        </div>
 
-          <div className="rounded-xl border border-ink-200 bg-white p-4 shadow-soft">
-            <h2 className="mb-3 text-sm font-medium text-ink-500">热门标签</h2>
-            <div className="flex flex-wrap gap-2">
-              {tagSummary.length === 0 ? (
-                <span className="text-xs text-ink-400">还没有标签，先写第一条笔记。</span>
-              ) : (
-                tagSummary.map(([tag, count]) => (
-                  <span
-                    key={tag}
-                    className="inline-flex items-center gap-1 rounded-full bg-ink-100 px-2.5 py-1 text-xs text-ink-600"
+        {flash ? <p className={`rounded-lg border px-3 py-2 text-sm ${toneClass(flash.type)}`}>{flash.message}</p> : null}
+
+        <div className="grid gap-5 lg:grid-cols-4">
+          <aside className="space-y-3 lg:col-span-1">
+            <div className="rounded-xl border border-ink-200 bg-white p-4 shadow-soft">
+              <h2 className="mb-3 text-sm font-medium text-ink-500">概览</h2>
+              <ul className="space-y-2 text-sm text-ink-600">
+                <li className="flex items-center justify-between rounded-lg bg-brand-50 px-3 py-2 text-brand-700">
+                  <span>全部笔记</span>
+                  <span className="text-xs font-medium">{notes.length}</span>
+                </li>
+                <li className="flex items-center justify-between rounded-lg px-3 py-2">
+                  <span>关联项目</span>
+                  <span className="text-xs text-ink-400">{notes.filter((note) => note.projectId).length}</span>
+                </li>
+                <li className="flex items-center justify-between rounded-lg px-3 py-2">
+                  <span>标签数</span>
+                  <span className="text-xs text-ink-400">{tagSummary.length}</span>
+                </li>
+              </ul>
+            </div>
+
+            <div className="rounded-xl border border-ink-200 bg-white p-4 shadow-soft">
+              <h2 className="mb-3 text-sm font-medium text-ink-500">热门标签</h2>
+              <div className="flex flex-wrap gap-2">
+                {tagSummary.length === 0 ? (
+                  <span className="text-xs text-ink-400">还没有标签，先写第一条笔记。</span>
+                ) : (
+                  tagSummary.map(([tag, count]) => (
+                    <span
+                      key={tag}
+                      className="inline-flex items-center gap-1 rounded-full bg-ink-100 px-2.5 py-1 text-xs text-ink-600"
+                    >
+                      <IconTag className="h-3 w-3 text-ink-400" />
+                      {tag}
+                      <span className="text-ink-400">{count}</span>
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+          </aside>
+
+          <div className="space-y-4 lg:col-span-3">
+            {showForm ? (
+              <form onSubmit={handleSubmit} className="grid gap-4 rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-medium text-ink-900">{editingId ? "编辑笔记" : "新建笔记"}</h2>
+                    <p className="mt-1 text-xs text-ink-400">标题、正文、标签、项目和附件名都会进入搜索索引。</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowForm(false);
+                      resetForm();
+                    }}
+                    className="rounded-lg border border-ink-200 px-3 py-2 text-sm text-ink-600 hover:bg-ink-100"
                   >
-                    <IconTag className="h-3 w-3 text-ink-400" />
-                    {tag}
-                    <span className="text-ink-400">{count}</span>
-                  </span>
-                ))
+                    取消
+                  </button>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="flex flex-col gap-2 md:col-span-2">
+                    <span className="text-sm font-medium text-ink-700">标题</span>
+                    <input
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder="例如：Prisma + pgvector 踩坑记录"
+                      className="rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                    />
+                  </label>
+
+                  <label className="flex flex-col gap-2">
+                    <span className="text-sm font-medium text-ink-700">关联项目</span>
+                    <select
+                      value={projectId}
+                      onChange={(e) => setProjectId(e.target.value)}
+                      className="rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                    >
+                      <option value="">不关联项目</option>
+                      {projects.map((project) => (
+                        <option key={project.id} value={project.id}>
+                          {project.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="flex flex-col gap-2">
+                    <span className="text-sm font-medium text-ink-700">标签</span>
+                    <input
+                      value={tagsInput}
+                      onChange={(e) => setTagsInput(e.target.value)}
+                      placeholder="例如：RAG, Prisma, 搜索"
+                      className="rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                    />
+                  </label>
+
+                  <label className="flex flex-col gap-2 md:col-span-2">
+                    <span className="text-sm font-medium text-ink-700">正文（Markdown）</span>
+                    <div className="rounded-lg border border-ink-200 bg-white">
+                      {contentImages.length > 0 ? (
+                        <div
+                          className="flex flex-wrap gap-2 border-b border-ink-200 p-3"
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.nativeEvent.stopImmediatePropagation()}
+                        >
+                          {contentImages.map((img, index) => (
+                            <div
+                              key={`${img.name}-${index}`}
+                              className="group relative"
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.nativeEvent.stopImmediatePropagation()}
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={img.src}
+                                alt={img.name}
+                                className="max-h-28 cursor-pointer rounded-lg border border-ink-200 object-contain hover:ring-2 hover:ring-brand-400"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openPreview(img);
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onMouseDown={(e) => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                  removeImage(index);
+                                }}
+                                className="absolute -right-2 -top-2 hidden h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white transition-opacity hover:!bg-danger group-hover:flex"
+                              >
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  width="12"
+                                  height="12"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.5"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <line x1="18" y1="6" x2="6" y2="18" />
+                                  <line x1="6" y1="6" x2="18" y2="18" />
+                                </svg>
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                      <textarea
+                        value={content}
+                        onChange={(e) => setContent(e.target.value)}
+                        onPaste={(e) => {
+                          const items = e.clipboardData.items;
+                          for (const item of items) {
+                            if (item.type.startsWith("image/")) {
+                              e.preventDefault();
+                              const file = item.getAsFile();
+                              if (file) insertImage(file);
+                              return;
+                            }
+                          }
+                        }}
+                        rows={10}
+                        placeholder="记录你的方案、踩坑、结论和上下文。支持 Markdown，也支持直接粘贴截图。"
+                        className="w-full px-3 py-2 font-mono text-sm leading-6 outline-none placeholder:text-ink-400"
+                        style={{ minHeight: "180px", resize: "vertical" }}
+                      />
+                    </div>
+                  </label>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <label className="w-fit cursor-pointer rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm hover:bg-ink-100">
+                    插入图片
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) insertImage(file);
+                        e.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+
+                  <label className="w-fit cursor-pointer rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm hover:bg-ink-100">
+                    上传附件
+                    <input
+                      type="file"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          if (isImageFile(file)) {
+                            insertImage(file);
+                          } else {
+                            appendAttachment(file);
+                          }
+                        }
+                        e.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+
+                {attachments.length > 0 ? (
+                  <div className="rounded-lg border border-ink-200 bg-ink-50/70 p-3">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium text-ink-700">附件</p>
+                      <p className="text-xs text-ink-400">最多 {PKM_ATTACHMENT_MAX_COUNT} 个，单个不超过 {formatBytes(PKM_ATTACHMENT_MAX_SIZE)}</p>
+                    </div>
+                    <div className="space-y-2">
+                      {attachments.map((attachment, index) => (
+                        <div
+                          key={`${attachment.name}-${index}`}
+                          className="flex items-center justify-between gap-3 rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-ink-700">{attachment.name}</p>
+                            <p className="text-xs text-ink-400">{attachment.mimeType} · {formatBytes(attachment.size)}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeAttachment(index)}
+                            className="rounded-lg border border-ink-200 px-2 py-1 text-xs text-danger hover:bg-rose-50"
+                          >
+                            删除
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="rounded-lg border border-dashed border-ink-200 bg-ink-50/60 p-4">
+                  <p className="text-xs font-medium text-ink-500">Markdown 预览</p>
+                  <div className="mt-3 min-h-16 text-sm text-ink-600">
+                    {content.trim() ? <MarkdownContent content={content} /> : <p className="text-sm text-ink-400">输入正文后会在这里预览。</p>}
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={saving || !title.trim() || !content.trim()}
+                    className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {saving ? "保存中…" : editingId ? "保存修改" : "创建笔记"}
+                  </button>
+                </div>
+              </form>
+            ) : null}
+
+            <div className="space-y-3">
+              {notes.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-ink-200 bg-white px-6 py-12 text-center shadow-soft">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-ink-100 text-ink-400">
+                    <IconPkm className="h-5 w-5" />
+                  </div>
+                  <p className="mt-4 text-sm font-medium text-ink-700">还没有个人笔记</p>
+                  <p className="mt-1 text-sm text-ink-400">从第一条笔记开始，让团队知识进入搜索系统。</p>
+                </div>
+              ) : (
+                notes.map((note) => {
+                  const active = note.id === selectedId;
+                  const noteAttachments = normalizePkmAttachments(note.attachments);
+                  return (
+                    <article
+                      key={note.id}
+                      className={`rounded-xl border bg-white p-5 shadow-soft transition ${
+                        active ? "border-brand-300 shadow-base" : "border-ink-200 hover:border-brand-200"
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedId(note.id)}
+                          className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                        >
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+                            <IconPkm className="h-5 w-5" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-3">
+                              <h3 className="truncate font-medium text-ink-900">{note.title}</h3>
+                              <span className="shrink-0 text-xs text-ink-400">{formatDate(note.updatedAt)}</span>
+                            </div>
+                            <p className="mt-1.5 line-clamp-2 text-sm text-ink-500">{summarizeContent(note.content) || "暂无正文"}</p>
+                            <p className="mt-2 text-xs text-ink-400">
+                              {note.project?.name || "未关联项目"}
+                              {note.tags.length > 0 ? ` · ${note.tags.join(" · ")}` : ""}
+                              {noteAttachments.length > 0 ? ` · 附件 ${noteAttachments.length}` : ""}
+                            </p>
+                          </div>
+                        </button>
+                        <div className="flex shrink-0 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openEditForm(note)}
+                            className="rounded-lg border border-ink-200 px-3 py-2 text-sm text-ink-600 hover:bg-ink-100"
+                          >
+                            编辑
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(note)}
+                            disabled={deletingId === note.id}
+                            className="inline-flex items-center gap-1 rounded-lg border border-ink-200 px-3 py-2 text-sm text-danger hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <IconTrash className="h-4 w-4" />
+                            {deletingId === note.id ? "删除中…" : "删除"}
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })
               )}
             </div>
-          </div>
-        </aside>
 
-        <div className="space-y-4 lg:col-span-3">
-          {showForm ? (
-            <form onSubmit={handleSubmit} className="grid gap-4 rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-medium text-ink-900">{editingId ? "编辑笔记" : "新建笔记"}</h2>
-                  <p className="mt-1 text-xs text-ink-400">标题、正文、标签和项目都会进入搜索索引。</p>
+            {selectedNote ? (
+              <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-medium text-ink-900">当前查看</h2>
+                    <p className="mt-1 text-xs text-ink-400">{selectedNote.project?.name || "未关联项目"}</p>
+                  </div>
+                  <span className="text-xs text-ink-400">更新于 {formatDate(selectedNote.updatedAt)}</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowForm(false);
-                    resetForm();
-                  }}
-                  className="rounded-lg border border-ink-200 px-3 py-2 text-sm text-ink-600 hover:bg-ink-100"
-                >
-                  取消
-                </button>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="flex flex-col gap-2 md:col-span-2">
-                  <span className="text-sm font-medium text-ink-700">标题</span>
-                  <input
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="例如：Prisma + pgvector 踩坑记录"
-                    className="rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
-                  />
-                </label>
-
-                <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-ink-700">关联项目</span>
-                  <select
-                    value={projectId}
-                    onChange={(e) => setProjectId(e.target.value)}
-                    className="rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
-                  >
-                    <option value="">不关联项目</option>
-                    {projects.map((project) => (
-                      <option key={project.id} value={project.id}>
-                        {project.name}
-                      </option>
+                <h3 className="mt-4 text-lg font-semibold text-ink-900">{selectedNote.title}</h3>
+                {selectedNote.tags.length > 0 ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {selectedNote.tags.map((tag) => (
+                      <span key={tag} className="rounded-full bg-ink-100 px-2.5 py-1 text-xs text-ink-600">
+                        {tag}
+                      </span>
                     ))}
-                  </select>
-                </label>
-
-                <label className="flex flex-col gap-2">
-                  <span className="text-sm font-medium text-ink-700">标签</span>
-                  <input
-                    value={tagsInput}
-                    onChange={(e) => setTagsInput(e.target.value)}
-                    placeholder="例如：RAG, Prisma, 搜索"
-                    className="rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
-                  />
-                </label>
-
-                <label className="flex flex-col gap-2 md:col-span-2">
-                  <span className="text-sm font-medium text-ink-700">正文</span>
-                  <textarea
-                    value={content}
-                    onChange={(e) => setContent(e.target.value)}
-                    rows={8}
-                    placeholder="记录你的方案、踩坑、结论和上下文。"
-                    className="rounded-lg border border-ink-200 px-3 py-2 text-sm leading-6 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
-                  />
-                </label>
-              </div>
-
-              <div className="flex justify-end">
-                <button
-                  type="submit"
-                  disabled={saving || !title.trim() || !content.trim()}
-                  className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {saving ? "保存中…" : editingId ? "保存修改" : "创建笔记"}
-                </button>
-              </div>
-            </form>
-          ) : null}
-
-          <div className="space-y-3">
-            {notes.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-ink-200 bg-white px-6 py-12 text-center shadow-soft">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-ink-100 text-ink-400">
-                  <IconPkm className="h-5 w-5" />
+                  </div>
+                ) : null}
+                <div className="mt-4">
+                  <MarkdownContent content={selectedNote.content} />
                 </div>
-                <p className="mt-4 text-sm font-medium text-ink-700">还没有个人笔记</p>
-                <p className="mt-1 text-sm text-ink-400">从第一条笔记开始，让团队知识进入搜索系统。</p>
-              </div>
-            ) : (
-              notes.map((note) => {
-                const active = note.id === selectedId;
-                return (
-                  <article
-                    key={note.id}
-                    className={`rounded-xl border bg-white p-5 shadow-soft transition ${
-                      active ? "border-brand-300 shadow-base" : "border-ink-200 hover:border-brand-200"
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedId(note.id)}
-                        className="flex min-w-0 flex-1 items-start gap-3 text-left"
-                      >
-                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-                          <IconPkm className="h-5 w-5" />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between gap-3">
-                            <h3 className="truncate font-medium text-ink-900">{note.title}</h3>
-                            <span className="shrink-0 text-xs text-ink-400">{formatDate(note.updatedAt)}</span>
+                {normalizePkmAttachments(selectedNote.attachments).length > 0 ? (
+                  <div className="mt-5 border-t border-ink-100 pt-4">
+                    <h4 className="text-sm font-medium text-ink-800">附件</h4>
+                    <div className="mt-3 space-y-2">
+                      {normalizePkmAttachments(selectedNote.attachments).map((attachment, index) => (
+                        <a
+                          key={`${attachment.name}-${index}`}
+                          href={attachment.url}
+                          download={attachment.name}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center justify-between gap-3 rounded-lg border border-ink-200 px-3 py-2 text-sm hover:border-brand-200 hover:bg-brand-50/40"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-ink-700">{attachment.name}</p>
+                            <p className="text-xs text-ink-400">{attachment.mimeType} · {formatBytes(attachment.size)}</p>
                           </div>
-                          <p className="mt-1.5 line-clamp-2 text-sm text-ink-500">{note.content}</p>
-                          <p className="mt-2 text-xs text-ink-400">
-                            {note.project?.name || "未关联项目"}
-                            {note.tags.length > 0 ? ` · ${note.tags.join(" · ")}` : ""}
-                          </p>
-                        </div>
-                      </button>
-                      <div className="flex shrink-0 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => openEditForm(note)}
-                          className="rounded-lg border border-ink-200 px-3 py-2 text-sm text-ink-600 hover:bg-ink-100"
-                        >
-                          编辑
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(note)}
-                          disabled={deletingId === note.id}
-                          className="inline-flex items-center gap-1 rounded-lg border border-ink-200 px-3 py-2 text-sm text-danger hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          <IconTrash className="h-4 w-4" />
-                          {deletingId === note.id ? "删除中…" : "删除"}
-                        </button>
-                      </div>
+                          <span className="shrink-0 text-xs text-brand-600">下载</span>
+                        </a>
+                      ))}
                     </div>
-                  </article>
-                );
-              })
-            )}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
           </div>
-
-          {selectedNote ? (
-            <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-medium text-ink-900">当前查看</h2>
-                  <p className="mt-1 text-xs text-ink-400">{selectedNote.project?.name || "未关联项目"}</p>
-                </div>
-                <span className="text-xs text-ink-400">更新于 {formatDate(selectedNote.updatedAt)}</span>
-              </div>
-              <h3 className="mt-4 text-lg font-semibold text-ink-900">{selectedNote.title}</h3>
-              {selectedNote.tags.length > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {selectedNote.tags.map((tag) => (
-                    <span key={tag} className="rounded-full bg-ink-100 px-2.5 py-1 text-xs text-ink-600">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-              <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-ink-600">{selectedNote.content}</p>
-            </section>
-          ) : null}
         </div>
       </div>
-    </div>
+    </>
   );
 }

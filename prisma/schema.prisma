@@ -175,16 +175,17 @@ model SearchDocument {
 }
 
 model PkmNote {
-  id        String   @id @default(cuid())
-  userId    String
-  projectId String?
-  title     String
-  content   String
-  tags      String[] @default([])
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  id          String   @id @default(cuid())
+  userId      String
+  projectId   String?
+  title       String
+  content     String
+  tags        String[] @default([])
+  attachments Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@index([userId, updatedAt(sort: Desc)])
   @@index([projectId, updatedAt(sort: Desc)])

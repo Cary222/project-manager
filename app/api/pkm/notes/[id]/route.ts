@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/permissions";
+import { normalizePkmAttachments } from "@/lib/pkm";
 import { syncPkmNoteSearchDocument } from "@/lib/search";
 
 type Params = { params: Promise<{ id: string }> };
@@ -41,12 +42,14 @@ export async function PATCH(request: Request, { params }: Params) {
       content?: string;
       tags?: unknown;
       projectId?: string | null;
+      attachments?: unknown;
     };
 
     const title = body.title?.trim();
     const content = body.content?.trim();
     const projectId = body.projectId?.trim() || null;
     const tags = normalizeTags(body.tags);
+    const attachments = normalizePkmAttachments(body.attachments);
 
     if (!title) {
       return NextResponse.json({ error: "title is required" }, { status: 400 });
@@ -70,6 +73,7 @@ export async function PATCH(request: Request, { params }: Params) {
         content,
         tags,
         projectId,
+        attachments,
       },
       include: {
         project: {

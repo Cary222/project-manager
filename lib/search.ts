@@ -1,4 +1,5 @@
-import { Prisma, SearchDocumentSourceType as PrismaSearchDocumentSourceType } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { SearchDocumentSourceType as PrismaSearchDocumentSourceType } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
   buildEmbeddingHash,
@@ -17,6 +18,7 @@ import type {
   SearchableRecord,
 } from "@/lib/search-types";
 import { SEARCH_DOCUMENT_SOURCE_TYPES } from "@/lib/search-types";
+import { normalizePkmAttachments } from "@/lib/pkm";
 
 const SEARCH_LIMIT_DEFAULT = 8;
 const SEARCH_LIMIT_MAX = 20;
@@ -25,7 +27,7 @@ const KEYWORD_CANDIDATE_MULTIPLIER = 4;
 
 type SearchDocumentRow = {
   id: string;
-  sourceType: PrismaSearchDocumentSourceType;
+  sourceType: string;
   sourceId: string;
   projectId: string | null;
   title: string;
@@ -46,7 +48,7 @@ type SearchDocumentEmbeddingStateRow = {
 
 type VectorSearchRow = {
   id: string;
-  sourceType: PrismaSearchDocumentSourceType;
+  sourceType: string;
   sourceId: string;
   projectId: string | null;
   title: string;
@@ -219,9 +221,9 @@ export function buildSearchableTicketDocument(ticket: SearchDocumentTicketRecord
     `项目 ${ticket.project.name}`,
     `模块 ${ticket.module.name}`,
     `职能 ${ticket.module.responsibility.kind}`,
-    `状态 ${ticket.status}`,
     assigneeNames ? `指派 ${assigneeNames}` : null,
-    `创建人 ${ticket.creator.name || ticket.creator.email}`,
+    `创建者 ${ticket.creator.name || ticket.creator.email}`,
+    `状态 ${ticket.status}`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -251,8 +253,7 @@ export function buildSearchableCommitDocument(commit: SearchDocumentCommitRecord
     `作者 ${commit.author}`,
     `项目 ${commit.ticket.project.name}`,
     `模块 ${commit.ticket.module.name}`,
-    `关联单子 #${commit.ticketNo}`,
-    `仓库 ${commit.repoPath}`,
+    commit.body ? `内容 ${commit.body}` : null,
     commit.branches.length > 0 ? `分支 ${commit.branches.join("、")}` : null,
   ]
     .filter(Boolean)
@@ -270,7 +271,6 @@ export function buildSearchableCommitDocument(commit: SearchDocumentCommitRecord
       projectId: commit.ticket.project.id,
       projectName: commit.ticket.project.name,
       moduleName: commit.ticket.module.name,
-      repoPath: commit.repoPath,
       commitSha: commit.commitSha,
       author: commit.author,
       committedAt: commit.committedAt.toISOString(),
@@ -282,11 +282,13 @@ export function buildSearchableCommitDocument(commit: SearchDocumentCommitRecord
 export function buildSearchablePkmNoteDocument(note: SearchDocumentPkmNoteRecord): SearchableRecord {
   const authorName = note.user.name || note.user.email;
   const title = note.title.trim();
+  const attachments = normalizePkmAttachments(note.attachments);
   const content = [
     `标题 ${title}`,
     `作者 ${authorName}`,
     note.project ? `项目 ${note.project.name}` : null,
     note.tags.length > 0 ? `标签 ${note.tags.join("、")}` : null,
+    attachments.length > 0 ? `附件 ${attachments.map((item) => item.name).join("、")}` : null,
     `正文 ${note.content}`,
   ]
     .filter(Boolean)
@@ -357,11 +359,7 @@ export async function upsertSearchDocument(record: SearchableRecord) {
       await ensureSearchDocumentEmbedding(state);
     }
   } catch (error) {
-    console.error("[search] failed to update embedding", {
-      sourceType: record.sourceType,
-      sourceId: record.sourceId,
-      error,
-    });
+    console.error("ensureSearchDocumentEmbedding failed", error);
   }
 
   return document;
@@ -383,7 +381,7 @@ export async function syncTicketSearchDocument(ticketId: string) {
   if (!ticket) {
     await prisma.searchDocument.deleteMany({
       where: {
-        sourceType: SEARCH_DOCUMENT_SOURCE_TYPES.TICKET,
+        sourceType: buildSearchDocumentSourceType(SEARCH_DOCUMENT_SOURCE_TYPES.TICKET),
         sourceId: ticketId,
       },
     });
@@ -409,7 +407,7 @@ export async function syncCommitSearchDocument(commitId: string) {
   if (!commit) {
     await prisma.searchDocument.deleteMany({
       where: {
-        sourceType: SEARCH_DOCUMENT_SOURCE_TYPES.COMMIT,
+        sourceType: buildSearchDocumentSourceType(SEARCH_DOCUMENT_SOURCE_TYPES.COMMIT),
         sourceId: commitId,
       },
     });
@@ -438,7 +436,10 @@ export async function syncPkmNoteSearchDocument(noteId: string) {
     return null;
   }
 
-  return upsertSearchDocument(buildSearchablePkmNoteDocument(note));
+  return upsertSearchDocument(buildSearchablePkmNoteDocument({
+    ...note,
+    attachments: normalizePkmAttachments(note.attachments),
+  }));
 }
 
 export async function backfillSearchDocuments() {
@@ -471,31 +472,21 @@ export async function backfillSearchDocuments() {
     },
   });
 
-  let count = 0;
-  for (const ticket of tickets) {
-    await upsertSearchDocument(buildSearchableTicketDocument(ticket));
-    count += 1;
-  }
-
-  for (const commit of commits) {
-    await upsertSearchDocument(buildSearchableCommitDocument(commit));
-    count += 1;
-  }
-
-  for (const note of notes) {
-    await upsertSearchDocument(buildSearchablePkmNoteDocument(note));
-    count += 1;
-  }
-
-  return {
-    tickets: tickets.length,
-    commits: commits.length,
-    notes: notes.length,
-    total: count,
-  };
+  await Promise.all([
+    ...tickets.map((ticket) => upsertSearchDocument(buildSearchableTicketDocument(ticket))),
+    ...commits.map((commit) => upsertSearchDocument(buildSearchableCommitDocument(commit))),
+    ...notes.map((note) =>
+      upsertSearchDocument(
+        buildSearchablePkmNoteDocument({
+          ...note,
+          attachments: normalizePkmAttachments(note.attachments),
+        })
+      )
+    ),
+  ]);
 }
 
-async function searchDocumentsByKeyword(options: {
+async function searchKeywordCandidates(options: {
   query: string;
   projectId?: string | null;
   limit: number;
@@ -511,27 +502,21 @@ async function searchDocumentsByKeyword(options: {
     include: {
       project: { select: { id: true, name: true } },
     },
-    take: options.limit * KEYWORD_CANDIDATE_MULTIPLIER,
     orderBy: { updatedAt: "desc" },
+    take: options.limit,
   });
 
-  return documents satisfies SearchDocumentRow[];
+  return documents as SearchDocumentRow[];
 }
 
-async function searchDocumentsByVector(options: {
+async function searchVectorCandidates(options: {
   query: string;
   projectId?: string | null;
   limit: number;
 }) {
-  const queryVector = await fetchEmbedding(options.query);
-  const vectorLiteral = vectorToSqlLiteral(queryVector);
-  const limit = options.limit * VECTOR_CANDIDATE_MULTIPLIER;
-  const projectIdCondition = options.projectId
-    ? Prisma.sql`AND d."projectId" = ${options.projectId}`
-    : Prisma.empty;
-  const queryVectorSql = Prisma.raw(`'${vectorLiteral}'::public.vector`);
-
-  return prisma.$queryRaw<VectorSearchRow[]>(Prisma.sql`
+  const vector = await fetchEmbedding(options.query);
+  const literal = vectorToSqlLiteral(vector);
+  const rows = await prisma.$queryRaw<VectorSearchRow[]>(Prisma.sql`
     SELECT
       d."id",
       d."sourceType",
@@ -543,18 +528,19 @@ async function searchDocumentsByVector(options: {
       d."metadata",
       d."updatedAt",
       p."name" AS "projectName",
-      (d."embedding" <=> ${queryVectorSql}) AS "distance"
+      (d."embedding" <=> ${literal}::public.vector) AS distance
     FROM pm."SearchDocument" d
     LEFT JOIN pm."Project" p ON p."id" = d."projectId"
     WHERE d."embedding" IS NOT NULL
-      ${projectIdCondition}
-    ORDER BY d."embedding" <=> ${queryVectorSql} ASC
-    LIMIT ${limit}
+      AND (${options.projectId ?? null}::text IS NULL OR d."projectId" = ${options.projectId ?? null})
+    ORDER BY d."embedding" <=> ${literal}::public.vector ASC, d."updatedAt" DESC
+    LIMIT ${options.limit}
   `);
+
+  return rows;
 }
 
 function normalizeSemanticScore(distance: number) {
-  if (!Number.isFinite(distance)) return 0;
   return Math.max(0, Math.min(1, 1 - distance));
 }
 
@@ -589,10 +575,9 @@ function toRankedCandidate(args: {
   } satisfies RankedCandidate;
 }
 
-function mergeSearchResults(options: {
+function mergeCandidates(options: {
   query: string;
   terms: string[];
-  limit: number;
   keywordDocuments: SearchDocumentRow[];
   vectorDocuments: VectorSearchRow[];
 }) {
@@ -609,12 +594,10 @@ function mergeSearchResults(options: {
       query: options.query,
       terms: options.terms,
       keywordScore,
-      semanticScore: 0,
     });
 
-    if (candidate) {
-      merged.set(candidate.id, candidate);
-    }
+    if (!candidate) continue;
+    merged.set(candidate.id, candidate);
   }
 
   for (const document of options.vectorDocuments) {
@@ -640,43 +623,77 @@ function mergeSearchResults(options: {
     });
 
     if (!candidate) continue;
-
     const existing = merged.get(candidate.id);
-    if (!existing) {
+    if (!existing || candidate.score > existing.score) {
       merged.set(candidate.id, candidate);
-      continue;
     }
-
-    merged.set(candidate.id, {
-      ...existing,
-      snippet: existing.snippet || candidate.snippet,
-      score: Math.max(existing.score, 0) + semanticScore * 10,
-      keywordScore: Math.max(existing.keywordScore, keywordScore),
-      semanticScore: Math.max(existing.semanticScore, semanticScore),
-      updatedAt: Math.max(existing.updatedAt, candidate.updatedAt),
-    });
   }
 
-  return Array.from(merged.values())
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      if (b.updatedAt !== a.updatedAt) return b.updatedAt - a.updatedAt;
-      return a.type.localeCompare(b.type);
-    })
-    .slice(0, options.limit)
-    .map((item) => ({
-      id: item.id,
-      type: item.type,
-      title: item.title,
-      snippet: item.snippet,
-      project: item.project,
-      url: item.url,
-      score: item.score,
-      metadata: item.metadata,
-    }));
+  return Array.from(merged.values()).sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return b.updatedAt - a.updatedAt;
+  });
 }
 
-export async function backfillMissingSearchEmbeddings(batchSize = 20) {
+export async function searchDocuments(options: {
+  query: string;
+  projectId?: string | null;
+  limit?: number;
+  mode?: SearchResponseMode;
+}): Promise<SearchResponse> {
+  const startedAt = Date.now();
+  const query = normalizeQuery(options.query);
+  const mode = options.mode ?? "search";
+  const limit = Math.min(Math.max(options.limit ?? SEARCH_LIMIT_DEFAULT, 1), SEARCH_LIMIT_MAX);
+  const terms = splitTerms(query);
+
+  if (!query) {
+    return {
+      mode,
+      query,
+      tookMs: 0,
+      total: 0,
+      results: [],
+      grouped: { ticket: [], commit: [], note: [] },
+    };
+  }
+
+  const keywordLimit = Math.min(SEARCH_LIMIT_MAX * KEYWORD_CANDIDATE_MULTIPLIER, limit * KEYWORD_CANDIDATE_MULTIPLIER);
+  const vectorLimit = Math.min(SEARCH_LIMIT_MAX * VECTOR_CANDIDATE_MULTIPLIER, limit * VECTOR_CANDIDATE_MULTIPLIER);
+
+  const [keywordDocuments, vectorDocuments] = await Promise.all([
+    searchKeywordCandidates({ query, projectId: options.projectId, limit: keywordLimit }),
+    searchVectorCandidates({ query, projectId: options.projectId, limit: vectorLimit }).catch(() => []),
+  ]);
+
+  const ranked = mergeCandidates({
+    query,
+    terms,
+    keywordDocuments,
+    vectorDocuments,
+  }).slice(0, limit);
+
+  const grouped: Record<SearchResultType, SearchResultItem[]> = {
+    ticket: [],
+    commit: [],
+    note: [],
+  };
+
+  for (const item of ranked) {
+    grouped[item.type].push(item);
+  }
+
+  return {
+    mode,
+    query,
+    tookMs: Date.now() - startedAt,
+    total: ranked.length,
+    results: ranked,
+    grouped,
+  };
+}
+
+export async function refreshSearchDocumentEmbeddings(limit = 100) {
   const documents = await prisma.$queryRaw<SearchDocumentEmbeddingStateRow[]>(Prisma.sql`
     SELECT
       d."id",
@@ -686,94 +703,15 @@ export async function backfillMissingSearchEmbeddings(batchSize = 20) {
       (d."embedding" IS NOT NULL) AS "hasEmbedding"
     FROM pm."SearchDocument" d
     ORDER BY d."updatedAt" DESC
-    LIMIT ${batchSize}
+    LIMIT ${limit}
   `);
 
-  let processed = 0;
-  let updated = 0;
-  let reused = 0;
-  let failed = 0;
-
+  const results = [] as Array<{ id: string; reused: boolean; embeddingHash: string }>;
   for (const document of documents) {
-    processed += 1;
-    try {
-      const result = await ensureSearchDocumentEmbedding(document);
-      if (result.reused) {
-        reused += 1;
-      } else {
-        updated += 1;
-      }
-    } catch (error) {
-      failed += 1;
-      console.error("[search] failed to backfill embedding", {
-        id: document.id,
-        error,
-      });
-    }
+    const result = await ensureSearchDocumentEmbedding(document);
+    results.push({ id: document.id, ...result });
   }
-
-  return { processed, updated, reused, failed };
+  return results;
 }
 
-export async function searchDocuments(options: {
-  query: string;
-  mode?: SearchResponseMode;
-  limit?: number;
-  projectId?: string | null;
-}): Promise<SearchResponse> {
-  const startedAt = Date.now();
-  const mode = options.mode ?? "search";
-  const query = normalizeQuery(options.query);
-  const limit = Math.min(Math.max(options.limit ?? SEARCH_LIMIT_DEFAULT, 1), SEARCH_LIMIT_MAX);
-  const grouped: Record<SearchResultType, SearchResultItem[]> = { ticket: [], commit: [], note: [] };
-
-  if (!query) {
-    return {
-      mode,
-      query,
-      tookMs: Date.now() - startedAt,
-      total: 0,
-      results: [],
-      grouped,
-    };
-  }
-
-  const terms = splitTerms(query);
-  const keywordDocuments = await searchDocumentsByKeyword({
-    query,
-    projectId: options.projectId,
-    limit,
-  });
-
-  let vectorDocuments: VectorSearchRow[] = [];
-  try {
-    vectorDocuments = await searchDocumentsByVector({
-      query,
-      projectId: options.projectId,
-      limit,
-    });
-  } catch (error) {
-    console.error("[search] vector search unavailable, fallback to keyword only", error);
-  }
-
-  const results = mergeSearchResults({
-    query,
-    terms,
-    limit,
-    keywordDocuments,
-    vectorDocuments,
-  });
-
-  for (const result of results) {
-    grouped[result.type].push(result);
-  }
-
-  return {
-    mode,
-    query,
-    tookMs: Date.now() - startedAt,
-    total: results.length,
-    results,
-    grouped,
-  };
-}
+export const backfillMissingSearchEmbeddings = refreshSearchDocumentEmbeddings;
