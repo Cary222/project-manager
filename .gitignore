@@ -42,3 +42,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .venv
+
+# embedding
+embedding/__pycache__/
+embedding/api.log
