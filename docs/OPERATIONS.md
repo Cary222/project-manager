@@ -88,3 +88,45 @@ git clone hxy@192.168.1.14:/home/hxy/work/personal/project-manager.git
 - 共用 `community` 库，schema 隔离为 `pm`
 - 删除用户前需迁移其创建的 Ticket 和历史记录（`creatorId` / `changedById` 有 Restrict 约束）
 - 改用户权限：`UPDATE pm."User" SET role = 'ROOT' WHERE email = '...'`
+
+## Embedding 服务（端口 5000）
+
+独立于主应用的向量化服务，使用 FastAPI + BGE-M3 模型。
+
+### 安装依赖
+
+```bash
+cd /home/hxy/work/personal/project-manager/embedding
+pip install -r requirements.txt
+```
+
+### 启动
+
+```bash
+cd /home/hxy/work/personal/project-manager/embedding
+nohup python3 -m uvicorn api:app --host 0.0.0.0 --port 5000 --reload-dir /home/hxy/work/personal/project-manager/embedding > /tmp/embedding.log 2>&1 &
+```
+
+冷启动约 10-30 秒（加载模型）。
+
+### 重启
+
+```bash
+ps aux | grep "uvorn.*5000"   # 找到 PID
+kill <PID>
+# 再执行上面的启动命令
+```
+
+### 验证
+
+```bash
+curl http://localhost:5000/
+curl -X POST http://localhost:5000/embed -H "Content-Type: application/json" -d '{"text": "hello"}'
+```
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DATABASE_URL` | `postgresql://community:community@localhost:5432/community` | 向量存储连接 |
+| `EMBEDDING_API_URL` | `http://localhost:5000` | 客户端调用的远端 API 地址 |

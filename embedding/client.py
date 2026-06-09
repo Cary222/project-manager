@@ -78,7 +78,7 @@ def search(
 
     print(f"[Embedding] 本地无「{query_text}」，调用远端 API: {remote_url}/embed")
     try:
-        resp = requests.post(f"{remote_url}/embed", data={"text": query_text}, timeout=30)
+        resp = requests.post(f"{remote_url}/embed", json={"text": query_text}, timeout=30)
         resp.raise_for_status()
         query_emb = resp.json()["embedding"]
     except Exception as e:
@@ -112,7 +112,7 @@ def store_embedding(text: str, source_type: str, source_id: str, remote_url: Opt
         emb = model.encode(text).tolist()
         source = "local"
     except Exception:
-        resp = requests.post(f"{remote_url}/embed", data={"text": text}, timeout=30)
+        resp = requests.post(f"{remote_url}/embed", json={"text": text}, timeout=30)
         resp.raise_for_status()
         emb = resp.json()["embedding"]
         source = "remote"

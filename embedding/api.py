@@ -1,6 +1,7 @@
 """Embedding API 服务 — FastAPI + BGE-M3，监听 0.0.0.0:5000"""
-from fastapi import FastAPI, Form
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 
 app = FastAPI(title="Embedding API")
@@ -26,15 +27,23 @@ async def dimension():
     return {"dimension": DIM}
 
 
+class EmbedRequest(BaseModel):
+    text: str
+
+
+class BatchEmbedRequest(BaseModel):
+    texts: list[str]
+
+
 @app.post("/embed")
-async def embed(text: str = Form(...)):
+async def embed(body: EmbedRequest):
     """接收单个文本，返回 1024 维向量（JSON 数组）"""
-    emb = model.encode(text).tolist()
+    emb = model.encode(body.text).tolist()
     return JSONResponse({"embedding": emb})
 
 
 @app.post("/embed_batch")
-async def embed_batch(texts: list[str] = Form(...)):
+async def embed_batch(body: BatchEmbedRequest):
     """批量编码，避免频繁调用开销"""
-    embs = model.encode(texts).tolist()
+    embs = model.encode(body.texts).tolist()
     return JSONResponse({"embeddings": embs})

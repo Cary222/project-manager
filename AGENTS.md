@@ -14,6 +14,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 |------|------|
 | 架构 / API / 权限 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | 部署 / 重启 / 环境变量 | [docs/OPERATIONS.md](docs/OPERATIONS.md) |
+| Embedding / RAG 向量化 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) / [docs/OPERATIONS.md](docs/OPERATIONS.md) |
 | 开发 skill | [.cursor/skills/pm-dev/SKILL.md](.cursor/skills/pm-dev/SKILL.md) |
 | 运维 skill | [.cursor/skills/pm-ops/SKILL.md](.cursor/skills/pm-ops/SKILL.md) |
 
