@@ -13,7 +13,7 @@ const EMPTY_RESULTS: SearchResponse = {
   tookMs: 0,
   total: 0,
   results: [],
-  grouped: { ticket: [], commit: [] },
+  grouped: { ticket: [], commit: [], note: [] },
 };
 
 type KnowledgeSearchPanelProps = {
@@ -78,9 +78,9 @@ export function KnowledgeSearchPanel({
   const searching = query.trim().length > 0;
   const hint = useMemo(() => {
     if (!searching) {
-      return "先支持工单与提交记录检索，后续会接入知识文档、规范与个人笔记。";
+      return "已支持工单、提交记录与个人笔记检索，后续可继续接入知识文档与项目规范。";
     }
-    return "可输入问题描述、项目名、单号、提交主题等关键词。";
+    return "可输入问题描述、项目名、单号、提交主题、笔记标题或标签关键词。";
   }, [searching]);
 
   function updateUrl(nextQuery: string) {
@@ -106,7 +106,7 @@ export function KnowledgeSearchPanel({
               setQuery(next);
               updateUrl(next);
             }}
-            placeholder={compact ? "全局搜索工单、提交…" : "搜索工单、提交记录、规范线索…"}
+            placeholder={compact ? "全局搜索工单、提交、笔记…" : "搜索工单、提交记录、个人笔记、规范线索…"}
             className="w-full rounded-xl border border-ink-200 bg-white py-3 pl-10 pr-3 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
           />
         </div>

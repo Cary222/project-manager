@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, SearchDocumentSourceType as PrismaSearchDocumentSourceType } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
   buildEmbeddingHash,
@@ -8,7 +8,7 @@ import {
 import type {
   SearchDocumentCommitRecord,
   SearchDocumentMetadata,
-  SearchDocumentSourceType,
+  SearchDocumentPkmNoteRecord,
   SearchDocumentTicketRecord,
   SearchResponse,
   SearchResponseMode,
@@ -25,7 +25,7 @@ const KEYWORD_CANDIDATE_MULTIPLIER = 4;
 
 type SearchDocumentRow = {
   id: string;
-  sourceType: SearchDocumentSourceType;
+  sourceType: PrismaSearchDocumentSourceType;
   sourceId: string;
   projectId: string | null;
   title: string;
@@ -46,7 +46,7 @@ type SearchDocumentEmbeddingStateRow = {
 
 type VectorSearchRow = {
   id: string;
-  sourceType: SearchDocumentSourceType;
+  sourceType: PrismaSearchDocumentSourceType;
   sourceId: string;
   projectId: string | null;
   title: string;
@@ -85,6 +85,7 @@ function splitTerms(query: string) {
 function toResultType(sourceType: string): SearchResultType | null {
   if (sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.TICKET) return "ticket";
   if (sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.COMMIT) return "commit";
+  if (sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.PKM_NOTE) return "note";
   return null;
 }
 
@@ -104,6 +105,11 @@ function coerceMetadata(value: Prisma.JsonValue | null): SearchDocumentMetadata 
       ? data.branches.filter((branch): branch is string => typeof branch === "string")
       : undefined,
     embeddingHash: typeof data.embeddingHash === "string" ? data.embeddingHash : undefined,
+    noteUserId: typeof data.noteUserId === "string" ? data.noteUserId : undefined,
+    noteUserName: typeof data.noteUserName === "string" ? data.noteUserName : undefined,
+    noteTags: Array.isArray(data.noteTags)
+      ? data.noteTags.filter((tag): tag is string => typeof tag === "string")
+      : undefined,
   };
 }
 
@@ -273,15 +279,51 @@ export function buildSearchableCommitDocument(commit: SearchDocumentCommitRecord
   };
 }
 
+export function buildSearchablePkmNoteDocument(note: SearchDocumentPkmNoteRecord): SearchableRecord {
+  const authorName = note.user.name || note.user.email;
+  const title = note.title.trim();
+  const content = [
+    `标题 ${title}`,
+    `作者 ${authorName}`,
+    note.project ? `项目 ${note.project.name}` : null,
+    note.tags.length > 0 ? `标签 ${note.tags.join("、")}` : null,
+    `正文 ${note.content}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    sourceType: SEARCH_DOCUMENT_SOURCE_TYPES.PKM_NOTE,
+    sourceId: note.id,
+    projectId: note.projectId,
+    title,
+    content,
+    url: `/pkm?noteId=${note.id}`,
+    metadata: {
+      projectId: note.project?.id,
+      projectName: note.project?.name,
+      noteUserId: note.userId,
+      noteUserName: authorName,
+      noteTags: note.tags,
+      author: authorName,
+    },
+  };
+}
+
+function buildSearchDocumentSourceType(sourceType: SearchableRecord["sourceType"]): PrismaSearchDocumentSourceType {
+  return sourceType as PrismaSearchDocumentSourceType;
+}
+
 export async function upsertSearchDocument(record: SearchableRecord) {
   const embeddingInput = buildEmbeddingInput(record.title, record.content);
   const embeddingHash = buildEmbeddingHash(embeddingInput);
   const metadata = buildMetadataWithEmbeddingHash(record, embeddingHash);
+  const sourceType = buildSearchDocumentSourceType(record.sourceType);
 
   const document = await prisma.searchDocument.upsert({
     where: {
       sourceType_sourceId: {
-        sourceType: record.sourceType,
+        sourceType,
         sourceId: record.sourceId,
       },
     },
@@ -293,7 +335,7 @@ export async function upsertSearchDocument(record: SearchableRecord) {
       metadata: metadata as Prisma.InputJsonValue,
     },
     create: {
-      sourceType: record.sourceType,
+      sourceType,
       sourceId: record.sourceId,
       projectId: record.projectId ?? null,
       title: record.title,
@@ -377,6 +419,28 @@ export async function syncCommitSearchDocument(commitId: string) {
   return upsertSearchDocument(buildSearchableCommitDocument(commit));
 }
 
+export async function syncPkmNoteSearchDocument(noteId: string) {
+  const note = await prisma.pkmNote.findUnique({
+    where: { id: noteId },
+    include: {
+      user: { select: { id: true, name: true, email: true } },
+      project: { select: { id: true, name: true } },
+    },
+  });
+
+  if (!note) {
+    await prisma.searchDocument.deleteMany({
+      where: {
+        sourceType: buildSearchDocumentSourceType(SEARCH_DOCUMENT_SOURCE_TYPES.PKM_NOTE),
+        sourceId: noteId,
+      },
+    });
+    return null;
+  }
+
+  return upsertSearchDocument(buildSearchablePkmNoteDocument(note));
+}
+
 export async function backfillSearchDocuments() {
   const tickets = await prisma.ticket.findMany({
     include: {
@@ -400,6 +464,13 @@ export async function backfillSearchDocuments() {
     },
   });
 
+  const notes = await prisma.pkmNote.findMany({
+    include: {
+      user: { select: { id: true, name: true, email: true } },
+      project: { select: { id: true, name: true } },
+    },
+  });
+
   let count = 0;
   for (const ticket of tickets) {
     await upsertSearchDocument(buildSearchableTicketDocument(ticket));
@@ -411,9 +482,15 @@ export async function backfillSearchDocuments() {
     count += 1;
   }
 
+  for (const note of notes) {
+    await upsertSearchDocument(buildSearchablePkmNoteDocument(note));
+    count += 1;
+  }
+
   return {
     tickets: tickets.length,
     commits: commits.length,
+    notes: notes.length,
     total: count,
   };
 }
@@ -648,7 +725,7 @@ export async function searchDocuments(options: {
   const mode = options.mode ?? "search";
   const query = normalizeQuery(options.query);
   const limit = Math.min(Math.max(options.limit ?? SEARCH_LIMIT_DEFAULT, 1), SEARCH_LIMIT_MAX);
-  const grouped: Record<SearchResultType, SearchResultItem[]> = { ticket: [], commit: [] };
+  const grouped: Record<SearchResultType, SearchResultItem[]> = { ticket: [], commit: [], note: [] };
 
   if (!query) {
     return {

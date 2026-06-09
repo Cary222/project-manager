@@ -36,8 +36,8 @@ export default async function KnowledgePage({
     >
       <div className="space-y-5 pm-fade-in">
         <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium">预览</span>
-          知识库已开放第一版团队知识搜索，当前结果来自工单与提交记录。
+          <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium">已接入</span>
+          知识库当前结果来自工单、提交记录与个人笔记。
         </div>
 
         <KnowledgeSearchPanel initialQuery={initialQuery} />

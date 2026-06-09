@@ -2,12 +2,13 @@ export const SEARCH_DOCUMENT_SOURCE_TYPES = {
   TICKET: "TICKET",
   COMMIT: "COMMIT",
   KNOWLEDGE_DOC: "KNOWLEDGE_DOC",
+  PKM_NOTE: "PKM_NOTE",
 } as const;
 
 export type SearchDocumentSourceType =
   (typeof SEARCH_DOCUMENT_SOURCE_TYPES)[keyof typeof SEARCH_DOCUMENT_SOURCE_TYPES];
 
-export const SEARCH_RESULT_TYPES = ["ticket", "commit"] as const;
+export const SEARCH_RESULT_TYPES = ["ticket", "commit", "note"] as const;
 
 export type SearchResultType = (typeof SEARCH_RESULT_TYPES)[number];
 
@@ -22,6 +23,9 @@ export type SearchDocumentMetadata = {
   committedAt?: string;
   branches?: string[];
   embeddingHash?: string;
+  noteUserId?: string;
+  noteUserName?: string;
+  noteTags?: string[];
 };
 
 export type SearchResultItem = {
@@ -85,4 +89,15 @@ export type SearchDocumentCommitRecord = {
     project: { id: string; name: string };
     module: { name: string };
   };
+};
+
+export type SearchDocumentPkmNoteRecord = {
+  id: string;
+  title: string;
+  content: string;
+  tags: string[];
+  userId: string;
+  projectId: string | null;
+  user: { id: string; name: string | null; email: string };
+  project: { id: string; name: string } | null;
 };
