@@ -61,3 +61,60 @@ export function normalizePkmAttachments(input: unknown) {
 
   return attachments;
 }
+
+/**
+ * 从 Markdown 正文中提取内嵌 data URL 图片，返回图片列表和去掉这些图片后的纯正文。
+ * 只处理 data:image/ 开头的内嵌图片，外部链接图片不受影响。
+ */
+export type InlineImage = { src: string; name: string };
+
+const INLINE_IMAGE_PATTERN = /!\[([^\]]*)\]\((data:image\/[^)\s]+)\)/g;
+
+export function extractInlineImages(markdown: string): {
+  images: InlineImage[];
+  plainContent: string;
+} {
+  const images: InlineImage[] = [];
+  const seen = new Set<string>();
+
+  const plainContent = markdown.replace(INLINE_IMAGE_PATTERN, (_match, name, src) => {
+    const imageName = name.trim() || `图片${images.length + 1}`;
+    if (seen.has(src)) return "";
+    seen.add(src);
+    images.push({ src, name: imageName });
+    return "";
+  });
+
+  return {
+    images,
+    plainContent: plainContent.replace(/^\s*[\r\n]+/, "").trim(),
+  };
+}
+
+/**
+ * 将图片列表重新拼回 Markdown 图片语法。
+ * 可选传入已有正文，将图片 Markdown 拼到正文最前面。
+ */
+export function composeImageMarkdown(
+  images: InlineImage[],
+  existingContent = ""
+): { content: string; newImages: InlineImage[] } {
+  const existingSrcs = new Set<string>();
+  INLINE_IMAGE_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = INLINE_IMAGE_PATTERN.exec(existingContent)) !== null) {
+    existingSrcs.add(match[2]);
+  }
+
+  const newImages = images.filter((img) => !existingSrcs.has(img.src));
+  const imageMarkdown = newImages
+    .map((img) => `![${img.name}](${img.src})`)
+    .join("\n");
+
+  const combined =
+    imageMarkdown && existingContent.trim()
+      ? `${imageMarkdown}\n\n${existingContent.trim()}`
+      : imageMarkdown || existingContent;
+
+  return { content: combined, newImages };
+}

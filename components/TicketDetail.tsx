@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { CommitDiffModal, type CommitSummary } from "@/components/CommitDiffModal";
 import { AssigneePicker } from "@/components/AssigneePicker";
@@ -15,6 +16,7 @@ import {
 } from "@/components/TicketCreateForm";
 import { formatAssigneeList } from "@/lib/ticket-assignees";
 import { branchStyle, repoStyle } from "@/lib/repo-style";
+import { composeImageMarkdown, extractInlineImages } from "@/lib/pkm";
 import { IconArrowLeft, IconClock, IconEdit } from "@/components/icons";
 
 function TicketDetailHeaderSkeleton() {
@@ -227,6 +229,9 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [editDescriptionImages, setEditDescriptionImages] = useState<{ src: string; name: string }[]>([]);
+  const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
+  const isLightboxOpenRef = useRef(false);
   const [modules, setModules] = useState<{ id: string; name: string }[]>([]);
   const [selectedModuleId, setSelectedModuleId] = useState("");
   const [pendingDoneConfirm, setPendingDoneConfirm] = useState(false);
@@ -250,7 +255,9 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     setStatus(data.ticket.status);
     setAssigneeIds(data.ticket.assignees.map((user) => user.id));
     setEditTitle(data.ticket.title);
-    setEditDescription(data.ticket.description || "");
+    const initialDescription = extractInlineImages(data.ticket.description || "");
+    setEditDescription(initialDescription.plainContent);
+    setEditDescriptionImages(initialDescription.images);
     setSelectedModuleId(data.ticket.module.id);
   }, [ticketId]);
 
@@ -367,10 +374,11 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   async function saveTicketDetails() {
     setMessage("");
     if (!ticket) return;
+    const { content: fullDescription } = composeImageMarkdown(editDescriptionImages, editDescription);
     const res = await fetch(`/api/tickets/${ticket.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: editTitle, description: editDescription }),
+      body: JSON.stringify({ title: editTitle, description: fullDescription }),
     });
     if (!res.ok) {
       setMessage("保存失败");
@@ -379,6 +387,33 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     setMessage("详情已保存");
     setIsEditing(false);
     await loadTicket();
+  }
+
+  function openPreview(img: { src: string; name: string }) {
+    isLightboxOpenRef.current = true;
+    setPreviewImage(img);
+  }
+
+  function closePreview() {
+    setPreviewImage(null);
+    setTimeout(() => {
+      isLightboxOpenRef.current = false;
+    }, 0);
+  }
+
+  function insertDescriptionImage(file: File) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = String(reader.result ?? "");
+      if (!src) return;
+      setEditDescriptionImages((prev) => [...prev, { src, name: file.name }]);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function removeDescriptionImage(index: number) {
+    if (isLightboxOpenRef.current) return;
+    setEditDescriptionImages((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function updateModule() {
@@ -904,7 +939,20 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   }
 
   return (
-    <AppShell
+    <>
+      {previewImage ? (
+        <ImageLightbox
+          image={previewImage}
+          onClose={closePreview}
+          onDownload={() => {
+            const anchor = document.createElement("a");
+            anchor.href = previewImage.src;
+            anchor.download = previewImage.name || "image";
+            anchor.click();
+          }}
+        />
+      ) : null}
+      <AppShell
       header={
         <div className="flex items-center gap-3">
           <Link
@@ -958,7 +1006,13 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                 {canEdit && !isEditing && (
                   <button
                     type="button"
-                    onClick={() => setIsEditing(true)}
+                    onClick={() => {
+                      const initialDescription = extractInlineImages(ticket.description || "");
+                      setEditTitle(ticket.title);
+                      setEditDescription(initialDescription.plainContent);
+                      setEditDescriptionImages(initialDescription.images);
+                      setIsEditing(true);
+                    }}
                     className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink-200 px-3 py-1.5 text-sm text-ink-700 hover:bg-ink-100"
                   >
                     <IconEdit className="h-4 w-4" /> 编辑
@@ -968,15 +1022,67 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
 
               <div className="mt-4">
                 {isEditing ? (
-                  <textarea
-                    value={editDescription}
-                    onChange={(e) => setEditDescription(e.target.value)}
-                    rows={6}
-                    className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
-                    placeholder="添加描述（Markdown）..."
-                  />
+                  <div className="rounded-lg border border-ink-200 bg-white">
+                    {editDescriptionImages.length > 0 ? (
+                      <div
+                        className="flex flex-wrap gap-2 border-b border-ink-200 p-3"
+                        onClick={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.nativeEvent.stopImmediatePropagation()}
+                      >
+                        {editDescriptionImages.map((img, index) => (
+                          <div
+                            key={`${img.name}-${index}`}
+                            className="group relative"
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.nativeEvent.stopImmediatePropagation()}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={img.src}
+                              alt={img.name}
+                              className="max-h-28 cursor-pointer rounded-lg border border-ink-200 object-contain hover:ring-2 hover:ring-brand-400"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openPreview(img);
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onMouseDown={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                removeDescriptionImage(index);
+                              }}
+                              className="absolute -right-2 -top-2 hidden h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white transition-opacity hover:!bg-danger group-hover:flex"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    <textarea
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      onPaste={(e) => {
+                        const items = e.clipboardData.items;
+                        for (const item of items) {
+                          if (item.type.startsWith("image/")) {
+                            e.preventDefault();
+                            const file = item.getAsFile();
+                            if (file) insertDescriptionImage(file);
+                            return;
+                          }
+                        }
+                      }}
+                      rows={6}
+                      className="w-full px-3 py-2 font-mono text-sm outline-none placeholder:text-ink-400"
+                      placeholder="添加描述（Markdown）..."
+                      style={{ minHeight: "140px", resize: "vertical" }}
+                    />
+                  </div>
                 ) : ticket.description ? (
-                  <MarkdownContent content={ticket.description} />
+                  <MarkdownContent content={ticket.description} collapsible collapsedHeight={240} />
                 ) : (
                   <p className="text-sm text-ink-400">暂无描述</p>
                 )}
@@ -994,9 +1100,11 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                   <button
                     type="button"
                     onClick={() => {
+                      const initialDescription = extractInlineImages(ticket.description || "");
                       setIsEditing(false);
                       setEditTitle(ticket.title);
-                      setEditDescription(ticket.description || "");
+                      setEditDescription(initialDescription.plainContent);
+                      setEditDescriptionImages(initialDescription.images);
                     }}
                     className="rounded-lg border border-ink-200 px-4 py-2 text-sm hover:bg-ink-100"
                   >
@@ -1247,5 +1355,6 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
         onClose={() => setSelectedCommit(null)}
       />
     </AppShell>
+    </>
   );
 }

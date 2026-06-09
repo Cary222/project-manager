@@ -5,6 +5,8 @@ import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { IconPkm, IconPlus, IconTag, IconTrash } from "@/components/icons";
 import {
+  composeImageMarkdown,
+  extractInlineImages,
   normalizePkmAttachments,
   PKM_ATTACHMENT_MAX_COUNT,
   PKM_ATTACHMENT_MAX_SIZE,
@@ -159,12 +161,13 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
   }
 
   function openEditForm(note: PkmNote) {
+    const initialContent = extractInlineImages(note.content);
     setEditingId(note.id);
     setTitle(note.title);
-    setContent(note.content);
+    setContent(initialContent.plainContent);
     setTagsInput(tagsToInput(note.tags));
     setProjectId(note.projectId || "");
-    setContentImages([]);
+    setContentImages(initialContent.images);
     setAttachments(normalizePkmAttachments(note.attachments));
     setShowForm(true);
     setFlash(null);
@@ -243,8 +246,7 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
     setSaving(true);
     setFlash(null);
 
-    const imageMarkdown = contentImages.map((img) => `![${img.name}](${img.src})`).join("\n");
-    const fullContent = imageMarkdown ? `${imageMarkdown}\n\n${content.trim()}` : content.trim();
+    const { content: fullContent } = composeImageMarkdown(contentImages, content.trim());
 
     try {
       const response = await fetch(editingId ? `/api/pkm/notes/${editingId}` : "/api/pkm/notes", {
@@ -349,8 +351,8 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
 
         {flash ? <p className={`rounded-lg border px-3 py-2 text-sm ${toneClass(flash.type)}`}>{flash.message}</p> : null}
 
-        <div className="grid gap-5 lg:grid-cols-4">
-          <aside className="space-y-3 lg:col-span-1">
+        <div className="grid items-start gap-5 lg:grid-cols-4">
+          <aside className="space-y-3 self-start lg:col-span-1">
             <div className="rounded-xl border border-ink-200 bg-white p-4 shadow-soft">
               <h2 className="mb-3 text-sm font-medium text-ink-500">概览</h2>
               <ul className="space-y-2 text-sm text-ink-600">
@@ -390,9 +392,12 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
             </div>
           </aside>
 
-          <div className="space-y-4 lg:col-span-3">
+          <div className="min-w-0 space-y-4 lg:col-span-3">
             {showForm ? (
-              <form onSubmit={handleSubmit} className="grid gap-4 rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+              <form
+                onSubmit={handleSubmit}
+                className="grid min-w-0 max-w-full gap-4 self-start rounded-xl border border-ink-200 bg-white p-5 shadow-soft"
+              >
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h2 className="text-base font-medium text-ink-900">{editingId ? "编辑笔记" : "新建笔记"}</h2>
@@ -410,23 +415,23 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
                   </button>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-2">
-                  <label className="flex flex-col gap-2 md:col-span-2">
+                <div className="grid min-w-0 gap-4 md:grid-cols-2">
+                  <label className="flex min-w-0 flex-col gap-2 md:col-span-2">
                     <span className="text-sm font-medium text-ink-700">标题</span>
                     <input
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
                       placeholder="例如：Prisma + pgvector 踩坑记录"
-                      className="rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                      className="w-full min-w-0 rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
                     />
                   </label>
 
-                  <label className="flex flex-col gap-2">
+                  <label className="flex min-w-0 flex-col gap-2">
                     <span className="text-sm font-medium text-ink-700">关联项目</span>
                     <select
                       value={projectId}
                       onChange={(e) => setProjectId(e.target.value)}
-                      className="rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                      className="w-full min-w-0 rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
                     >
                       <option value="">不关联项目</option>
                       {projects.map((project) => (
@@ -437,22 +442,22 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
                     </select>
                   </label>
 
-                  <label className="flex flex-col gap-2">
+                  <label className="flex min-w-0 flex-col gap-2">
                     <span className="text-sm font-medium text-ink-700">标签</span>
                     <input
                       value={tagsInput}
                       onChange={(e) => setTagsInput(e.target.value)}
                       placeholder="例如：RAG, Prisma, 搜索"
-                      className="rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                      className="w-full min-w-0 rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
                     />
                   </label>
 
-                  <label className="flex flex-col gap-2 md:col-span-2">
+                  <label className="flex min-w-0 flex-col gap-2 md:col-span-2">
                     <span className="text-sm font-medium text-ink-700">正文（Markdown）</span>
-                    <div className="rounded-lg border border-ink-200 bg-white">
+                    <div className="min-w-0 rounded-lg border border-ink-200 bg-white">
                       {contentImages.length > 0 ? (
                         <div
-                          className="flex flex-wrap gap-2 border-b border-ink-200 p-3"
+                          className="min-w-0 flex flex-wrap gap-2 border-b border-ink-200 p-3"
                           onClick={(e) => e.stopPropagation()}
                           onMouseDown={(e) => e.nativeEvent.stopImmediatePropagation()}
                         >
@@ -517,7 +522,7 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
                         }}
                         rows={10}
                         placeholder="记录你的方案、踩坑、结论和上下文。支持 Markdown，也支持直接粘贴截图。"
-                        className="w-full px-3 py-2 font-mono text-sm leading-6 outline-none placeholder:text-ink-400"
+                        className="w-full min-w-0 px-3 py-2 font-mono text-sm leading-6 outline-none placeholder:text-ink-400"
                         style={{ minHeight: "180px", resize: "vertical" }}
                       />
                     </div>
@@ -588,10 +593,14 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
                   </div>
                 ) : null}
 
-                <div className="rounded-lg border border-dashed border-ink-200 bg-ink-50/60 p-4">
+                <div className="min-w-0 rounded-lg border border-dashed border-ink-200 bg-ink-50/60 p-4">
                   <p className="text-xs font-medium text-ink-500">Markdown 预览</p>
-                  <div className="mt-3 min-h-16 text-sm text-ink-600">
-                    {content.trim() ? <MarkdownContent content={content} /> : <p className="text-sm text-ink-400">输入正文后会在这里预览。</p>}
+                  <div className="mt-3 min-h-16 overflow-x-auto text-sm text-ink-600">
+                    {content.trim() ? (
+                      <MarkdownContent content={content} collapsible collapsedHeight={240} />
+                    ) : (
+                      <p className="text-sm text-ink-400">输入正文后会在这里预览。</p>
+                    )}
                   </div>
                 </div>
 
@@ -694,7 +703,7 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
                   </div>
                 ) : null}
                 <div className="mt-4">
-                  <MarkdownContent content={selectedNote.content} />
+                  <MarkdownContent content={selectedNote.content} collapsible collapsedHeight={240} />
                 </div>
                 {normalizePkmAttachments(selectedNote.attachments).length > 0 ? (
                   <div className="mt-5 border-t border-ink-100 pt-4">

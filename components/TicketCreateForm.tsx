@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { AssigneePicker } from "@/components/AssigneePicker";
 import { ImageLightbox } from "@/components/ImageLightbox";
+import { composeImageMarkdown, extractInlineImages } from "@/lib/pkm";
 
 export type TicketCreateUser = {
   id: string;
@@ -83,9 +84,12 @@ export function TicketCreateForm({
   const [designAssigneeIds, setDesignAssigneeIds] = useState(
     initialValues?.designAssigneeIds ?? []
   );
+  const initialDescriptionState = extractInlineImages(initialValues?.description ?? "");
   const [title, setTitle] = useState(initialValues?.title ?? "");
-  const [description, setDescription] = useState(initialValues?.description ?? "");
-  const [descriptionImages, setDescriptionImages] = useState<{ src: string; name: string }[]>([]);
+  const [description, setDescription] = useState(initialDescriptionState.plainContent);
+  const [descriptionImages, setDescriptionImages] = useState<{ src: string; name: string }[]>(
+    initialDescriptionState.images
+  );
   const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
   const isLightboxOpenRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
@@ -165,10 +169,7 @@ export function TicketCreateForm({
           ? [currentUserId]
           : [];
 
-    const imageMarkdown = descriptionImages.map((img) => `![${img.name}](${img.src})`).join("\n");
-    const fullDescription = imageMarkdown
-      ? `${imageMarkdown}\n\n${description.trim()}`
-      : description.trim();
+    const { content: fullDescription } = composeImageMarkdown(descriptionImages, description.trim());
 
     if (submitMode === "edit") {
       setSubmitting(false);
