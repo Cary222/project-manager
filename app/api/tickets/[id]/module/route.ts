@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireRoot } from "@/lib/permissions";
 import { createModerationLog } from "@/lib/moderation";
 import { ModerationAction } from "@prisma/client";
+import { syncTicketSearchDocument } from "@/lib/search";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -47,6 +48,7 @@ export async function PATCH(request: Request, { params }: Params) {
       where: { id: ticket.id },
       data: { moduleId: body.moduleId },
     });
+    await syncTicketSearchDocument(ticket.id);
 
     await createModerationLog({
       action: ModerationAction.CHANGE_TICKET_MODULE,

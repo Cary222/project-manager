@@ -11,6 +11,7 @@ import {
   markNotificationReadAction,
   type NotificationListItem,
 } from "@/actions/notifications";
+import { KnowledgeSearchPanel } from "@/components/search/KnowledgeSearchPanel";
 import {
   IconBell,
   IconChevronDown,
@@ -110,12 +111,14 @@ export function AppShell({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationListItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
   const [notificationsLoaded, setNotificationsLoaded] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const notificationRef = useRef<HTMLDivElement | null>(null);
+  const globalSearchRef = useRef<HTMLDivElement | null>(null);
 
   const visibleNav = NAV_ITEMS.filter((item) => !item.rootOnly || isRoot);
 
@@ -124,6 +127,9 @@ export function AppShell({
       const target = event.target as Node;
       if (notificationRef.current && !notificationRef.current.contains(target)) {
         setNotificationsOpen(false);
+      }
+      if (globalSearchRef.current && !globalSearchRef.current.contains(target)) {
+        setGlobalSearchOpen(false);
       }
       if (userMenuRef.current && !userMenuRef.current.contains(target)) {
         setUserMenuOpen(false);
@@ -244,9 +250,26 @@ export function AppShell({
 
           <div className="min-w-0 flex-1">{header}</div>
 
-          <div className="hidden items-center gap-2 rounded-lg border border-ink-200 bg-ink-100 px-3 py-1.5 text-sm text-ink-400 md:flex">
-            <IconSearch className="h-4 w-4" />
-            <span>全局搜索</span>
+          <div className="relative hidden md:block" ref={globalSearchRef}>
+            <button
+              type="button"
+              onClick={() => {
+                setGlobalSearchOpen((current) => !current);
+                setNotificationsOpen(false);
+                setUserMenuOpen(false);
+              }}
+              className="flex items-center gap-2 rounded-lg border border-ink-200 bg-ink-100 px-3 py-1.5 text-sm text-ink-400 transition hover:border-brand-200 hover:bg-white hover:text-ink-600"
+              aria-label="打开全局搜索"
+            >
+              <IconSearch className="h-4 w-4" />
+              <span>全局搜索</span>
+            </button>
+
+            {globalSearchOpen ? (
+              <div className="absolute right-0 top-12 z-30 w-[420px] rounded-2xl border border-ink-200 bg-white p-4 shadow-elevated pm-fade-in">
+                <KnowledgeSearchPanel compact />
+              </div>
+            ) : null}
           </div>
 
           <div className="relative" ref={notificationRef}>

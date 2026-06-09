@@ -10,6 +10,7 @@ import {
   createManyNotifications,
   listRootUserIds,
 } from "@/lib/notifications";
+import { syncTicketSearchDocument } from "@/lib/search";
 
 const TICKET_STATUS_VALUES = [
   "DEVELOPING",
@@ -129,6 +130,7 @@ export async function PATCH(
       });
       return updated;
     });
+    await syncTicketSearchDocument(current.id);
 
     const actorName = session.user.name || session.user.email || "成员";
 

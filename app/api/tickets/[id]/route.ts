@@ -11,6 +11,7 @@ import { requireRoot, requireSession } from "@/lib/permissions";
 import { createModerationLog } from "@/lib/moderation";
 import { syncTicketCounterAfterDelete } from "@/lib/ticket-counter";
 import { ModerationAction } from "@prisma/client";
+import { syncTicketSearchDocument } from "@/lib/search";
 
 async function enrichAssigneeHistory(
   history: {
@@ -139,6 +140,13 @@ export async function DELETE(
       });
     });
 
+    await prisma.searchDocument.deleteMany({
+      where: {
+        sourceType: "TICKET",
+        sourceId: ticket.id,
+      },
+    });
+
     await syncTicketCounterAfterDelete();
 
     // 记录审计日志
@@ -189,6 +197,7 @@ export async function PUT(
         description: body.description !== undefined ? (body.description.trim() || null) : undefined,
       },
     });
+    await syncTicketSearchDocument(ticket.id);
 
     await createModerationLog({
       action: ModerationAction.EDIT_TICKET,

@@ -1,0 +1,702 @@
+import { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/db";
+import {
+  buildEmbeddingHash,
+  buildEmbeddingInput,
+  fetchEmbedding,
+} from "@/lib/embedding";
+import type {
+  SearchDocumentCommitRecord,
+  SearchDocumentMetadata,
+  SearchDocumentSourceType,
+  SearchDocumentTicketRecord,
+  SearchResponse,
+  SearchResponseMode,
+  SearchResultItem,
+  SearchResultType,
+  SearchableRecord,
+} from "@/lib/search-types";
+import { SEARCH_DOCUMENT_SOURCE_TYPES } from "@/lib/search-types";
+
+const SEARCH_LIMIT_DEFAULT = 8;
+const SEARCH_LIMIT_MAX = 20;
+const VECTOR_CANDIDATE_MULTIPLIER = 3;
+const KEYWORD_CANDIDATE_MULTIPLIER = 4;
+
+type SearchDocumentRow = {
+  id: string;
+  sourceType: SearchDocumentSourceType;
+  sourceId: string;
+  projectId: string | null;
+  title: string;
+  content: string;
+  url: string;
+  metadata: Prisma.JsonValue | null;
+  updatedAt: Date;
+  project: { id: string; name: string } | null;
+};
+
+type SearchDocumentEmbeddingStateRow = {
+  id: string;
+  title: string;
+  content: string;
+  metadata: Prisma.JsonValue | null;
+  hasEmbedding: boolean;
+};
+
+type VectorSearchRow = {
+  id: string;
+  sourceType: SearchDocumentSourceType;
+  sourceId: string;
+  projectId: string | null;
+  title: string;
+  content: string;
+  url: string;
+  metadata: Prisma.JsonValue | null;
+  updatedAt: Date;
+  projectName: string | null;
+  distance: number;
+};
+
+type RankedCandidate = SearchResultItem & {
+  keywordScore: number;
+  semanticScore: number;
+  updatedAt: number;
+};
+
+function normalizeQuery(query: string) {
+  return query.trim().replace(/\s+/g, " ");
+}
+
+function truncate(text: string, max = 180) {
+  const value = text.replace(/\s+/g, " ").trim();
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1).trimEnd()}…`;
+}
+
+function splitTerms(query: string) {
+  return normalizeQuery(query)
+    .split(" ")
+    .map((term) => term.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+}
+
+function toResultType(sourceType: string): SearchResultType | null {
+  if (sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.TICKET) return "ticket";
+  if (sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.COMMIT) return "commit";
+  return null;
+}
+
+function coerceMetadata(value: Prisma.JsonValue | null): SearchDocumentMetadata {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const data = value as Record<string, Prisma.JsonValue>;
+  return {
+    ticketNo: typeof data.ticketNo === "number" ? data.ticketNo : undefined,
+    projectId: typeof data.projectId === "string" ? data.projectId : undefined,
+    projectName: typeof data.projectName === "string" ? data.projectName : undefined,
+    moduleName: typeof data.moduleName === "string" ? data.moduleName : undefined,
+    repoPath: typeof data.repoPath === "string" ? data.repoPath : undefined,
+    commitSha: typeof data.commitSha === "string" ? data.commitSha : undefined,
+    author: typeof data.author === "string" ? data.author : undefined,
+    committedAt: typeof data.committedAt === "string" ? data.committedAt : undefined,
+    branches: Array.isArray(data.branches)
+      ? data.branches.filter((branch): branch is string => typeof branch === "string")
+      : undefined,
+    embeddingHash: typeof data.embeddingHash === "string" ? data.embeddingHash : undefined,
+  };
+}
+
+function buildSnippet(content: string, terms: string[]) {
+  const plain = content.replace(/\s+/g, " ").trim();
+  if (!plain) return "";
+  const lower = plain.toLowerCase();
+  const hit = terms
+    .map((term) => lower.indexOf(term.toLowerCase()))
+    .filter((index) => index >= 0)
+    .sort((a, b) => a - b)[0];
+
+  if (hit === undefined) {
+    return truncate(plain, 180);
+  }
+
+  const start = Math.max(0, hit - 48);
+  const end = Math.min(plain.length, hit + 132);
+  const snippet = plain.slice(start, end).trim();
+  return `${start > 0 ? "…" : ""}${truncate(snippet, 180)}${end < plain.length ? "…" : ""}`;
+}
+
+function rankDocument(title: string, content: string, terms: string[]) {
+  const lowerTitle = title.toLowerCase();
+  const lowerContent = content.toLowerCase();
+
+  return terms.reduce((score, term) => {
+    const lowerTerm = term.toLowerCase();
+    let next = score;
+    if (lowerTitle.includes(lowerTerm)) next += 5;
+    if (lowerContent.includes(lowerTerm)) next += 2;
+    if (lowerTitle.startsWith(lowerTerm)) next += 2;
+    return next;
+  }, 0);
+}
+
+function hasDirectQueryMatch(title: string, content: string, query: string) {
+  const lowerQuery = query.toLowerCase();
+  return title.toLowerCase().includes(lowerQuery) || content.toLowerCase().includes(lowerQuery);
+}
+
+function buildMetadataWithEmbeddingHash(record: SearchableRecord, embeddingHash: string) {
+  return {
+    ...(record.metadata ?? {}),
+    embeddingHash,
+  } satisfies SearchDocumentMetadata;
+}
+
+function hasReusableEmbedding(
+  metadata: SearchDocumentMetadata,
+  embeddingHash: string,
+  hasEmbedding: boolean,
+) {
+  return hasEmbedding && metadata.embeddingHash === embeddingHash;
+}
+
+function vectorToSqlLiteral(vector: number[]) {
+  return `[${vector.join(",")}]`;
+}
+
+async function updateSearchDocumentEmbedding(id: string, vector: number[]) {
+  const literal = vectorToSqlLiteral(vector);
+  await prisma.$executeRaw`
+    UPDATE pm."SearchDocument"
+    SET embedding = ${literal}::public.vector
+    WHERE id = ${id}
+  `;
+}
+
+async function getSearchDocumentEmbeddingState(id: string) {
+  const rows = await prisma.$queryRaw<SearchDocumentEmbeddingStateRow[]>(Prisma.sql`
+    SELECT
+      d."id",
+      d."title",
+      d."content",
+      d."metadata",
+      (d."embedding" IS NOT NULL) AS "hasEmbedding"
+    FROM pm."SearchDocument" d
+    WHERE d."id" = ${id}
+    LIMIT 1
+  `);
+
+  return rows[0] ?? null;
+}
+
+async function ensureSearchDocumentEmbedding(document: SearchDocumentEmbeddingStateRow) {
+  const embeddingInput = buildEmbeddingInput(document.title, document.content);
+  const embeddingHash = buildEmbeddingHash(embeddingInput);
+  const metadata = coerceMetadata(document.metadata);
+
+  if (hasReusableEmbedding(metadata, embeddingHash, document.hasEmbedding)) {
+    return { reused: true, embeddingHash };
+  }
+
+  const vector = await fetchEmbedding(embeddingInput);
+  await updateSearchDocumentEmbedding(document.id, vector);
+  return { reused: false, embeddingHash };
+}
+
+export function buildSearchableTicketDocument(ticket: SearchDocumentTicketRecord): SearchableRecord {
+  const assigneeNames = ticket.assignees.map((item) => item.user.name || item.user.email).join("、");
+  const title = `#${ticket.ticketNo} ${ticket.title}`;
+  const content = [
+    `单子编号 #${ticket.ticketNo}`,
+    `标题 ${ticket.title}`,
+    ticket.description ? `描述 ${ticket.description}` : null,
+    `项目 ${ticket.project.name}`,
+    `模块 ${ticket.module.name}`,
+    `职能 ${ticket.module.responsibility.kind}`,
+    `状态 ${ticket.status}`,
+    assigneeNames ? `指派 ${assigneeNames}` : null,
+    `创建人 ${ticket.creator.name || ticket.creator.email}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    sourceType: SEARCH_DOCUMENT_SOURCE_TYPES.TICKET,
+    sourceId: ticket.id,
+    projectId: ticket.projectId,
+    title,
+    content,
+    url: `/${ticket.ticketNo}`,
+    metadata: {
+      ticketNo: ticket.ticketNo,
+      projectId: ticket.project.id,
+      projectName: ticket.project.name,
+      moduleName: ticket.module.name,
+    },
+  };
+}
+
+export function buildSearchableCommitDocument(commit: SearchDocumentCommitRecord): SearchableRecord {
+  const shortSha = commit.commitSha.slice(0, 7);
+  const title = `#${commit.ticketNo} ${commit.subject}`;
+  const content = [
+    `提交 ${shortSha}`,
+    `主题 ${commit.subject}`,
+    `作者 ${commit.author}`,
+    `项目 ${commit.ticket.project.name}`,
+    `模块 ${commit.ticket.module.name}`,
+    `关联单子 #${commit.ticketNo}`,
+    `仓库 ${commit.repoPath}`,
+    commit.branches.length > 0 ? `分支 ${commit.branches.join("、")}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    sourceType: SEARCH_DOCUMENT_SOURCE_TYPES.COMMIT,
+    sourceId: commit.id,
+    projectId: commit.ticket.project.id,
+    title,
+    content,
+    url: `/${commit.ticketNo}`,
+    metadata: {
+      ticketNo: commit.ticketNo,
+      projectId: commit.ticket.project.id,
+      projectName: commit.ticket.project.name,
+      moduleName: commit.ticket.module.name,
+      repoPath: commit.repoPath,
+      commitSha: commit.commitSha,
+      author: commit.author,
+      committedAt: commit.committedAt.toISOString(),
+      branches: commit.branches,
+    },
+  };
+}
+
+export async function upsertSearchDocument(record: SearchableRecord) {
+  const embeddingInput = buildEmbeddingInput(record.title, record.content);
+  const embeddingHash = buildEmbeddingHash(embeddingInput);
+  const metadata = buildMetadataWithEmbeddingHash(record, embeddingHash);
+
+  const document = await prisma.searchDocument.upsert({
+    where: {
+      sourceType_sourceId: {
+        sourceType: record.sourceType,
+        sourceId: record.sourceId,
+      },
+    },
+    update: {
+      projectId: record.projectId ?? null,
+      title: record.title,
+      content: record.content,
+      url: record.url,
+      metadata: metadata as Prisma.InputJsonValue,
+    },
+    create: {
+      sourceType: record.sourceType,
+      sourceId: record.sourceId,
+      projectId: record.projectId ?? null,
+      title: record.title,
+      content: record.content,
+      url: record.url,
+      metadata: metadata as Prisma.InputJsonValue,
+    },
+    select: {
+      id: true,
+      title: true,
+      content: true,
+      metadata: true,
+    },
+  });
+
+  try {
+    const state = await getSearchDocumentEmbeddingState(document.id);
+    if (state) {
+      await ensureSearchDocumentEmbedding(state);
+    }
+  } catch (error) {
+    console.error("[search] failed to update embedding", {
+      sourceType: record.sourceType,
+      sourceId: record.sourceId,
+      error,
+    });
+  }
+
+  return document;
+}
+
+export async function syncTicketSearchDocument(ticketId: string) {
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: ticketId },
+    include: {
+      project: { select: { id: true, name: true } },
+      module: { include: { responsibility: { select: { kind: true } } } },
+      assignees: {
+        include: { user: { select: { id: true, name: true, email: true } } },
+      },
+      creator: { select: { name: true, email: true } },
+    },
+  });
+
+  if (!ticket) {
+    await prisma.searchDocument.deleteMany({
+      where: {
+        sourceType: SEARCH_DOCUMENT_SOURCE_TYPES.TICKET,
+        sourceId: ticketId,
+      },
+    });
+    return null;
+  }
+
+  return upsertSearchDocument(buildSearchableTicketDocument(ticket));
+}
+
+export async function syncCommitSearchDocument(commitId: string) {
+  const commit = await prisma.ticketCommit.findUnique({
+    where: { id: commitId },
+    include: {
+      ticket: {
+        include: {
+          project: { select: { id: true, name: true } },
+          module: { select: { name: true } },
+        },
+      },
+    },
+  });
+
+  if (!commit) {
+    await prisma.searchDocument.deleteMany({
+      where: {
+        sourceType: SEARCH_DOCUMENT_SOURCE_TYPES.COMMIT,
+        sourceId: commitId,
+      },
+    });
+    return null;
+  }
+
+  return upsertSearchDocument(buildSearchableCommitDocument(commit));
+}
+
+export async function backfillSearchDocuments() {
+  const tickets = await prisma.ticket.findMany({
+    include: {
+      project: { select: { id: true, name: true } },
+      module: { include: { responsibility: { select: { kind: true } } } },
+      assignees: {
+        include: { user: { select: { id: true, name: true, email: true } } },
+      },
+      creator: { select: { name: true, email: true } },
+    },
+  });
+
+  const commits = await prisma.ticketCommit.findMany({
+    include: {
+      ticket: {
+        include: {
+          project: { select: { id: true, name: true } },
+          module: { select: { name: true } },
+        },
+      },
+    },
+  });
+
+  let count = 0;
+  for (const ticket of tickets) {
+    await upsertSearchDocument(buildSearchableTicketDocument(ticket));
+    count += 1;
+  }
+
+  for (const commit of commits) {
+    await upsertSearchDocument(buildSearchableCommitDocument(commit));
+    count += 1;
+  }
+
+  return {
+    tickets: tickets.length,
+    commits: commits.length,
+    total: count,
+  };
+}
+
+async function searchDocumentsByKeyword(options: {
+  query: string;
+  projectId?: string | null;
+  limit: number;
+}) {
+  const documents = await prisma.searchDocument.findMany({
+    where: {
+      projectId: options.projectId ?? undefined,
+      OR: [
+        { title: { contains: options.query, mode: "insensitive" } },
+        { content: { contains: options.query, mode: "insensitive" } },
+      ],
+    },
+    include: {
+      project: { select: { id: true, name: true } },
+    },
+    take: options.limit * KEYWORD_CANDIDATE_MULTIPLIER,
+    orderBy: { updatedAt: "desc" },
+  });
+
+  return documents satisfies SearchDocumentRow[];
+}
+
+async function searchDocumentsByVector(options: {
+  query: string;
+  projectId?: string | null;
+  limit: number;
+}) {
+  const queryVector = await fetchEmbedding(options.query);
+  const vectorLiteral = vectorToSqlLiteral(queryVector);
+  const limit = options.limit * VECTOR_CANDIDATE_MULTIPLIER;
+  const projectIdCondition = options.projectId
+    ? Prisma.sql`AND d."projectId" = ${options.projectId}`
+    : Prisma.empty;
+  const queryVectorSql = Prisma.raw(`'${vectorLiteral}'::public.vector`);
+
+  return prisma.$queryRaw<VectorSearchRow[]>(Prisma.sql`
+    SELECT
+      d."id",
+      d."sourceType",
+      d."sourceId",
+      d."projectId",
+      d."title",
+      d."content",
+      d."url",
+      d."metadata",
+      d."updatedAt",
+      p."name" AS "projectName",
+      (d."embedding" <=> ${queryVectorSql}) AS "distance"
+    FROM pm."SearchDocument" d
+    LEFT JOIN pm."Project" p ON p."id" = d."projectId"
+    WHERE d."embedding" IS NOT NULL
+      ${projectIdCondition}
+    ORDER BY d."embedding" <=> ${queryVectorSql} ASC
+    LIMIT ${limit}
+  `);
+}
+
+function normalizeSemanticScore(distance: number) {
+  if (!Number.isFinite(distance)) return 0;
+  return Math.max(0, Math.min(1, 1 - distance));
+}
+
+function toRankedCandidate(args: {
+  document: Pick<SearchDocumentRow, "id" | "sourceType" | "title" | "content" | "url" | "metadata" | "updatedAt" | "project">;
+  query: string;
+  terms: string[];
+  keywordScore?: number;
+  semanticScore?: number;
+}) {
+  const type = toResultType(args.document.sourceType);
+  if (!type) return null;
+
+  const metadata = coerceMetadata(args.document.metadata);
+  const keywordScore = args.keywordScore ?? 0;
+  const semanticScore = args.semanticScore ?? 0;
+  const directMatchBoost = hasDirectQueryMatch(args.document.title, args.document.content, args.query) ? 2 : 0;
+  const score = keywordScore + semanticScore * 10 + directMatchBoost;
+
+  return {
+    id: args.document.id,
+    type,
+    title: args.document.title,
+    snippet: buildSnippet(args.document.content, args.terms),
+    project: args.document.project,
+    url: args.document.url,
+    score,
+    metadata,
+    keywordScore,
+    semanticScore,
+    updatedAt: args.document.updatedAt.getTime(),
+  } satisfies RankedCandidate;
+}
+
+function mergeSearchResults(options: {
+  query: string;
+  terms: string[];
+  limit: number;
+  keywordDocuments: SearchDocumentRow[];
+  vectorDocuments: VectorSearchRow[];
+}) {
+  const merged = new Map<string, RankedCandidate>();
+
+  for (const document of options.keywordDocuments) {
+    const keywordScore = rankDocument(document.title, document.content, options.terms);
+    if (keywordScore <= 0 && !hasDirectQueryMatch(document.title, document.content, options.query)) {
+      continue;
+    }
+
+    const candidate = toRankedCandidate({
+      document,
+      query: options.query,
+      terms: options.terms,
+      keywordScore,
+      semanticScore: 0,
+    });
+
+    if (candidate) {
+      merged.set(candidate.id, candidate);
+    }
+  }
+
+  for (const document of options.vectorDocuments) {
+    const keywordScore = rankDocument(document.title, document.content, options.terms);
+    const semanticScore = normalizeSemanticScore(document.distance);
+    const candidate = toRankedCandidate({
+      document: {
+        id: document.id,
+        sourceType: document.sourceType,
+        title: document.title,
+        content: document.content,
+        url: document.url,
+        metadata: document.metadata,
+        updatedAt: document.updatedAt,
+        project: document.projectId && document.projectName
+          ? { id: document.projectId, name: document.projectName }
+          : null,
+      },
+      query: options.query,
+      terms: options.terms,
+      keywordScore,
+      semanticScore,
+    });
+
+    if (!candidate) continue;
+
+    const existing = merged.get(candidate.id);
+    if (!existing) {
+      merged.set(candidate.id, candidate);
+      continue;
+    }
+
+    merged.set(candidate.id, {
+      ...existing,
+      snippet: existing.snippet || candidate.snippet,
+      score: Math.max(existing.score, 0) + semanticScore * 10,
+      keywordScore: Math.max(existing.keywordScore, keywordScore),
+      semanticScore: Math.max(existing.semanticScore, semanticScore),
+      updatedAt: Math.max(existing.updatedAt, candidate.updatedAt),
+    });
+  }
+
+  return Array.from(merged.values())
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (b.updatedAt !== a.updatedAt) return b.updatedAt - a.updatedAt;
+      return a.type.localeCompare(b.type);
+    })
+    .slice(0, options.limit)
+    .map((item) => ({
+      id: item.id,
+      type: item.type,
+      title: item.title,
+      snippet: item.snippet,
+      project: item.project,
+      url: item.url,
+      score: item.score,
+      metadata: item.metadata,
+    }));
+}
+
+export async function backfillMissingSearchEmbeddings(batchSize = 20) {
+  const documents = await prisma.$queryRaw<SearchDocumentEmbeddingStateRow[]>(Prisma.sql`
+    SELECT
+      d."id",
+      d."title",
+      d."content",
+      d."metadata",
+      (d."embedding" IS NOT NULL) AS "hasEmbedding"
+    FROM pm."SearchDocument" d
+    ORDER BY d."updatedAt" DESC
+    LIMIT ${batchSize}
+  `);
+
+  let processed = 0;
+  let updated = 0;
+  let reused = 0;
+  let failed = 0;
+
+  for (const document of documents) {
+    processed += 1;
+    try {
+      const result = await ensureSearchDocumentEmbedding(document);
+      if (result.reused) {
+        reused += 1;
+      } else {
+        updated += 1;
+      }
+    } catch (error) {
+      failed += 1;
+      console.error("[search] failed to backfill embedding", {
+        id: document.id,
+        error,
+      });
+    }
+  }
+
+  return { processed, updated, reused, failed };
+}
+
+export async function searchDocuments(options: {
+  query: string;
+  mode?: SearchResponseMode;
+  limit?: number;
+  projectId?: string | null;
+}): Promise<SearchResponse> {
+  const startedAt = Date.now();
+  const mode = options.mode ?? "search";
+  const query = normalizeQuery(options.query);
+  const limit = Math.min(Math.max(options.limit ?? SEARCH_LIMIT_DEFAULT, 1), SEARCH_LIMIT_MAX);
+  const grouped: Record<SearchResultType, SearchResultItem[]> = { ticket: [], commit: [] };
+
+  if (!query) {
+    return {
+      mode,
+      query,
+      tookMs: Date.now() - startedAt,
+      total: 0,
+      results: [],
+      grouped,
+    };
+  }
+
+  const terms = splitTerms(query);
+  const keywordDocuments = await searchDocumentsByKeyword({
+    query,
+    projectId: options.projectId,
+    limit,
+  });
+
+  let vectorDocuments: VectorSearchRow[] = [];
+  try {
+    vectorDocuments = await searchDocumentsByVector({
+      query,
+      projectId: options.projectId,
+      limit,
+    });
+  } catch (error) {
+    console.error("[search] vector search unavailable, fallback to keyword only", error);
+  }
+
+  const results = mergeSearchResults({
+    query,
+    terms,
+    limit,
+    keywordDocuments,
+    vectorDocuments,
+  });
+
+  for (const result of results) {
+    grouped[result.type].push(result);
+  }
+
+  return {
+    mode,
+    query,
+    tookMs: Date.now() - startedAt,
+    total: results.length,
+    results,
+    grouped,
+  };
+}

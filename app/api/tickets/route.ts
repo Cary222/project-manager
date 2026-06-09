@@ -13,6 +13,7 @@ import {
   buildAssignedNotification,
   createManyNotifications,
 } from "@/lib/notifications";
+import { syncTicketSearchDocument } from "@/lib/search";
 
 export async function POST(request: Request) {
   try {
@@ -81,6 +82,7 @@ export async function POST(request: Request) {
     });
 
     await syncTicketCounterAfterCreate(ticket.ticketNo);
+    await syncTicketSearchDocument(ticket.id);
 
     if (assigneeIds.length > 0) {
       const actorName = session.user.name || session.user.email || "管理员";

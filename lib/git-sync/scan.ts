@@ -4,6 +4,11 @@ import { prisma } from "@/lib/db";
 import { getCommitBranches } from "@/lib/git-sync/branches";
 import { parseTicketCommitSubject } from "@/lib/git-sync/parse";
 import { listManagedRepos } from "@/lib/git-sync/repos";
+import {
+  buildSearchableCommitDocument,
+  backfillSearchDocuments,
+  upsertSearchDocument,
+} from "@/lib/search";
 
 const execFileAsync = promisify(execFile);
 const SCAN_LIMIT = 500;
@@ -100,6 +105,20 @@ export async function syncRepoCommits(repoPath: string) {
         branches,
       },
     });
+    const linkedCommit = await prisma.ticketCommit.findUnique({
+      where: { repoPath_commitSha: { repoPath, commitSha: commit.sha } },
+      include: {
+        ticket: {
+          include: {
+            project: { select: { id: true, name: true } },
+            module: { select: { name: true } },
+          },
+        },
+      },
+    });
+    if (linkedCommit) {
+      await upsertSearchDocument(buildSearchableCommitDocument(linkedCommit));
+    }
     linked += 1;
   }
 
@@ -145,6 +164,10 @@ export async function backfillCommitBranches() {
       });
     }
   }
+}
+
+export async function backfillSearchIndex() {
+  return backfillSearchDocuments();
 }
 
 export { listManagedRepos } from "@/lib/git-sync/repos";

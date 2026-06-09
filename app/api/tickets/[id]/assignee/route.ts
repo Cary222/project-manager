@@ -14,6 +14,7 @@ import {
   createManyNotifications,
   listRootUserIds,
 } from "@/lib/notifications";
+import { syncTicketSearchDocument } from "@/lib/search";
 
 export async function PATCH(
   request: Request,
@@ -70,6 +71,7 @@ export async function PATCH(
         },
       });
     });
+    await syncTicketSearchDocument(current.id);
 
     const newAssignees = await prisma.user.findMany({
       where: { id: { in: nextAssigneeIds } },

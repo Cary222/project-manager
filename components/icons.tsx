@@ -131,6 +131,13 @@ export const IconArrowLeft = (p: IconProps) => (
   </svg>
 );
 
+export const IconArrowRight = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M5 12h14" />
+    <path d="m13 6 6 6-6 6" />
+  </svg>
+);
+
 export const IconClock = (p: IconProps) => (
   <svg {...base(p)}>
     <circle cx="12" cy="12" r="9" />
