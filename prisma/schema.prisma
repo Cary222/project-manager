@@ -182,13 +182,16 @@ model PkmNote {
   content     String
   tags        String[] @default([])
   attachments Json?
+  isPublic    Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@index([userId, updatedAt(sort: Desc)])
+  @@index([userId, isPublic, updatedAt(sort: Desc)])
   @@index([projectId, updatedAt(sort: Desc)])
+  @@index([isPublic, updatedAt(sort: Desc)])
   @@schema("pm")
 }
 

@@ -26,6 +26,7 @@ export type SearchDocumentMetadata = {
   noteUserId?: string;
   noteUserName?: string;
   noteTags?: string[];
+  noteIsPublic?: boolean;
 };
 
 export type SearchResultItem = {
@@ -104,6 +105,7 @@ export type SearchDocumentPkmNoteRecord = {
   content: string;
   tags: string[];
   attachments?: SearchDocumentPkmAttachmentRecord[] | null;
+  isPublic: boolean;
   userId: string;
   projectId: string | null;
   user: { id: string; name: string | null; email: string };

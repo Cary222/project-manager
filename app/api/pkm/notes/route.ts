@@ -57,12 +57,14 @@ export async function POST(request: Request) {
       content?: string;
       tags?: unknown;
       projectId?: string | null;
+      isPublic?: boolean;
       attachments?: unknown;
     };
 
     const title = body.title?.trim();
     const content = body.content?.trim();
     const projectId = body.projectId?.trim() || null;
+    const isPublic = body.isPublic === true;
     const tags = normalizeTags(body.tags);
     const attachments = normalizePkmAttachments(body.attachments);
 
@@ -88,6 +90,7 @@ export async function POST(request: Request) {
         content,
         tags,
         projectId,
+        isPublic,
         attachments,
       },
       include: {

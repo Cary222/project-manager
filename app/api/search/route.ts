@@ -4,7 +4,7 @@ import { requireSession } from "@/lib/permissions";
 
 export async function GET(request: Request) {
   try {
-    await requireSession();
+    const session = await requireSession();
     const { searchParams } = new URL(request.url);
     const query = searchParams.get("q") ?? "";
     const projectId = searchParams.get("projectId");
@@ -16,6 +16,7 @@ export async function GET(request: Request) {
       projectId: projectId?.trim() ? projectId : null,
       limit: Number.isFinite(limitParam) ? limitParam : 8,
       mode,
+      viewerUserId: session.user.id,
     });
 
     return NextResponse.json(data);

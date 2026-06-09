@@ -8,6 +8,7 @@ function serializeNote(note: {
   title: string;
   content: string;
   tags: string[];
+  isPublic: boolean;
   projectId: string | null;
   project: { id: string; name: string } | null;
   createdAt: Date;
@@ -29,7 +30,7 @@ export default async function PkmPage({
   const params = searchParams ? await searchParams : undefined;
   const noteId = params?.noteId ?? "";
 
-  const [notes, projects] = await Promise.all([
+  const [notes, projects, publicTagSummary] = await Promise.all([
     prisma.pkmNote.findMany({
       where: { userId: session.user.id },
       include: {
@@ -49,6 +50,20 @@ export default async function PkmPage({
         name: true,
       },
     }),
+    prisma.pkmNote.findMany({
+      where: { isPublic: true },
+      select: { tags: true },
+    }).then((items) => {
+      const counts = new Map<string, number>();
+      for (const item of items) {
+        for (const tag of item.tags) {
+          counts.set(tag, (counts.get(tag) ?? 0) + 1);
+        }
+      }
+      return Array.from(counts.entries())
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 8);
+    }),
   ]);
   const serializedNotes = notes.map(serializeNote);
 
@@ -61,7 +76,7 @@ export default async function PkmPage({
         </div>
       }
     >
-      <PkmBoard initialNotes={serializedNotes} projects={projects} initialNoteId={noteId} />
+      <PkmBoard initialNotes={serializedNotes} projects={projects} publicTagSummary={publicTagSummary} initialNoteId={noteId} />
     </AppShell>
   );
 }

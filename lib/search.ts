@@ -112,6 +112,7 @@ function coerceMetadata(value: Prisma.JsonValue | null): SearchDocumentMetadata 
     noteTags: Array.isArray(data.noteTags)
       ? data.noteTags.filter((tag): tag is string => typeof tag === "string")
       : undefined,
+    noteIsPublic: typeof data.noteIsPublic === "boolean" ? data.noteIsPublic : undefined,
   };
 }
 
@@ -300,13 +301,14 @@ export function buildSearchablePkmNoteDocument(note: SearchDocumentPkmNoteRecord
     projectId: note.projectId,
     title,
     content,
-    url: `/pkm?noteId=${note.id}`,
+    url: `/pkm/notes/${note.id}`,
     metadata: {
       projectId: note.project?.id,
       projectName: note.project?.name,
       noteUserId: note.userId,
       noteUserName: authorName,
       noteTags: note.tags,
+      noteIsPublic: note.isPublic,
       author: authorName,
     },
   };
@@ -575,11 +577,18 @@ function toRankedCandidate(args: {
   } satisfies RankedCandidate;
 }
 
+function canAccessSearchResult(item: SearchResultItem, viewerUserId?: string | null) {
+  if (item.type !== "note") return true;
+  if (item.metadata.noteUserId && viewerUserId && item.metadata.noteUserId === viewerUserId) return true;
+  return item.metadata.noteIsPublic === true;
+}
+
 function mergeCandidates(options: {
   query: string;
   terms: string[];
   keywordDocuments: SearchDocumentRow[];
   vectorDocuments: VectorSearchRow[];
+  viewerUserId?: string | null;
 }) {
   const merged = new Map<string, RankedCandidate>();
 
@@ -597,6 +606,7 @@ function mergeCandidates(options: {
     });
 
     if (!candidate) continue;
+    if (!canAccessSearchResult(candidate, options.viewerUserId)) continue;
     merged.set(candidate.id, candidate);
   }
 
@@ -623,6 +633,7 @@ function mergeCandidates(options: {
     });
 
     if (!candidate) continue;
+    if (!canAccessSearchResult(candidate, options.viewerUserId)) continue;
     const existing = merged.get(candidate.id);
     if (!existing || candidate.score > existing.score) {
       merged.set(candidate.id, candidate);
@@ -640,6 +651,7 @@ export async function searchDocuments(options: {
   projectId?: string | null;
   limit?: number;
   mode?: SearchResponseMode;
+  viewerUserId?: string | null;
 }): Promise<SearchResponse> {
   const startedAt = Date.now();
   const query = normalizeQuery(options.query);
@@ -671,6 +683,7 @@ export async function searchDocuments(options: {
     terms,
     keywordDocuments,
     vectorDocuments,
+    viewerUserId: options.viewerUserId,
   }).slice(0, limit);
 
   const grouped: Record<SearchResultType, SearchResultItem[]> = {

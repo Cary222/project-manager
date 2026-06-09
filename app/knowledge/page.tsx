@@ -1,6 +1,7 @@
 import { AppShell } from "@/components/AppShell";
-import { IconBook } from "@/components/icons";
+import { IconBook, IconTag } from "@/components/icons";
 import { KnowledgeSearchPanel } from "@/components/search/KnowledgeSearchPanel";
+import { prisma } from "@/lib/db";
 
 const SPACES = [
   { name: "光伏云平台", docs: 42, color: "bg-brand-50 text-brand-600" },
@@ -9,12 +10,14 @@ const SPACES = [
   { name: "通用研发规范", docs: 35, color: "bg-violet-50 text-purple" },
 ];
 
-const RECENT = [
-  { title: "登录鉴权统一接入文档", space: "光伏云平台", author: "张三", date: "2024-06-01" },
-  { title: "Git 提交规范与单号关联说明", space: "通用研发规范", author: "cary", date: "2024-05-31" },
-  { title: "网关协议适配指南", space: "物联网网关服务", author: "李四", date: "2024-05-30" },
-  { title: "数据库 schema 设计约定", space: "通用研发规范", author: "王五", date: "2024-05-28" },
-];
+function formatDate(value: Date) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(value);
+}
 
 export default async function KnowledgePage({
   searchParams,
@@ -24,6 +27,32 @@ export default async function KnowledgePage({
   const params = searchParams ? await searchParams : undefined;
   const initialQuery = params?.q ?? "";
   const showSearchResults = initialQuery.trim().length > 0;
+
+  const [recentNotes, publicTagSummary] = await Promise.all([
+    prisma.pkmNote.findMany({
+      where: { isPublic: true },
+      include: {
+        user: { select: { name: true, email: true } },
+        project: { select: { id: true, name: true } },
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 8,
+    }),
+    prisma.pkmNote.findMany({
+      where: { isPublic: true },
+      select: { tags: true },
+    }).then((notes) => {
+      const counts = new Map<string, number>();
+      for (const note of notes) {
+        for (const tag of note.tags) {
+          counts.set(tag, (counts.get(tag) ?? 0) + 1);
+        }
+      }
+      return Array.from(counts.entries())
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 12);
+    }),
+  ]);
 
   return (
     <AppShell
@@ -64,26 +93,53 @@ export default async function KnowledgePage({
               </div>
             </section>
 
+            <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-sm font-medium text-ink-500">公开热门标签</h2>
+                <span className="text-xs text-ink-400">团队共享笔记聚合</span>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {publicTagSummary.length === 0 ? (
+                  <span className="text-xs text-ink-400">暂无公开标签，先公开第一篇笔记。</span>
+                ) : (
+                  publicTagSummary.map(([tag, count]) => (
+                    <span
+                      key={tag}
+                      className="inline-flex items-center gap-1 rounded-full bg-ink-100 px-2.5 py-1 text-xs text-ink-600"
+                    >
+                      <IconTag className="h-3 w-3 text-ink-400" />
+                      {tag}
+                      <span className="text-ink-400">{count}</span>
+                    </span>
+                  ))
+                )}
+              </div>
+            </section>
+
             <section className="rounded-xl border border-ink-200 bg-white shadow-soft">
               <div className="border-b border-ink-100 px-5 py-4">
                 <h2 className="font-medium">最近更新</h2>
               </div>
               <ul className="divide-y divide-ink-100">
-                {RECENT.map((d) => (
-                  <li
-                    key={d.title}
-                    className="flex items-center gap-3 px-5 py-3.5 transition hover:bg-ink-100/50"
-                  >
-                    <IconBook className="h-4 w-4 text-ink-400" />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                      {d.title}
-                    </span>
-                    <span className="hidden text-xs text-ink-400 sm:inline">
-                      {d.space} · {d.author}
-                    </span>
-                    <span className="shrink-0 text-xs text-ink-400">{d.date}</span>
-                  </li>
-                ))}
+                {recentNotes.length === 0 ? (
+                  <li className="px-5 py-10 text-center text-sm text-ink-400">暂无公开笔记更新</li>
+                ) : (
+                  recentNotes.map((note) => (
+                    <li key={note.id}>
+                      <a
+                        href={`/pkm/notes/${note.id}`}
+                        className="flex items-center gap-3 px-5 py-3.5 transition hover:bg-ink-100/50"
+                      >
+                        <IconBook className="h-4 w-4 text-ink-400" />
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium">{note.title}</span>
+                        <span className="hidden text-xs text-ink-400 sm:inline">
+                          {note.project?.name || "未关联项目"} · {note.user.name || note.user.email}
+                        </span>
+                        <span className="shrink-0 text-xs text-ink-400">{formatDate(note.updatedAt)}</span>
+                      </a>
+                    </li>
+                  ))
+                )}
               </ul>
             </section>
           </>

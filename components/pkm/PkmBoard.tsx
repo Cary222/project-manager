@@ -24,6 +24,7 @@ type PkmNote = {
   content: string;
   tags: string[];
   attachments?: PkmAttachment[] | null;
+  isPublic: boolean;
   projectId: string | null;
   project: ProjectOption | null;
   createdAt: string;
@@ -33,6 +34,7 @@ type PkmNote = {
 type PkmBoardProps = {
   initialNotes: PkmNote[];
   projects: ProjectOption[];
+  publicTagSummary: Array<[string, number]>;
   initialNoteId?: string;
 };
 
@@ -46,6 +48,7 @@ const EMPTY_FORM = {
   content: "",
   tagsInput: "",
   projectId: "",
+  isPublic: false,
 };
 
 function formatDate(value: string) {
@@ -98,7 +101,7 @@ function isImageFile(file: File) {
   return file.type.startsWith("image/");
 }
 
-export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProps) {
+export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNoteId }: PkmBoardProps) {
   const [notes, setNotes] = useState(() =>
     initialNotes.map((note) => ({
       ...note,
@@ -112,6 +115,7 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
   const [content, setContent] = useState(EMPTY_FORM.content);
   const [tagsInput, setTagsInput] = useState(EMPTY_FORM.tagsInput);
   const [projectId, setProjectId] = useState(EMPTY_FORM.projectId);
+  const [isPublic, setIsPublic] = useState(EMPTY_FORM.isPublic);
   const [contentImages, setContentImages] = useState<{ src: string; name: string }[]>([]);
   const [attachments, setAttachments] = useState<PkmAttachment[]>([]);
   const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
@@ -149,6 +153,7 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
     setContent(EMPTY_FORM.content);
     setTagsInput(EMPTY_FORM.tagsInput);
     setProjectId(EMPTY_FORM.projectId);
+    setIsPublic(EMPTY_FORM.isPublic);
     setContentImages([]);
     setAttachments([]);
     setEditingId(null);
@@ -167,6 +172,7 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
     setContent(initialContent.plainContent);
     setTagsInput(tagsToInput(note.tags));
     setProjectId(note.projectId || "");
+    setIsPublic(note.isPublic);
     setContentImages(initialContent.images);
     setAttachments(normalizePkmAttachments(note.attachments));
     setShowForm(true);
@@ -257,6 +263,7 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
           content: fullContent,
           tags: parseTags(tagsInput),
           projectId: projectId || null,
+          isPublic,
           attachments,
         }),
       });
@@ -372,12 +379,12 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
             </div>
 
             <div className="rounded-xl border border-ink-200 bg-white p-4 shadow-soft">
-              <h2 className="mb-3 text-sm font-medium text-ink-500">热门标签</h2>
+              <h2 className="mb-3 text-sm font-medium text-ink-500">公开热门标签</h2>
               <div className="flex flex-wrap gap-2">
-                {tagSummary.length === 0 ? (
-                  <span className="text-xs text-ink-400">还没有标签，先写第一条笔记。</span>
+                {publicTagSummary.length === 0 ? (
+                  <span className="text-xs text-ink-400">暂无公开标签，先公开第一条团队笔记。</span>
                 ) : (
-                  tagSummary.map(([tag, count]) => (
+                  publicTagSummary.map(([tag, count]) => (
                     <span
                       key={tag}
                       className="inline-flex items-center gap-1 rounded-full bg-ink-100 px-2.5 py-1 text-xs text-ink-600"
@@ -450,6 +457,21 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
                       placeholder="例如：RAG, Prisma, 搜索"
                       className="w-full min-w-0 rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
                     />
+                  </label>
+
+                  <label className="md:col-span-2 flex items-start gap-3 rounded-lg border border-ink-200 bg-ink-50/60 px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={isPublic}
+                      onChange={(e) => setIsPublic(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-400"
+                    />
+                    <span>
+                      <span className="block text-sm font-medium text-ink-700">公开到团队知识库</span>
+                      <span className="mt-1 block text-xs text-ink-400">
+                        公开后会出现在知识库最近更新、公共搜索和热门标签中；不公开时仅你自己可查看。
+                      </span>
+                    </span>
                   </label>
 
                   <label className="flex min-w-0 flex-col gap-2 md:col-span-2">
@@ -647,7 +669,16 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
                           </span>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center justify-between gap-3">
-                              <h3 className="truncate font-medium text-ink-900">{note.title}</h3>
+                              <div className="flex min-w-0 items-center gap-2">
+                                <h3 className="truncate font-medium text-ink-900">{note.title}</h3>
+                                <span
+                                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                                    note.isPublic ? "bg-emerald-50 text-emerald-700" : "bg-ink-100 text-ink-500"
+                                  }`}
+                                >
+                                  {note.isPublic ? "公开" : "私有"}
+                                </span>
+                              </div>
                               <span className="shrink-0 text-xs text-ink-400">{formatDate(note.updatedAt)}</span>
                             </div>
                             <p className="mt-1.5 line-clamp-2 text-sm text-ink-500">{summarizeContent(note.content) || "暂无正文"}</p>
@@ -690,7 +721,16 @@ export function PkmBoard({ initialNotes, projects, initialNoteId }: PkmBoardProp
                     <h2 className="text-base font-medium text-ink-900">当前查看</h2>
                     <p className="mt-1 text-xs text-ink-400">{selectedNote.project?.name || "未关联项目"}</p>
                   </div>
-                  <span className="text-xs text-ink-400">更新于 {formatDate(selectedNote.updatedAt)}</span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                        selectedNote.isPublic ? "bg-emerald-50 text-emerald-700" : "bg-ink-100 text-ink-500"
+                      }`}
+                    >
+                      {selectedNote.isPublic ? "公开笔记" : "私有笔记"}
+                    </span>
+                    <span className="text-xs text-ink-400">更新于 {formatDate(selectedNote.updatedAt)}</span>
+                  </div>
                 </div>
                 <h3 className="mt-4 text-lg font-semibold text-ink-900">{selectedNote.title}</h3>
                 {selectedNote.tags.length > 0 ? (
