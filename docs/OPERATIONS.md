@@ -18,7 +18,7 @@ cp .env.example .env
 
 | 变量 | 说明 |
 |------|------|
-| `DATABASE_URL` | PostgreSQL，带 `?schema=pm` |
+| `DATABASE_URL` | PostgreSQL，默认 schema 为 `pm`，并带 `search_path=pm,public` |
 | `AUTH_SECRET` / `NEXTAUTH_SECRET` | 随机密钥 |
 | `AUTH_TRUST_HOST=true` | 必须开启，支持局域网访问 |
 
