@@ -58,7 +58,7 @@ export async function GET(
         r."targetTicketId",
         t."ticketNo" AS "targetTicketNo",
         t.title AS "targetTicketTitle"
-      FROM pm."TicketPushRecord" AS r
+      FROM pm."DesignProgramBinding" AS r
       LEFT JOIN pm."Ticket" AS t ON t.id = r."targetTicketId"
       WHERE r."sourceTicketId" = ${ticket.id}
       LIMIT 1

@@ -115,7 +115,7 @@ type Module = {
 
 type Responsibility = {
   id: string;
-  kind: "PROGRAM" | "DESIGN";
+  kind: "PROGRAM" | "DESIGN" | "BUG";
   modules: Module[];
 };
 
@@ -129,6 +129,7 @@ type Project = {
 const KIND_LABEL: Record<Responsibility["kind"], string> = {
   PROGRAM: "程序",
   DESIGN: "设计",
+  BUG: "Bug",
 };
 
 const STATUS_LABEL: Record<TicketStatus, string> = {
@@ -535,6 +536,27 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 </button>
               );
             })}
+            {!project.responsibilities.some((r) => r.kind === "BUG") && isRoot && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const res = await fetch(`/api/projects/${projectId}/responsibilities`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ kind: "BUG" }),
+                  });
+                  if (res.ok) {
+                    await loadProject();
+                  } else {
+                    const err = await res.json().catch(() => ({}));
+                    setMessage(`创建Bug职能失败: ${err.error}`);
+                  }
+                }}
+                className="w-full rounded-xl border border-dashed border-rose-300 bg-rose-50/50 p-4 text-left text-sm text-rose-600 transition hover:border-rose-400 hover:bg-rose-50"
+              >
+                + 添加 Bug 职能
+              </button>
+            )}
           </section>
 
           {/* 单子区 */}

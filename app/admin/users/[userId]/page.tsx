@@ -24,6 +24,7 @@ const STATUS_LABEL: Record<TicketStatus, string> = {
 const KIND_LABEL: Record<string, string> = {
   PROGRAM: "程序",
   DESIGN: "设计",
+  BUG: "Bug",
 };
 
 export default function UserDetailPage({ params }: Props) {

@@ -74,6 +74,20 @@ export async function GET(
         commits: {
           orderBy: { committedAt: "desc" },
         },
+        pushSources: {
+          include: {
+            sourceTicket: {
+              select: { id: true, ticketNo: true, title: true },
+            },
+          },
+        },
+        bugSources: {
+          include: {
+            programTicket: {
+              select: { id: true, ticketNo: true, title: true },
+            },
+          },
+        },
         assigneeHistory: {
           orderBy: { createdAt: "desc" },
           include: {
@@ -101,6 +115,8 @@ export async function GET(
         creatorId: ticket.creator.id,
         assignees: ticket.assignees.map((item) => item.user),
         assigneeHistory,
+        pushSources: ticket.pushSources,
+        bugSources: ticket.bugSources,
       },
     });
   } catch (error) {
@@ -130,9 +146,15 @@ export async function DELETE(
 
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`
-        DELETE FROM pm."TicketPushRecord"
+        DELETE FROM pm."DesignProgramBinding"
         WHERE "sourceTicketId" = ${ticket.id}
            OR "targetTicketId" = ${ticket.id}
+      `;
+
+      await tx.$executeRaw`
+        DELETE FROM pm."BugProgramBinding"
+        WHERE "bugTicketId" = ${ticket.id}
+           OR "programTicketId" = ${ticket.id}
       `;
 
       await tx.ticket.delete({

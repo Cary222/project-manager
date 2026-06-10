@@ -81,7 +81,7 @@ export async function GET(
         r."targetTicketId",
         t."ticketNo" AS "targetTicketNo",
         t.title AS "targetTicketTitle"
-      FROM pm."TicketPushRecord" AS r
+      FROM pm."DesignProgramBinding" AS r
       LEFT JOIN pm."Ticket" AS t ON t.id = r."targetTicketId"
       WHERE r."sourceTicketId" = ${sourceTicket.id}
       LIMIT 1
@@ -123,24 +123,42 @@ export async function GET(
     const candidateTicket = candidateModule
       ? await prisma.ticket.findFirst({
           where: {
+            id: { not: sourceTicket.id },
             projectId: sourceTicket.projectId,
             moduleId: candidateModule.id,
             title: normalizeText(sourceTicket.title),
           },
           orderBy: { createdAt: "desc" },
-          select: {
-            id: true,
-            ticketNo: true,
-            title: true,
+          include: {
+            assignees: { select: { userId: true } },
           },
         })
       : null;
 
+    // 权限检查：候选人必须对候选单有读权限
+    const canAccessCandidate =
+      candidateTicket &&
+      (candidateTicket.creatorId === session.user.id ||
+        candidateTicket.assignees.some((a) => a.userId === session.user.id) ||
+        session.user.role === "ROOT");
+
+    const accessibleCandidate = canAccessCandidate ? candidateTicket : null;
+
     return NextResponse.json({
-      mode: candidateTicket ? "candidate" : "unbound",
-      record,
+      mode: accessibleCandidate ? "candidate" : "unbound",
+      record: record ?? {
+        status: "PENDING",
+        errorMessage: null,
+        draftTitle: normalizeText(sourceTicket.title),
+        draftDescription: null,
+        programAssigneeIds: [],
+        designAssigneeIds: [],
+        targetTicket: null,
+      },
       targetTicket: null,
-      candidateTicket,
+      candidateTicket: accessibleCandidate
+        ? { id: accessibleCandidate.id, ticketNo: accessibleCandidate.ticketNo, title: accessibleCandidate.title }
+        : null,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";

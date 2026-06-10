@@ -64,14 +64,14 @@ export async function PATCH(
 
     const existingRows = await prisma.$queryRaw<Array<{ id: string }>>`
       SELECT id
-      FROM pm."TicketPushRecord"
+      FROM pm."DesignProgramBinding"
       WHERE "sourceTicketId" = ${ticket.id}
       LIMIT 1
     `;
 
     if (existingRows[0]) {
       await prisma.$executeRaw`
-        UPDATE pm."TicketPushRecord"
+        UPDATE pm."DesignProgramBinding"
         SET
           status = ${normalizedStatus},
           "errorMessage" = ${body.errorMessage ?? null},
@@ -85,7 +85,7 @@ export async function PATCH(
       `;
     } else {
       await prisma.$executeRaw`
-        INSERT INTO pm."TicketPushRecord" (
+        INSERT INTO pm."DesignProgramBinding" (
           id,
           "sourceTicketId",
           "targetTicketId",
@@ -127,7 +127,7 @@ export async function PATCH(
         r."targetTicketId",
         t."ticketNo" AS "targetTicketNo",
         t.title AS "targetTicketTitle"
-      FROM pm."TicketPushRecord" AS r
+      FROM pm."DesignProgramBinding" AS r
       LEFT JOIN pm."Ticket" AS t ON t.id = r."targetTicketId"
       WHERE r."sourceTicketId" = ${ticket.id}
       LIMIT 1

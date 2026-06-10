@@ -1,8 +1,8 @@
 import dynamic from "next/dynamic";
-import { TicketDetailLoading } from "@/components/TicketDetail";
+import { TicketDetailLoading } from "@/components/ticket-detail";
 
 const TicketDetail = dynamic(
-  () => import("@/components/TicketDetail").then((mod) => mod.TicketDetail),
+  () => import("@/components/ticket-detail").then((mod) => mod.TicketDetail),
   {
     loading: () => <TicketDetailLoading />,
   }

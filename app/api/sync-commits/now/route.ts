@@ -6,7 +6,6 @@ export async function POST() {
   try {
     await requireSession();
     const result = await syncAllManagedRepos();
-
     return NextResponse.json({ result });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";

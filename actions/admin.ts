@@ -31,7 +31,7 @@ export type UserTicket = {
   title: string;
   status: TicketStatus;
   project: { id: string; name: string };
-  module: { name: string; responsibility: { kind: "PROGRAM" | "DESIGN" } };
+  module: { name: string; responsibility: { kind: "PROGRAM" | "DESIGN" | "BUG" } };
 };
 
 export async function getUserTicketsAction(userId: string, status?: TicketStatus) {

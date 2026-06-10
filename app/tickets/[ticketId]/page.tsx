@@ -1,4 +1,4 @@
-import { TicketDetail } from "@/components/TicketDetail";
+import { TicketDetail } from "@/components/ticket-detail";
 
 export const dynamic = "force-dynamic";
 

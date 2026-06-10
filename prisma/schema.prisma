@@ -42,6 +42,7 @@ enum ModerationAction {
 enum ResponsibilityKind {
   PROGRAM
   DESIGN
+  BUG
 
   @@schema("pm")
 }
@@ -85,7 +86,8 @@ model User {
   updatedSystemSettings SystemSetting[] @relation("SystemSettingUpdater")
   notifications Notification[] @relation("NotificationRecipient")
   actorNotifications Notification[] @relation("NotificationActor")
-  pushRecords        TicketPushRecord[]
+  pushRecords        DesignProgramBinding[]
+  bugBindings        BugProgramBinding[]
   pkmNotes           PkmNote[]
 
   @@schema("pm")
@@ -258,13 +260,15 @@ model Ticket {
   assigneeHistory TicketAssigneeHistory[]
   statusHistory TicketStatusHistory[]
   notifications Notification[]
-  pushSources   TicketPushRecord[]    @relation("PushSourceTicket")
-  pushTargets   TicketPushRecord[]    @relation("PushTargetTicket")
+  pushSources   DesignProgramBinding[]    @relation("PushSourceTicket")
+  pushTargets   DesignProgramBinding[]    @relation("PushTargetTicket")
+  bugSources    BugProgramBinding[]       @relation("BugSourceTicket")
+  bugTargets    BugProgramBinding[]      @relation("BugTargetTicket")
 
   @@schema("pm")
 }
 
-model TicketPushRecord {
+model DesignProgramBinding {
   id                 String   @id @default(cuid())
   sourceTicketId     String
   targetTicketId     String?
@@ -275,6 +279,7 @@ model TicketPushRecord {
   draftDescription   String?
   programAssigneeIds String[] @default([])
   designAssigneeIds  String[] @default([])
+  bugCommitIds       String[] @default([])
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   sourceTicket       Ticket   @relation("PushSourceTicket", fields: [sourceTicketId], references: [id], onDelete: Cascade)
@@ -283,6 +288,25 @@ model TicketPushRecord {
 
   @@unique([sourceTicketId])
   @@index([createdById, createdAt(sort: Desc)])
+  @@schema("pm")
+}
+
+model BugProgramBinding {
+  id              String   @id @default(cuid())
+  bugTicketId     String
+  programTicketId String
+  draftTitle      String   @default("")
+  fixCommitIds    String[] @default([])
+  boundById       String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  bugTicket       Ticket   @relation("BugSourceTicket", fields: [bugTicketId], references: [id], onDelete: Cascade)
+  programTicket   Ticket   @relation("BugTargetTicket", fields: [programTicketId], references: [id], onDelete: Cascade)
+  boundBy         User     @relation(fields: [boundById], references: [id], onDelete: Restrict)
+
+  @@unique([bugTicketId, programTicketId])
+  @@index([programTicketId])
+  @@index([bugTicketId])
   @@schema("pm")
 }
 

@@ -20,7 +20,7 @@ export type TicketCreateModule = {
 
 export type TicketCreateResponsibility = {
   id: string;
-  kind: "PROGRAM" | "DESIGN";
+  kind: "PROGRAM" | "DESIGN" | "BUG";
   modules: TicketCreateModule[];
 };
 
@@ -58,6 +58,8 @@ type TicketCreateFormProps = {
   showDesignAssignees?: boolean;
   editableDesignAssignees?: boolean;
   currentUserId?: string;
+  bugTicketMode?: boolean;
+  sourceTicketNo?: number;
 };
 
 export function TicketCreateForm({
@@ -75,6 +77,8 @@ export function TicketCreateForm({
   showDesignAssignees = responsibility.kind === "DESIGN",
   editableDesignAssignees = responsibility.kind === "DESIGN",
   currentUserId,
+  bugTicketMode = false,
+  sourceTicketNo,
 }: TicketCreateFormProps) {
   const [moduleId, setModuleId] = useState(initialValues?.moduleId ?? "");
   const [newModuleName, setNewModuleName] = useState(initialValues?.newModuleName ?? "");
@@ -189,15 +193,27 @@ export function TicketCreateForm({
       return;
     }
 
-    const ticketRes = await fetch("/api/tickets", {
+    const apiUrl = bugTicketMode && sourceTicketNo
+      ? `/api/tickets/${sourceTicketNo}/bug-ticket`
+      : "/api/tickets";
+
+    const ticketRes = await fetch(apiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        projectId,
-        moduleId: targetModuleId,
-        assigneeIds: effectiveProgramAssigneeIds,
-        title: title.trim(),
-        description: fullDescription,
+        ...(bugTicketMode && sourceTicketNo
+          ? {
+              title: title.trim(),
+              description: fullDescription,
+              assigneeIds: effectiveProgramAssigneeIds,
+            }
+          : {
+              projectId,
+              moduleId: targetModuleId,
+              assigneeIds: effectiveProgramAssigneeIds,
+              title: title.trim(),
+              description: fullDescription,
+            }),
       }),
     });
 
@@ -220,9 +236,20 @@ export function TicketCreateForm({
       return;
     }
 
-    const data = (await ticketRes.json()) as {
-      ticket: { id: string; ticketNo: number; title: string };
+    const rawData = await ticketRes.json();
+
+    const data = rawData as {
+      ticket?: { id: string; ticketNo: number; title: string };
+      bugTicket?: { id: string; ticketNo: number; title: string };
     };
+
+    const createdTicket = data.bugTicket ?? data.ticket;
+
+    if (!createdTicket) {
+      setSubmitting(false);
+      onMessage?.("创建单子失败: 响应格式错误");
+      return;
+    }
 
     setModuleId("");
     setNewModuleName("");
@@ -233,7 +260,7 @@ export function TicketCreateForm({
     setDescriptionImages([]);
     onMessage?.("单子已创建");
     await onCreated?.({
-      ticket: data.ticket,
+      ticket: createdTicket,
       programAssigneeIds: effectiveProgramAssigneeIds,
       designAssigneeIds,
       title: title.trim(),
