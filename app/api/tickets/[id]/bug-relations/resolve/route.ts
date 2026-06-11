@@ -15,6 +15,7 @@ export async function GET(
     const { id } = await context.params;
     const ticketNo = Number(id);
 
+    // 加载源程序单的模块所属职责类型（必须）
     const sourceTicket = await prisma.ticket.findUnique({
       where: Number.isInteger(ticketNo) ? { ticketNo } : { id },
       include: {
@@ -22,7 +23,11 @@ export async function GET(
           select: { userId: true },
         },
         module: {
-          select: { name: true },
+          include: {
+            responsibility: {
+              select: { kind: true },
+            },
+          },
         },
         project: {
           include: {
@@ -54,6 +59,18 @@ export async function GET(
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
     }
 
+    // 必须是 PROGRAM 类型的单子才能检索 Bug 单
+    if (sourceTicket.module.responsibility.kind !== "PROGRAM") {
+      return NextResponse.json({
+        mode: "unbound",
+        candidateTicket: null,
+        shouldAutoCreate: false,
+        fixCommitCount: 0,
+        fixCommitIds: [],
+        fixCommits: [],
+      });
+    }
+
     // 检查已绑定列表
     const existingBindings = await prisma.bugProgramBinding.findMany({
       where: { programTicketId: sourceTicket.id },
@@ -61,9 +78,13 @@ export async function GET(
     });
     const boundBugIds = existingBindings.map((b) => b.bugTicketId);
 
-    // 检查是否有 fix: 关键词的提交
-    // 支持格式：fix:xxx, fix：xxx, fix修补xxx, ，fix修补xxx 等
-    const fixCommitPattern = /(?:^|[，,、\s])fix[:：\s]*/i;
+    // 支持的 fix 关键词格式：
+    // - fix:xxx / fix：xxx  （英文/中文冒号分隔）
+    // - xxx fix xxx        （fix 作为独立词，前后有分隔）
+    // - 故障fix / bug fix   （中文/英文词+空格+fix）
+    // - fix                （句末的 fix）
+    // 即：fix 前后有分隔符（冒号/空格/汉字）或出现在句末
+    const fixCommitPattern = /(?<=[\u4e00-\u9fa5a-zA-Z\s]|^)fix(?::|：|$|[\s\u4e00-\u9fa5])/i;
     const fixCommits = sourceTicket.commits.filter((c) => fixCommitPattern.test(c.subject));
 
     // 查找 Bug 职责目录
@@ -75,13 +96,16 @@ export async function GET(
 
     let candidateBugTicket: { id: string; ticketNo: number; title: string } | null = null;
 
-    // 优先级1：同一模块下同名 Bug 单
+    // 优先级1：Bug 职责下，同模块 + 同名标题的 Bug 单
     if (candidateModule) {
       const sameModuleBug = await prisma.ticket.findFirst({
         where: {
           id: { not: sourceTicket.id, notIn: boundBugIds },
           projectId: sourceTicket.projectId,
           moduleId: candidateModule.id,
+          module: {
+            responsibility: { kind: "BUG" },
+          },
           title: normalizeText(sourceTicket.title),
         },
         orderBy: { createdAt: "desc" },
@@ -92,19 +116,18 @@ export async function GET(
       }
     }
 
-    // 优先级2：从 fix 提交中提取被修复的单号，查找对应 Bug 单
-    // 排除源程序单本身（fix 提交通常是关于自身的问题）
+    // 优先级2：从 fix 提交中提取被修复的单号，在 Bug 职责下查找对应单
     if (!candidateBugTicket && fixCommits.length > 0) {
       for (const commit of fixCommits) {
-        // 提取 #XXXXX 格式的单号
         const ticketNoMatch = commit.subject.match(/#(\d{5,})/);
         if (ticketNoMatch) {
           const referencedTicketNo = parseInt(ticketNoMatch[1], 10);
-          // 查找该单号的 Bug 单（排除源程序单本身）
+          // 必须在 Bug 职责下，排除源程序单本身
           const referencedBug = await prisma.ticket.findFirst({
             where: {
               ticketNo: referencedTicketNo,
               id: { not: sourceTicket.id, notIn: boundBugIds },
+              module: { responsibility: { kind: "BUG" } },
             },
             select: { id: true, ticketNo: true, title: true },
           });
@@ -116,17 +139,16 @@ export async function GET(
       }
     }
 
-    // 优先级3：如果有 fix 提交但没有找到候选 Bug 单，
-    // 说明这些 fix 是修复本程序的问题，应该创建一个新的 Bug 单
+    // 优先级3：有 fix 提交但没找到候选 Bug 单 → 预填 fix 信息引导用户创建
     const shouldAutoCreate = !candidateBugTicket && fixCommits.length > 0;
 
-    // 优先级3（修改）：查找标题包含源程序单标题的 Bug 单
-    // 但如果有 fix 提交，跳过这步（fix 提交说明问题不在现有单里）
+    // 优先级4：Bug 职责下，标题包含源程序单标题的 Bug 单（无 fix 提交时）
     if (!candidateBugTicket && !shouldAutoCreate) {
       const similarBug = await prisma.ticket.findFirst({
         where: {
           projectId: sourceTicket.projectId,
           id: { not: sourceTicket.id, notIn: boundBugIds },
+          module: { responsibility: { kind: "BUG" } },
           OR: [
             { title: { contains: normalizeText(sourceTicket.title) } },
             { title: { contains: `Bug: ${normalizeText(sourceTicket.title)}` } },

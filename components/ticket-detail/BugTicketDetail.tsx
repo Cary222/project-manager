@@ -19,7 +19,9 @@ export function BugTicketDetail({ ticket }: Props) {
   const [fixCommits, setFixCommits] = useState<FixCommit[]>([]);
   const [selectedCommit, setSelectedCommit] = useState<CommitSummary | null>(null);
   const sourceInfo = ticket.bugSources?.[0];
-  const ticketFixCommits = ticket.commits.filter((c) => /^fix[:：]\s*/i.test(c.subject));
+  // 支持中文句式中的 fix 关键词，如"故障fix" / "搜索故障fix"
+  const fixCommitPattern = /(?<=[\u4e00-\u9fa5a-zA-Z\s]|^)fix(?::|：|$|[\s\u4e00-\u9fa5])/i;
+  const ticketFixCommits = ticket.commits.filter((c) => fixCommitPattern.test(c.subject));
 
   useEffect(() => {
     async function fetchFixCommits() {

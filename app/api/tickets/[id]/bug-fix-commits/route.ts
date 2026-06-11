@@ -56,7 +56,7 @@ export async function GET(
     }
 
     // 从程序单的提交中筛选出 fix commits
-    const fixCommitPattern = /(?:^|[，,、\s])fix[:：\s]*/i;
+    const fixCommitPattern = /(?<=[\u4e00-\u9fa5a-zA-Z\s]|^)fix(?::|：|$|[\s\u4e00-\u9fa5])/i;
     const fixCommits = binding.programTicket.commits
       .filter((c) => binding.fixCommitIds.includes(c.id) && fixCommitPattern.test(c.subject))
       .map((c) => ({

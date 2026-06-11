@@ -17,15 +17,18 @@ export async function GET(request: Request) {
       );
     }
 
-    const linked = await prisma.ticketCommit.findUnique({
-      where: { repoPath_commitSha: { repoPath, commitSha } },
-      select: { id: true },
+    const linked = await prisma.ticketCommit.findFirst({
+      where: {
+        repoPath,
+        commitSha: { startsWith: commitSha },
+      },
+      select: { id: true, commitSha: true },
     });
     if (!linked) {
       return NextResponse.json({ error: "commit not found" }, { status: 404 });
     }
 
-    const diff = await getCommitDiff(repoPath, commitSha);
+    const diff = await getCommitDiff(repoPath, linked.commitSha);
     return NextResponse.json({ diff });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
