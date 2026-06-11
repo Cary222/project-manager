@@ -183,7 +183,7 @@ export default function UserDetailPage({ params }: Props) {
                       return (
                         <li key={ticket.id}>
                           <Link
-                            href={`/${ticket.ticketNo}`}
+                            href={`/tickets/${ticket.id}`}
                             className={`block rounded-lg border px-3 py-2 transition ${
                               isDone
                                 ? "border-zinc-100 bg-zinc-50 text-zinc-400 hover:border-zinc-200 hover:bg-zinc-100"

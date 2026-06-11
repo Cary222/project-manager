@@ -199,3 +199,11 @@ export const IconTrend = (p: IconProps) => (
     <polyline points="15 7 21 7 21 13" />
   </svg>
 );
+
+export const IconTicket = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M3 10h18" />
+    <path d="M10 4v6" />
+  </svg>
+);

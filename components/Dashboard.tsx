@@ -12,42 +12,20 @@ import {
   IconSearch,
   IconTask,
 } from "@/components/icons";
-import { fetchJson } from "../lib/fetch-json";
-import { STALE_SWR_OPTIONS } from "../lib/swr-config";
+import { fetchJson } from "@/lib/fetch-json";
+import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
+import {
+  type TicketStatus,
+  type MyTicket,
+  STATUS_LABEL,
+  STATUS_ORDER,
+} from "@/components/ticket-detail/types";
 
 type Project = {
   id: string;
   name: string;
   description: string | null;
   status: string;
-};
-
-type TicketStatus = "DEVELOPING" | "READY_FOR_TEST" | "DELIVERED" | "DONE";
-
-type MyTicket = {
-  id: string;
-  ticketNo: number;
-  title: string;
-  status: TicketStatus;
-  project: { id: string; name: string };
-  module: {
-    name: string;
-    responsibility: { kind: "PROGRAM" | "DESIGN" };
-  };
-};
-
-const STATUS_LABEL: Record<TicketStatus, string> = {
-  DEVELOPING: "开发中",
-  READY_FOR_TEST: "待测试",
-  DELIVERED: "已交付",
-  DONE: "已完成",
-};
-
-const STATUS_ORDER: Record<TicketStatus, number> = {
-  DEVELOPING: 0,
-  READY_FOR_TEST: 1,
-  DELIVERED: 2,
-  DONE: 3,
 };
 
 const STATUS_STYLE: Record<TicketStatus, string> = {
@@ -436,7 +414,7 @@ export function Dashboard() {
               {sortedTickets.slice(0, 8).map((t) => (
                 <li key={t.id}>
                   <Link
-                    href={`/${t.ticketNo}`}
+                    href={`/tickets/${t.id}`}
                     className="flex items-start gap-3 px-5 py-4 transition hover:bg-ink-100/40"
                   >
                     <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-ink-100 text-sm font-semibold text-ink-700">

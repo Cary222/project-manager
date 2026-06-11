@@ -61,7 +61,7 @@ export function BugTicketDetail({ ticketId, ticket, onMessage }: Props) {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Link href={`/tickets/${sourceInfo.programTicket.ticketNo}`} className="inline-flex justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700">
+              <Link href={`/tickets/${sourceInfo.programTicket.id}`} className="inline-flex justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700">
                 查看程序单
               </Link>
             </div>

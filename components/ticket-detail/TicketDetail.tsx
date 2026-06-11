@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { useSession } from "next-auth/react";
-import { AppShell } from "@/components/AppShell";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { AssigneePicker } from "@/components/AssigneePicker";
@@ -30,7 +29,7 @@ import { BugTicketDetail } from "./BugTicketDetail";
 
 // ==================== Loading Skeleton ====================
 
-function TicketDetailHeaderSkeleton() {
+export function TicketDetailHeaderSkeleton() {
   return (
     <div className="flex items-center gap-3">
       <div className="h-8 w-8 animate-pulse rounded-lg bg-ink-200" />
@@ -87,11 +86,7 @@ function TicketDetailContentSkeleton() {
 }
 
 export function TicketDetailLoading() {
-  return (
-    <AppShell header={<TicketDetailHeaderSkeleton />}>
-      <TicketDetailContentSkeleton />
-    </AppShell>
-  );
+  return <TicketDetailContentSkeleton />;
 }
 
 // ==================== Avatar ====================
@@ -316,14 +311,14 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
 
   if (!ticket) {
     return (
-      <AppShell>
+      <div className="pm-fade-in p-6">
         <Link href="/tasks" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-900">
           <IconArrowLeft className="h-4 w-4" /> 返回任务列表
         </Link>
         <p className="mt-6 rounded-xl border border-dashed border-ink-200 bg-white p-12 text-center text-ink-400">
           单子不存在
         </p>
-      </AppShell>
+      </div>
     );
   }
 
@@ -341,22 +336,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
           }}
         />
       )}
-      <AppShell
-        header={
-          <div className="flex items-center gap-3">
-            <Link href={`/projects/${ticket.project.id}`} className="rounded-lg p-1.5 text-ink-400 hover:bg-ink-100 hover:text-ink-700">
-              <IconArrowLeft />
-            </Link>
-            <div>
-              <h1 className="text-lg font-semibold leading-tight">#{ticket.ticketNo}</h1>
-              <p className="text-xs text-ink-400">
-                {ticket.project.name} · {KIND_LABEL[ticket.module.responsibility.kind]} / {ticket.module.name}
-              </p>
-            </div>
-          </div>
-        }
-      >
-        <div className="space-y-5 pm-fade-in">
+      <div className="space-y-5 pm-fade-in">
           {message && (
             <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>
           )}
@@ -583,7 +563,6 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
             </div>
           </div>
         </div>
-      </AppShell>
-    </>
+      </>
   );
 }

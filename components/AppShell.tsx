@@ -27,6 +27,7 @@ import {
   IconSettings,
   IconTask,
   IconTeam,
+  IconTicket,
 } from "@/components/icons";
 
 type NavItem = {
@@ -49,7 +50,13 @@ const NAV_ITEMS: NavItem[] = [
     href: "/tasks",
     label: "任务",
     icon: IconTask,
-    match: (p) => p.startsWith("/tasks") || /^\/\d+$/.test(p),
+    match: (p) => p.startsWith("/tasks"),
+  },
+  {
+    href: "/tickets",
+    label: "单子",
+    icon: IconTicket,
+    match: (p) => p.startsWith("/tickets") || /^\/\d+$/.test(p),
   },
   { href: "/pkm", label: "PKM", icon: IconPkm, match: (p) => p.startsWith("/pkm") },
   {
@@ -312,7 +319,7 @@ export function AppShell({
                     </div>
                   ) : (
                     notifications.map((item) => {
-                      const href = item.ticketNo ? `/${item.ticketNo}` : "/tasks";
+                      const href = item.ticketId ? `/tickets/${item.ticketId}` : "/tasks";
                       return (
                         <div
                           key={item.id}

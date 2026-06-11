@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import useSWR from "swr";
-import { AppShell } from "@/components/AppShell";
 import { formatAssigneeNames } from "@/components/AssigneePicker";
 import {
   TicketCreateForm,
@@ -14,6 +13,15 @@ import { useCallback, useMemo, useState } from "react";
 import { IconArrowLeft, IconEdit, IconPlus, IconTrash } from "@/components/icons";
 import { fetchJson } from "@/lib/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
+import { KIND_LABEL, Module } from "@/components/ticket-detail/types";
+import {
+  type Ticket,
+  type MyTicket,
+  type Project,
+  STATUS_LABEL,
+  STATUS_STYLE,
+  STATUS_ORDER,
+} from "@/components/ticket-detail/types";
 
 function ProjectDetailHeaderSkeleton() {
   return (
@@ -90,78 +98,8 @@ function ProjectDetailContentSkeleton() {
   );
 }
 
-type Ticket = {
-  id: string;
-  ticketNo: number;
-  title: string;
-  description: string | null;
-  progress: number;
-  status: TicketStatus;
-  assignees: User[];
-};
-
-type TicketStatus = "DEVELOPING" | "READY_FOR_TEST" | "DELIVERED" | "DONE";
-
-type User = {
-  id: string;
-  name: string | null;
-  email: string;
-  role: "ROOT" | "USER";
-};
-
-type Module = {
-  id: string;
-  name: string;
-  description: string | null;
-  tickets: Ticket[];
-};
-
-type Responsibility = {
-  id: string;
-  kind: "PROGRAM" | "DESIGN" | "BUG";
-  modules: Module[];
-};
-
-type Project = {
-  id: string;
-  name: string;
-  description: string | null;
-  responsibilities: Responsibility[];
-};
-
-const KIND_LABEL: Record<Responsibility["kind"], string> = {
-  PROGRAM: "程序",
-  DESIGN: "设计",
-  BUG: "Bug",
-};
-
-const STATUS_LABEL: Record<TicketStatus, string> = {
-  DEVELOPING: "开发中",
-  READY_FOR_TEST: "待测试",
-  DELIVERED: "已交付",
-  DONE: "已完成",
-};
-
-const STATUS_STYLE: Record<TicketStatus, string> = {
-  DEVELOPING: "bg-brand-50 text-brand-700",
-  READY_FOR_TEST: "bg-amber-50 text-warning",
-  DELIVERED: "bg-violet-50 text-violet-700",
-  DONE: "bg-emerald-50 text-emerald-600",
-};
-
-const STATUS_ORDER: Record<TicketStatus, number> = {
-  DEVELOPING: 0,
-  READY_FOR_TEST: 1,
-  DELIVERED: 2,
-  DONE: 3,
-};
-
 export function ProjectDetailLoading() {
-  return (
-    <AppShell header={<ProjectDetailHeaderSkeleton />}>
-      <ProjectDetailContentSkeleton />
-    </AppShell>
-  );
+  return <ProjectDetailContentSkeleton />;
 }
 
 export function ProjectDetail({ projectId }: { projectId: string }) {
@@ -327,7 +265,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     await loadProject();
   }
 
-  async function deleteTicket(ticket: Ticket) {
+  async function deleteTicket(ticket: MyTicket) {
     if (!window.confirm(`确定删除单子 #${ticket.ticketNo} 吗？`)) {
       return;
     }
@@ -347,7 +285,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   if (!project) {
     return (
-      <AppShell>
+      <div className="pm-fade-in p-6">
         <Link
           href="/projects"
           className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-900"
@@ -357,30 +295,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         <p className="mt-6 rounded-xl border border-dashed border-ink-200 bg-white p-12 text-center text-ink-400">
           项目不存在
         </p>
-      </AppShell>
+      </div>
     );
   }
 
   return (
-    <AppShell
-      header={
-        <div className="flex items-center gap-3">
-          <Link
-            href="/projects"
-            className="rounded-lg p-1.5 text-ink-400 hover:bg-ink-100 hover:text-ink-700"
-            aria-label="返回项目列表"
-          >
-            <IconArrowLeft />
-          </Link>
-          <div>
-            <h1 className="text-lg font-semibold leading-tight">{project.name}</h1>
-            <p className="text-xs text-ink-400">
-              {project.description || "项目详情 · Project Detail"}
-            </p>
-          </div>
-        </div>
-      }
-    >      {/* 编辑模块弹窗 */}
+    <>
       {editingModule && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-elevated">
@@ -438,7 +358,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 将合并到「<span className="font-medium">{mergeConfirm.targetModule.name}</span>」
               </p>
               <p className="text-ink-600">
-                {mergeConfirm.sourceModule.tickets.length} + {mergeConfirm.targetTicketCount} 个单子
+                {mergeConfirm.sourceModule.tickets?.length ?? 0} + {mergeConfirm.targetTicketCount} 个单子
                 将全部归到「{mergeConfirm.targetModule.name}」
               </p>
               <p className="font-medium text-warning">此操作不可撤销，是否继续？</p>
@@ -657,7 +577,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                                     : "border-ink-200 hover:border-brand-200 hover:shadow-soft"
                                 }`}
                               >
-                                <Link href={`/${ticket.ticketNo}`} className="block">
+                                <Link href={`/tickets/${ticket.id}`} className="block">
                                   <div className="flex items-center justify-between gap-3">
                                     <span className="font-mono text-xs text-ink-400">
                                       #{ticket.ticketNo}
@@ -702,6 +622,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           </section>
         </div>
       </div>
-    </AppShell>
+    </>
   );
 }

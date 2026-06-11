@@ -399,7 +399,7 @@ export function TicketPushPanel({
                   className="group flex items-center justify-between rounded-lg border border-ink-100 bg-white px-4 py-3"
                 >
                   <Link
-                    href={`/tickets/${binding.bugTicket.ticketNo}`}
+                    href={`/tickets/${binding.bugTicket.id}`}
                     scroll={false}
                     className="flex flex-1 min-w-0 items-center gap-2 -my-3 -px-4 rounded-lg py-3 px-4 hover:bg-ink-50"
                   >
@@ -574,7 +574,7 @@ export function TicketPushPanel({
             </div>
             <div className="flex flex-wrap gap-2">
               <Link
-                href={`/${pushedTicket.ticketNo}`}
+                href={`/tickets/${pushedTicket.id}`}
                 className="inline-flex justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
               >
                 查看 {badgeStyles.label}

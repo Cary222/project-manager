@@ -1,5 +1,6 @@
 import dynamic from "next/dynamic";
-import { TasksBoardLoading } from "@/components/TasksBoard";
+import { AppShell } from "@/components/AppShell";
+import { TasksBoardLoading, TasksBoardHeaderSkeleton } from "@/components/TasksBoard";
 
 const TasksBoard = dynamic(
   () => import("@/components/TasksBoard").then((mod) => mod.TasksBoard),
@@ -8,6 +9,19 @@ const TasksBoard = dynamic(
   }
 );
 
+function TasksBoardHeader() {
+  return (
+    <div>
+      <h1 className="text-lg font-semibold leading-tight">任务看板</h1>
+      <p className="text-xs text-ink-400">Task Board · 指派给我的任务</p>
+    </div>
+  );
+}
+
 export default function TasksPage() {
-  return <TasksBoard />;
+  return (
+    <AppShell header={<TasksBoardHeader />}>
+      <TasksBoard />
+    </AppShell>
+  );
 }

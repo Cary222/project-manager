@@ -3,24 +3,10 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import useSWR from "swr";
-import { AppShell } from "@/components/AppShell";
 import { IconSearch } from "@/components/icons";
 import { fetchJson } from "@/lib/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
-
-type TicketStatus = "DEVELOPING" | "READY_FOR_TEST" | "DELIVERED" | "DONE";
-
-type MyTicket = {
-  id: string;
-  ticketNo: number;
-  title: string;
-  status: TicketStatus;
-  project: { id: string; name: string };
-  module: {
-    name: string;
-    responsibility: { kind: "PROGRAM" | "DESIGN" };
-  };
-};
+import { type TicketStatus, type MyTicket } from "@/components/ticket-detail/types";
 
 const COLUMNS: { key: TicketStatus; label: string; accent: string; head: string }[] =
   [
@@ -159,7 +145,7 @@ function TasksColumns({ query }: { query: string }) {
                 items.map((t) => (
                   <Link
                     key={t.id}
-                    href={`/${t.ticketNo}`}
+                    href={`/tickets/${t.id}`}
                     className="block rounded-lg border border-ink-100 bg-white p-3 shadow-soft transition hover:border-brand-200 hover:shadow-base"
                   >
                     <div className="flex items-center justify-between">
@@ -204,35 +190,40 @@ export function TasksBoard() {
   const [query, setQuery] = useState("");
 
   return (
-    <AppShell header={<TasksBoardHeader />}>
-      <div className="space-y-5 pm-fade-in">
-        <div className="relative w-full max-w-sm">
-          <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索任务标题、编号、项目…"
-            className="w-full rounded-lg border border-ink-200 bg-white py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
-          />
-        </div>
-
-        <TasksColumns query={query} />
+    <div className="space-y-5 pm-fade-in">
+      <div className="relative w-full max-w-sm">
+        <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="搜索任务标题、编号、项目…"
+          className="w-full rounded-lg border border-ink-200 bg-white py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+        />
       </div>
-    </AppShell>
+
+      <TasksColumns query={query} />
+    </div>
+  );
+}
+
+export function TasksBoardHeaderSkeleton() {
+  return (
+    <div>
+      <div className="h-5 w-24 animate-pulse rounded bg-ink-200" />
+      <div className="mt-1 h-3 w-40 animate-pulse rounded bg-ink-100" />
+    </div>
   );
 }
 
 export function TasksBoardLoading() {
   return (
-    <AppShell header={<TasksBoardHeader />}>
-      <div className="space-y-5 pm-fade-in">
-        <div className="relative w-full max-w-sm">
-          <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
-          <div className="h-[42px] w-full animate-pulse rounded-lg border border-ink-200 bg-white" />
-        </div>
-
-        <TasksColumnsSkeleton />
+    <div className="space-y-5 pm-fade-in">
+      <div className="relative w-full max-w-sm">
+        <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+        <div className="h-[42px] w-full animate-pulse rounded-lg border border-ink-200 bg-white" />
       </div>
-    </AppShell>
+
+      <TasksColumnsSkeleton />
+    </div>
   );
 }

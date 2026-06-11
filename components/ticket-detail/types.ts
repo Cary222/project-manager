@@ -10,6 +10,8 @@ export type UserBrief = {
 export type Module = {
   id: string;
   name: string;
+  description?: string | null;
+  tickets?: MyTicket[];
 };
 
 export type Responsibility = {
@@ -141,4 +143,43 @@ export const KIND_LABEL: Record<"PROGRAM" | "DESIGN" | "BUG", string> = {
   PROGRAM: "程序",
   DESIGN: "设计",
   BUG: "Bug",
+};
+
+// ---- Shared list-view types (used by Dashboard, TasksBoard, ProjectDetail) ----
+
+export type MyTicket = {
+  id: string;
+  ticketNo: number;
+  title: string;
+  status: TicketStatus;
+  project: { id: string; name: string };
+  module: { name: string; responsibility: { kind: "PROGRAM" | "DESIGN" } };
+  assignees: { name: string | null; email: string }[];
+};
+
+export type ModuleWithDetails = {
+  id: string;
+  name: string;
+  description: string | null;
+  tickets: MyTicket[];
+};
+
+export type ResponsibilityWithDetails = {
+  id: string;
+  kind: "PROGRAM" | "DESIGN" | "BUG";
+  modules: ModuleWithDetails[];
+};
+
+export type Project = {
+  id: string;
+  name: string;
+  description: string | null;
+  responsibilities: ResponsibilityWithDetails[];
+};
+
+export const STATUS_ORDER: Record<TicketStatus, number> = {
+  DEVELOPING: 0,
+  READY_FOR_TEST: 1,
+  DELIVERED: 2,
+  DONE: 3,
 };
