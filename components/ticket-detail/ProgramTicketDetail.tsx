@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { type Ticket, type TicketCreateUser, type TicketCreateResponsibility, type PushRecordSnapshot } from "./types";
 import { TicketPushPanel } from "./TicketPushPanel";
 import { PushConfirmModal } from "@/components/PushConfirmModal";
@@ -17,18 +17,25 @@ type Props = {
   onBugPushSuccess?: () => void;
 };
 
-export function ProgramTicketDetail({ ticket, users, programResponsibility, onMessage, showBugPushModal: externalShowModal, onDismissBugPushModal, onBugPushSuccess }: Props) {
-  const [internalShowModal, setInternalShowModal] = useState(false);
-  const [bugResponsibility, setBugResponsibility] = useState<TicketCreateResponsibility | null>(null);
+export function ProgramTicketDetail({
+  ticket,
+  users,
+  programResponsibility,
+  onMessage,
+  showBugPushModal,
+  onDismissBugPushModal,
+  onBugPushSuccess,
+}: Props) {
   const [selectedCommit, setSelectedCommit] = useState<CommitSummary | null>(null);
+  const [internalShowModal, setInternalShowModal] = useState(false);
 
-  const showModal = externalShowModal !== undefined ? externalShowModal : internalShowModal;
+  const showModal = showBugPushModal !== undefined ? showBugPushModal : internalShowModal;
   const onDismiss = onDismissBugPushModal || (() => setInternalShowModal(false));
 
-  useEffect(() => {
-    const bugResp = ticket.project.responsibilities.find((r) => r.kind === "BUG");
-    if (bugResp) setBugResponsibility(bugResp as TicketCreateResponsibility);
-  }, [ticket.project.responsibilities]);
+  const bugResponsibility = useMemo(
+    () => (ticket.project.responsibilities.find((r) => r.kind === "BUG") as TicketCreateResponsibility | undefined) ?? null,
+    [ticket.project.responsibilities],
+  );
 
   async function handleBugPush(options: {
     title: string;
@@ -48,7 +55,6 @@ export function ProgramTicketDetail({ ticket, users, programResponsibility, onMe
     }
     const data = await res.json() as { bugTicket: { id: string; ticketNo: number; title: string } };
 
-    // 创建绑定关系
     const bindRes = await fetch(`/api/tickets/${ticket.ticketNo}/bug-relations`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -64,6 +70,16 @@ export function ProgramTicketDetail({ ticket, users, programResponsibility, onMe
 
     onMessage(`Bug单 #${data.bugTicket.ticketNo} 已创建并绑定`);
     onDismiss();
+
+    // 推送 Bug 单后自动保存已交付状态
+    const statusRes = await fetch(`/api/tickets/${ticket.id}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "DELIVERED" }),
+    });
+    if (statusRes.ok) {
+      onMessage("状态已保存");
+    }
     onBugPushSuccess?.();
   }
 

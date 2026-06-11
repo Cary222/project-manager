@@ -7,4 +7,5 @@ export type {
   TicketCreateResponsibility,
   ProgramPushDraft,
   PushRecordSnapshot,
+  BugRelation,
 } from "./types";

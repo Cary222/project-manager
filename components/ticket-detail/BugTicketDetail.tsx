@@ -1,44 +1,36 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
+import useSWR from "swr";
 import { type Ticket } from "./types";
 import { type CommitSummary } from "@/components/CommitDiffModal";
 import { CommitList } from "@/components/CommitList";
 import { CommitDiffModal } from "@/components/CommitDiffModal";
+import { fetchJson } from "@/lib/fetch-json";
+import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
 
 type Props = {
+  ticketId: string;
   ticket: Ticket;
-  loadTicket: () => Promise<void>;
   onMessage: (msg: string) => void;
 };
 
 type FixCommit = CommitSummary & { id: string };
 
-export function BugTicketDetail({ ticket }: Props) {
-  const [fixCommits, setFixCommits] = useState<FixCommit[]>([]);
+export function BugTicketDetail({ ticketId, ticket, onMessage }: Props) {
   const [selectedCommit, setSelectedCommit] = useState<CommitSummary | null>(null);
   const sourceInfo = ticket.bugSources?.[0];
-  // 支持中文句式中的 fix 关键词，如"故障fix" / "搜索故障fix"
   const fixCommitPattern = /(?<=[\u4e00-\u9fa5a-zA-Z\s]|^)fix(?::|：|$|[\s\u4e00-\u9fa5])/i;
   const ticketFixCommits = ticket.commits.filter((c) => fixCommitPattern.test(c.subject));
 
-  useEffect(() => {
-    async function fetchFixCommits() {
-      try {
-        const res = await fetch(`/api/tickets/${ticket.ticketNo}/bug-fix-commits`);
-        if (res.ok) {
-          const data = await res.json();
-          setFixCommits(data.fixCommits ?? []);
-        }
-      } catch {
-        // ignore
-      }
-    }
-    fetchFixCommits();
-  }, [ticket.ticketNo]);
+  const { data: fixData } = useSWR<{ fixCommits: FixCommit[] }>(
+    `/api/tickets/${ticketId}/bug-fix-commits`,
+    fetchJson,
+    STALE_SWR_OPTIONS,
+  );
+  const fixCommits = fixData?.fixCommits ?? [];
 
-  // 合并：ticket自带的 fix commits + 绑定记录中的 fix commits
   const allFixCommits = [
     ...ticketFixCommits,
     ...fixCommits.filter(

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import useSWR from "swr";
 import Link from "next/link";
 import {
   type TicketCreateUser,
@@ -11,6 +12,8 @@ import {
   type BugResolveResponse,
 } from "./types";
 import { TicketCreateForm } from "@/components/TicketCreateForm";
+import { fetchJson } from "@/lib/fetch-json";
+import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
 
 type PushResolveMode = "bound" | "candidate" | "unbound";
 type BugResolveMode = "bound" | "candidate" | "unbound";
@@ -24,7 +27,7 @@ type Props = {
   programResponsibility: TicketCreateResponsibility | null;
   programPushDraft: ProgramPushDraft | null;
   onMessage: (msg: string) => void;
-  color?: "emerald" | "rose"; // emerald=设计单推程序, rose=程序单绑定Bug
+  color?: "emerald" | "rose";
 };
 
 export function TicketPushPanel({
@@ -38,97 +41,61 @@ export function TicketPushPanel({
   onMessage,
   color = "emerald",
 }: Props) {
-  const [retryDraft, setRetryDraft] = useState<ProgramPushDraft | null>(null);
-  const [pushRecord, setPushRecord] = useState<PushRecordSnapshot | null>(null);
-  const [pushResolveMode, setPushResolveMode] = useState<PushResolveMode>("unbound");
-  const [candidateTicket, setCandidateTicket] = useState<{ id: string; ticketNo: number; title: string } | null>(null);
-  const [pushedTicket, setPushedTicket] = useState<{ id: string; ticketNo: number; title: string } | null>(null);
+  const isBug = color === "rose";
+
+  // ---- SWR data ----
+
+  // Design ticket: push record
+  const { data: pushRecordData, mutate: refreshPushRecord } = useSWR<{ record?: PushRecordSnapshot | null }>(
+    !isBug ? `/api/tickets/${ticketNo}/push-record` : null,
+    fetchJson,
+    STALE_SWR_OPTIONS,
+  );
+
+  // Program ticket: bug bindings
+  const { data: bugBindingsData, mutate: refreshBugBindings } = useSWR<{ bindings: BugRelation[] }>(
+    isBug ? `/api/tickets/${ticketNo}/bug-relations` : null,
+    fetchJson,
+    STALE_SWR_OPTIONS,
+  );
+
+  // Derive push state from SWR data (design ticket)
+  const pushRecord = pushRecordData?.record ?? null;
+  const pushedTicket = pushRecord?.targetTicket ?? null;
+  const isPushBound = !!pushRecord?.targetTicket;
+
+  // Derive bug bindings from SWR data (program ticket)
+  const bugBindings = bugBindingsData?.bindings ?? [];
+
+  // ---- UI state ----
   const [showForm, setShowForm] = useState(false);
-  
-  // Bug bindings state (for program ticket)
-  const [bugBindings, setBugBindings] = useState<BugRelation[]>([]);
-  const [bugCandidateTicket, setBugCandidateTicket] = useState<{ id: string; ticketNo: number; title: string } | null>(null);
   const [showBugForm, setShowBugForm] = useState(false);
-  const [bugDraft, setBugDraft] = useState<ProgramPushDraft | null>(null);
+
+  // Design ticket: interactive form state
+  const [pushResolveMode, setPushResolveMode] = useState<PushResolveMode>(
+    isPushBound ? "bound" : "unbound",
+  );
+  const [candidateTicket, setCandidateTicket] = useState<{ id: string; ticketNo: number; title: string } | null>(null);
+  const [retryDraft, setRetryDraft] = useState<ProgramPushDraft | null>(null);
+
+  // Program ticket: interactive form state
   const [bugResolveMode, setBugResolveMode] = useState<BugResolveMode>("unbound");
+  const [bugCandidateTicket, setBugCandidateTicket] = useState<{ id: string; ticketNo: number; title: string } | null>(null);
+  const [bugDraft, setBugDraft] = useState<ProgramPushDraft | null>(null);
   const [fixCommitInfo, setFixCommitInfo] = useState<{
     count: number;
     fixCommitIds: string[];
     commits: { id: string; commitSha: string; subject: string; author: string; committedAt: string }[];
   } | null>(null);
 
-  const isBug = color === "rose";
-  const badgeStyles = isBug
-    ? {
-        badge: "bg-rose-100 text-rose-700",
-        label: "Bug 单",
-        label2: "Bug 绑定",
-      }
-    : {
-        badge: "bg-emerald-100 text-emerald-700",
-        label: "程序单",
-        label2: "程序单",
-      };
-
-  // Fetch push record (for design ticket)
-  useEffect(() => {
-    if (isBug) return;
-    
-    fetch(`/api/tickets/${ticketNo}/push-record`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { record?: PushRecordSnapshot | null } | null) => {
-        const record = data?.record;
-        setPushRecord(record ?? null);
-        if (record?.targetTicket) {
-          setPushResolveMode("bound");
-          setPushedTicket(record.targetTicket);
-          setRetryDraft({
-            title: record.draftTitle,
-            description: record.draftDescription || "",
-            designAssigneeIds: record.designAssigneeIds,
-            programAssigneeIds: record.programAssigneeIds,
-          });
-        } else {
-          setPushResolveMode("unbound");
-          setPushedTicket(null);
-          if (record) {
-            setRetryDraft({
-              title: record.draftTitle,
-              description: record.draftDescription || "",
-              designAssigneeIds: record.designAssigneeIds,
-              programAssigneeIds: record.programAssigneeIds,
-            });
-          }
-        }
-        setShowForm(false);
-      })
-      .catch(() => {
-        setPushRecord(null);
-        setPushResolveMode("unbound");
-        setPushedTicket(null);
-      });
-  }, [ticketNo, isBug]);
-
-  // Fetch bug bindings (for program ticket)
-  useEffect(() => {
-    if (!isBug) return;
-    
-    fetchBugBindings();
-  }, [ticketNo, isBug]);
-
-  async function fetchBugBindings() {
-    try {
-      const res = await fetch(`/api/tickets/${ticketNo}/bug-relations`);
-      if (res.ok) {
-        const data = await res.json() as { bindings: BugRelation[] };
-        setBugBindings(data.bindings);
-      }
-    } catch {
-      setBugBindings([]);
-    }
-  }
-
+  // Sync push resolve mode when SWR data changes
   const draft = retryDraft ?? programPushDraft;
+
+  const badgeStyles = isBug
+    ? { badge: "bg-rose-100 text-rose-700", label: "Bug 单", label2: "Bug 绑定" }
+    : { badge: "bg-emerald-100 text-emerald-700", label: "程序单", label2: "程序单" };
+
+  // ---- Design ticket handlers ----
 
   async function openPushForm() {
     try {
@@ -142,21 +109,18 @@ export function TicketPushPanel({
       };
       if (data.mode === "bound" && data.targetTicket) {
         setPushResolveMode("bound");
-        setPushedTicket(data.targetTicket);
-        setPushRecord(data.record ?? null);
-        if (data.record) {
-          setRetryDraft({
-            title: data.record.draftTitle,
-            description: data.record.draftDescription || "",
-            designAssigneeIds: data.record.designAssigneeIds,
-            programAssigneeIds: data.record.programAssigneeIds,
-          });
-        }
+        setRetryDraft(data.record ? {
+          title: data.record.draftTitle,
+          description: data.record.draftDescription || "",
+          designAssigneeIds: data.record.designAssigneeIds,
+          programAssigneeIds: data.record.programAssigneeIds,
+        } : null);
+        // Trigger SWR revalidation so pushedTicket/pushRecord update from cache
+        await refreshPushRecord();
       } else if (data.mode === "candidate" && data.candidateTicket) {
         setPushResolveMode("candidate");
         setCandidateTicket(data.candidateTicket);
         if (data.record) {
-          setPushRecord(data.record);
           setRetryDraft({
             title: data.record.draftTitle,
             description: data.record.draftDescription || "",
@@ -189,9 +153,8 @@ export function TicketPushPanel({
     });
     if (!res.ok) { onMessage("绑定失败"); return; }
     const data = await res.json() as { record: PushRecordSnapshot };
-    setPushRecord(data.record);
+    await refreshPushRecord();
     setPushResolveMode("bound");
-    setPushedTicket(candidateTicket);
     setCandidateTicket(null);
     onMessage(`已绑定 ${badgeStyles.label} #${candidateTicket.ticketNo}`);
   }
@@ -234,7 +197,7 @@ export function TicketPushPanel({
       }
       onMessage(`Bug 单 #${data.bugTicket.ticketNo} 已创建并绑定`);
       setShowBugForm(false);
-      fetchBugBindings();
+      await refreshBugBindings();
       return;
     }
 
@@ -252,28 +215,28 @@ export function TicketPushPanel({
     });
     if (!res.ok) { onMessage("创建失败"); return; }
     const data = await res.json() as { record: PushRecordSnapshot };
-    setPushRecord(data.record);
-    setPushedTicket(payload.ticket);
+    await refreshPushRecord();
     setPushResolveMode("bound");
     setShowForm(false);
     onMessage(`${badgeStyles.label} #${payload.ticket.ticketNo} 已创建并绑定`);
   }
 
-  // Bug binding handlers
+  // ---- Program ticket handlers ----
+
   async function openBugSearch() {
     try {
       const res = await fetch(`/api/tickets/${ticketNo}/bug-relations/resolve`);
       if (!res.ok) throw new Error("查询失败");
       const data = await res.json() as BugResolveResponse;
-      
+
       setFixCommitInfo(data.fixCommitCount && data.fixCommitCount > 0
-        ? { 
-            count: data.fixCommitCount ?? 0, 
+        ? {
+            count: data.fixCommitCount ?? 0,
             fixCommitIds: data.fixCommitIds ?? [],
-            commits: data.fixCommits ?? [] 
+            commits: data.fixCommits ?? [],
           }
         : null);
-      
+
       if (data.mode === "candidate" && data.candidateTicket) {
         setBugResolveMode("candidate");
         setBugCandidateTicket(data.candidateTicket);
@@ -284,17 +247,16 @@ export function TicketPushPanel({
           programAssigneeIds: [],
         });
       } else if (data.shouldAutoCreate && data.fixCommits && data.fixCommits.length > 0) {
-        // 有 fix 提交但没有匹配的 Bug 单，直接创建并预填 fix 信息
         const fixDescription = data.fixCommits.length === 1
           ? `## Fix 信息\n\n- 提交: \`${data.fixCommits[0].commitSha}\`\n- 主题: ${data.fixCommits[0].subject}\n- 作者: ${data.fixCommits[0].author}\n- 时间: ${new Date(data.fixCommits[0].committedAt).toLocaleString()}\n- 仓库: ${data.fixCommits[0].repoPath}\n`
           : `## Fix 信息（${data.fixCommits.length} 条）\n\n${data.fixCommits.map((c, i) => `${i + 1}. \`${c.commitSha}\` - ${c.subject}`).join("\n")}\n`;
-        
+
         setBugResolveMode("unbound");
         setBugCandidateTicket(null);
         setShowBugForm(true);
         setBugDraft(programPushDraft ? {
           ...programPushDraft,
-          description: programPushDraft.description 
+          description: programPushDraft.description
             ? `${programPushDraft.description}\n\n${fixDescription}`
             : fixDescription,
         } : {
@@ -323,7 +285,7 @@ export function TicketPushPanel({
 
   async function handleBindBugCandidate() {
     if (!bugCandidateTicket) return;
-    
+
     const res = await fetch(`/api/tickets/${ticketNo}/bug-relations`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -332,17 +294,17 @@ export function TicketPushPanel({
         draftTitle: bugCandidateTicket.title,
       }),
     });
-    
+
     if (!res.ok) {
       const err = await res.json();
       onMessage(err.error || "绑定失败");
       return;
     }
-    
+
     onMessage(`已绑定 Bug 单 #${bugCandidateTicket.ticketNo}`);
     setBugCandidateTicket(null);
     setFixCommitInfo(null);
-    fetchBugBindings();
+    await refreshBugBindings();
   }
 
   async function handleBindNewBug(payload: {
@@ -359,39 +321,39 @@ export function TicketPushPanel({
         fixCommitIds: fixCommitInfo?.fixCommitIds ?? [],
       }),
     });
-    
+
     if (!res.ok) {
       const err = await res.json();
       onMessage(err.error || "绑定失败");
       return;
     }
-    
+
     onMessage(`Bug 单 #${payload.ticket.ticketNo} 已创建并绑定`);
     setShowBugForm(false);
     setBugCandidateTicket(null);
     setFixCommitInfo(null);
-    fetchBugBindings();
+    await refreshBugBindings();
   }
 
   async function handleUnbindBug(bindingId: string) {
     const res = await fetch(`/api/tickets/${ticketNo}/bug-relations/actions?bindingId=${encodeURIComponent(bindingId)}`, {
       method: "DELETE",
     });
-    
+
     if (!res.ok) {
       onMessage("解绑失败");
       return;
     }
-    
+
     onMessage("已解绑 Bug 单");
-    fetchBugBindings();
+    await refreshBugBindings();
   }
 
-  // Program ticket UI (rose color)
+  // ---- Render: Program ticket (rose) ----
   if (isBug) {
     return (
       <>
-        {/* 已绑定 Bug 列表 */}
+        {/* Bug bindings list */}
         <section className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
@@ -439,7 +401,7 @@ export function TicketPushPanel({
                   <Link
                     href={`/tickets/${binding.bugTicket.ticketNo}`}
                     scroll={false}
-                    className="flex flex-1 min-w-0 items-center gap-2 hover:bg-ink-50 -my-3 -px-4 py-3 px-4 rounded-lg"
+                    className="flex flex-1 min-w-0 items-center gap-2 -my-3 -px-4 rounded-lg py-3 px-4 hover:bg-ink-50"
                   >
                     <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs text-rose-700 shrink-0">
                       #{binding.bugTicket.ticketNo}
@@ -454,7 +416,7 @@ export function TicketPushPanel({
                   </Link>
                   <button
                     onClick={() => handleUnbindBug(binding.id)}
-                    className="ml-3 rounded-lg border border-ink-200 px-2 py-1 text-xs text-ink-500 hover:bg-ink-50 shrink-0"
+                    className="ml-3 shrink-0 rounded-lg border border-ink-200 px-2 py-1 text-xs text-ink-500 hover:bg-ink-50"
                   >
                     解绑
                   </button>
@@ -466,7 +428,7 @@ export function TicketPushPanel({
           )}
         </section>
 
-        {/* Bug 检索/创建 */}
+        {/* Bug candidate */}
         {bugCandidateTicket && (
           <section className="rounded-xl border border-amber-200 bg-amber-50/70 p-6">
             <div className="space-y-3">
@@ -525,12 +487,7 @@ export function TicketPushPanel({
           </section>
         )}
 
-        {/*
-          fix 信息提示框：
-          1. 没有候选 Bug 单
-          2. 有 fix 提交
-          3. 表单还没显示（用户可以点击创建按钮）
-        */}
+        {/* Fix commit info banner */}
         {!bugCandidateTicket && fixCommitInfo && fixCommitInfo.count > 0 && !showBugForm && (
           <section className="rounded-xl border border-rose-200 bg-rose-50/70 p-4">
             <div className="flex items-start gap-3">
@@ -565,6 +522,7 @@ export function TicketPushPanel({
           </section>
         )}
 
+        {/* Bug form */}
         {showBugForm && programResponsibility && bugDraft && (
           <section className="rounded-xl border border-ink-200 bg-white p-6">
             <TicketCreateForm
@@ -593,11 +551,11 @@ export function TicketPushPanel({
     );
   }
 
-  // Design ticket UI (emerald color) - 原有逻辑
+  // ---- Render: Design ticket (emerald) ----
   return (
     <>
-      {/* 推单绑定卡片 */}
-      {pushResolveMode === "bound" && pushedTicket && (
+      {/* Push bound card */}
+      {isPushBound && pushedTicket && (
         <section className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
@@ -632,7 +590,7 @@ export function TicketPushPanel({
         </section>
       )}
 
-      {/* 推单流程 */}
+      {/* Push flow */}
       <section className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>

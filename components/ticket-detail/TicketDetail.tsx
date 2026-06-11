@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import useSWR from "swr";
 import { useSession } from "next-auth/react";
 import { AppShell } from "@/components/AppShell";
 import { ImageLightbox } from "@/components/ImageLightbox";
@@ -10,6 +11,8 @@ import { AssigneePicker } from "@/components/AssigneePicker";
 import { formatAssigneeList } from "@/lib/ticket-assignees";
 import { composeImageMarkdown, extractInlineImages } from "@/lib/pkm";
 import { IconArrowLeft, IconClock, IconEdit } from "@/components/icons";
+import { fetchJson } from "@/lib/fetch-json";
+import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
 import {
   type Ticket,
   type TicketStatus,
@@ -107,85 +110,71 @@ function Avatar({ name }: { name?: string | null }) {
 export function TicketDetail({ ticketId }: { ticketId: string }) {
   const { data: session } = useSession();
   const isRoot = session?.user?.role === "ROOT";
-  const [ticket, setTicket] = useState<Ticket | null>(null);
-  const [users, setUsers] = useState<TicketCreateUser[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState<TicketStatus>("DEVELOPING");
-  const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
-  const [message, setMessage] = useState("");
-  const [isEditing, setIsEditing] = useState(false);
-  const [editTitle, setEditTitle] = useState("");
-  const [editDescription, setEditDescription] = useState("");
-  const [editDescriptionImages, setEditDescriptionImages] = useState<{ src: string; name: string }[]>([]);
-  const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
-  const isLightboxOpenRef = useRef(false);
-  const [selectedModuleId, setSelectedModuleId] = useState("");
-  const [modules, setModules] = useState<{ id: string; name: string }[]>([]);
-  // 程序单的 Bug 绑定记录
-  const [programBugRelations, setProgramBugRelations] = useState<BugRelation[]>([]);
-  const [programShowBugPushModal, setProgramShowBugPushModal] = useState(false);
 
-  const loadTicket = useCallback(async () => {
-    const res = await fetch(`/api/tickets/${ticketId}`);
-    if (!res.ok) {
-      setTicket(null);
-      return;
-    }
-    const data = (await res.json()) as { ticket: Ticket };
-    setTicket(data.ticket);
-    setStatus(data.ticket.status);
-    setAssigneeIds(data.ticket.assignees.map((u) => u.id));
-    setSelectedModuleId(data.ticket.module.id);
-    setModules(data.ticket.project.responsibilities.flatMap((r) => r.modules));
-  }, [ticketId]);
+  // Data layer — all SWR
+  const { data: ticketData, isLoading: ticketLoading, mutate: refreshTicket } = useSWR<{ ticket: Ticket }>(
+    `/api/tickets/${ticketId}`,
+    fetchJson,
+    STALE_SWR_OPTIONS,
+  );
+  const { data: usersData } = useSWR<{ users: TicketCreateUser[] }>(
+    isRoot ? "/api/users" : null,
+    fetchJson,
+    STALE_SWR_OPTIONS,
+  );
+  const ticket = ticketData?.ticket ?? null;
 
-  useEffect(() => {
-    let cancelled = false;
-    async function init() {
-      setLoading(true);
-      await fetch("/api/sync-commits", { method: "POST" });
-      if (cancelled) return;
-      await loadTicket();
-      if (!cancelled) setLoading(false);
-    }
-    init();
-    return () => { cancelled = true; };
-  }, [loadTicket]);
-
-  useEffect(() => {
-    if (!isRoot) return;
-    fetch("/api/users")
-      .then((res) => (res.ok ? res.json() : { users: [] }))
-      .then((data: { users: TicketCreateUser[] }) => setUsers(data.users));
-  }, [isRoot]);
-
-  useEffect(() => {
-    if (!ticket) return;
-    const { plainContent, images } = extractInlineImages(ticket.description || "");
-    setEditTitle(ticket.title);
-    setEditDescription(plainContent);
-    setEditDescriptionImages(images);
-  }, [ticket]);
-
-  const isAssignee = ticket?.assignees.some((a) => a.id === session?.user?.id) ?? false;
-  const canEdit = isRoot || isAssignee;
+  // Derive kind flags from ticket
   const isDesignTicket = ticket?.module.responsibility.kind === "DESIGN";
   const isProgramTicket = ticket?.module.responsibility.kind === "PROGRAM";
   const isBugTicket = ticket?.module.responsibility.kind === "BUG";
 
-  // 程序单的 Bug 绑定记录
+  // Bug relations for program tickets (conditional SWR key)
+  const { data: bugRelationsData, mutate: refreshBugRelations } = useSWR<{ bindings: BugRelation[] }>(
+    isProgramTicket && ticket ? `/api/tickets/${ticket.ticketNo}/bug-relations` : null,
+    fetchJson,
+    STALE_SWR_OPTIONS,
+  );
+
+  // Sync commits on mount (fire-and-forget, then refresh ticket)
   useEffect(() => {
-    if (!ticket || !isProgramTicket) {
-      setProgramBugRelations([]);
-      return;
-    }
-    fetch(`/api/tickets/${ticket.ticketNo}/bug-relations`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { bindings?: BugRelation[] } | null) => {
-        setProgramBugRelations(data?.bindings ?? []);
-      })
-      .catch(() => setProgramBugRelations([]));
-  }, [ticket, isProgramTicket]);
+    if (!ticket) return;
+    fetch("/api/sync-commits", { method: "POST" }).then(() => refreshTicket());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticketId]);
+
+  // UI state — only these remain as useState
+  const [message, setMessage] = useState("");
+  const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
+  const isLightboxOpenRef = useRef(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editDescriptionImages, setEditDescriptionImages] = useState<{ src: string; name: string }[]>([]);
+  const [localStatus, setLocalStatus] = useState<TicketStatus | null>(null);
+  const [localAssigneeIds, setLocalAssigneeIds] = useState<string[]>([]);
+  const [localModuleId, setLocalModuleId] = useState<string>("");
+  const [programShowBugPushModal, setProgramShowBugPushModal] = useState(false);
+
+  // Sync local edit state when ticket loads
+  useEffect(() => {
+    if (!ticket) return;
+    setLocalStatus(ticket.status);
+    setLocalAssigneeIds(ticket.assignees.map((a) => a.id));
+    setLocalModuleId(ticket.module.id);
+  }, [ticket]);
+
+  // Populate edit fields when entering edit mode
+  useEffect(() => {
+    if (!isEditing || !ticket) return;
+    const { plainContent, images } = extractInlineImages(ticket.description || "");
+    setEditTitle(ticket.title);
+    setEditDescription(plainContent);
+    setEditDescriptionImages(images);
+  }, [isEditing, ticket]);
+
+  const users = usersData?.users ?? [];
+  const programBugRelations = bugRelationsData?.bindings ?? [];
 
   const allowedStatuses = useMemo((): TicketStatus[] => {
     if (!ticket) return [];
@@ -218,6 +207,16 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     };
   }, [ticket]);
 
+  const modules = useMemo(() => {
+    if (!ticket) return [];
+    return ticket.project.responsibilities.flatMap((r) => r.modules);
+  }, [ticket]);
+
+  const isAssignee = ticket?.assignees.some((a) => a.id === session?.user?.id) ?? false;
+  const canEdit = isRoot || isAssignee;
+
+  // ---- Mutation helpers ----
+
   async function saveTicketDetails() {
     setMessage("");
     if (!ticket) return;
@@ -233,7 +232,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     }
     setMessage("详情已保存");
     setIsEditing(false);
-    await loadTicket();
+    await refreshTicket();
   }
 
   async function updateModule() {
@@ -242,14 +241,14 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     const res = await fetch(`/api/tickets/${ticket.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ moduleId: selectedModuleId }),
+      body: JSON.stringify({ moduleId: localModuleId }),
     });
     if (!res.ok) {
       setMessage("移动模块失败");
       return;
     }
     setMessage("模块已移动");
-    await loadTicket();
+    await refreshTicket();
   }
 
   async function updateAssignee() {
@@ -258,23 +257,21 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     const res = await fetch(`/api/tickets/${ticket.id}/assignee`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ assigneeIds }),
+      body: JSON.stringify({ assigneeIds: localAssigneeIds }),
     });
     if (!res.ok) {
       setMessage("指派人保存失败");
       return;
     }
     setMessage("指派人已更新");
-    await loadTicket();
+    await refreshTicket();
   }
 
   async function updateStatus() {
     setMessage("");
-    if (!ticket) return;
+    if (!ticket || !localStatus) return;
 
-    // 程序单切换到 DELIVERED 时检查是否已绑定 Bug
-    if (isProgramTicket && status === "DELIVERED" && programBugRelations.length === 0) {
-      // 触发程序单组件显示 Bug 推送弹窗
+    if (isProgramTicket && localStatus === "DELIVERED" && programBugRelations.length === 0) {
       setProgramShowBugPushModal(true);
       return;
     }
@@ -282,14 +279,14 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     const res = await fetch(`/api/tickets/${ticket.id}/status`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status: localStatus }),
     });
     if (!res.ok) {
       setMessage("状态保存失败");
       return;
     }
     setMessage("状态已保存");
-    await loadTicket();
+    await refreshTicket();
   }
 
   function openPreview(img: { src: string; name: string }) {
@@ -315,7 +312,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     setEditDescriptionImages((prev) => prev.filter((_, i) => i !== index));
   }
 
-  if (loading) return <TicketDetailLoading />;
+  if (ticketLoading) return <TicketDetailLoading />;
 
   if (!ticket) {
     return (
@@ -365,7 +362,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
           )}
 
           <div className="grid gap-5 lg:grid-cols-3">
-            {/* 主区 */}
+            {/* Main area */}
             <div className="space-y-5 lg:col-span-2">
               <section className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">
                 <div className="flex items-start justify-between gap-4">
@@ -387,13 +384,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                   {canEdit && !isEditing && (
                     <button
                       type="button"
-                      onClick={() => {
-                        const { plainContent, images } = extractInlineImages(ticket.description || "");
-                        setEditTitle(ticket.title);
-                        setEditDescription(plainContent);
-                        setEditDescriptionImages(images);
-                        setIsEditing(true);
-                      }}
+                      onClick={() => setIsEditing(true)}
                       className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink-200 px-3 py-1.5 text-sm text-ink-700 hover:bg-ink-100"
                     >
                       <IconEdit className="h-4 w-4" /> 编辑
@@ -458,13 +449,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        const { plainContent, images } = extractInlineImages(ticket.description || "");
-                        setIsEditing(false);
-                        setEditTitle(ticket.title);
-                        setEditDescription(plainContent);
-                        setEditDescriptionImages(images);
-                      }}
+                      onClick={() => setIsEditing(false)}
                       className="rounded-lg border border-ink-200 px-4 py-2 text-sm hover:bg-ink-100"
                     >
                       取消
@@ -473,7 +458,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                 )}
               </section>
 
-              {/* 职责特定的详情卡片 */}
+              {/* Kind-specific detail cards */}
               {isDesignTicket && (
                 <DesignTicketDetail
                   ticket={ticket}
@@ -492,26 +477,26 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                   onMessage={setMessage}
                   showBugPushModal={programShowBugPushModal}
                   onDismissBugPushModal={() => setProgramShowBugPushModal(false)}
-                  onBugPushSuccess={loadTicket}
+                  onBugPushSuccess={refreshTicket}
                 />
               )}
               {isBugTicket && (
                 <BugTicketDetail
+                  ticketId={ticketId}
                   ticket={ticket}
-                  loadTicket={loadTicket}
                   onMessage={setMessage}
                 />
               )}
             </div>
 
-            {/* 右侧栏 */}
+            {/* Right sidebar */}
             <div className="space-y-5">
               <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
                 <h2 className="mb-3 font-medium">状态</h2>
                 <div className="mb-3 flex items-center gap-2">
                   <select
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value as TicketStatus)}
+                    value={localStatus ?? ticket.status}
+                    onChange={(e) => setLocalStatus(e.target.value as TicketStatus)}
                     className="flex-1 rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
                   >
                     {allowedStatuses.map((s) => (
@@ -555,7 +540,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                 </div>
                 {isRoot && (
                   <div className="space-y-3">
-                    <AssigneePicker users={users} value={assigneeIds} onChange={setAssigneeIds} />
+                    <AssigneePicker users={users} value={localAssigneeIds} onChange={setLocalAssigneeIds} />
                     <button type="button" onClick={updateAssignee} className="w-full rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700">
                       保存指派
                     </button>
@@ -581,8 +566,8 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                   <h2 className="mb-3 font-medium">移动到其他模块</h2>
                   <div className="flex items-center gap-2">
                     <select
-                      value={selectedModuleId}
-                      onChange={(e) => setSelectedModuleId(e.target.value)}
+                      value={localModuleId}
+                      onChange={(e) => setLocalModuleId(e.target.value)}
                       className="min-w-0 flex-1 rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
                     >
                       {modules.map((m) => (

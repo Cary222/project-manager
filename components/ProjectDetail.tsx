@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import useSWR from "swr";
 import { AppShell } from "@/components/AppShell";
 import { formatAssigneeNames } from "@/components/AssigneePicker";
 import {
@@ -9,8 +10,10 @@ import {
   type TicketCreateUser,
 } from "@/components/TicketCreateForm";
 import { useSession } from "next-auth/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { IconArrowLeft, IconEdit, IconPlus, IconTrash } from "@/components/icons";
+import { fetchJson } from "@/lib/fetch-json";
+import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
 
 function ProjectDetailHeaderSkeleton() {
   return (
@@ -164,12 +167,28 @@ export function ProjectDetailLoading() {
 export function ProjectDetail({ projectId }: { projectId: string }) {
   const { data: session } = useSession();
   const isRoot = session?.user?.role === "ROOT";
-  const [project, setProject] = useState<Project | null>(null);
-  const [users, setUsers] = useState<TicketCreateUser[]>([]);
-  const [loading, setLoading] = useState(true);
+
+  const { data: projectData, error: projectError, isLoading, mutate: refreshProject } = useSWR<{ project: Project }>(
+    `/api/projects/${projectId}`,
+    fetchJson,
+    STALE_SWR_OPTIONS,
+  );
+  const { data: usersData } = useSWR<{ users: TicketCreateUser[] }>(
+    isRoot ? "/api/users" : null,
+    fetchJson,
+    STALE_SWR_OPTIONS,
+  );
+
+  const project = projectData?.project ?? null;
+  const users = usersData?.users ?? [];
+
   const [selectedResponsibilityId, setSelectedResponsibilityId] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [message, setMessage] = useState("");
+
+  const loadProject = useCallback(async () => {
+    await refreshProject();
+  }, [refreshProject]);
 
   // Module editing state
   const [editingModule, setEditingModule] = useState<Module | null>(null);
@@ -264,26 +283,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     setMessage("模块已删除");
     await loadProject();
   }
-  const loadProject = useCallback(async () => {
-    const res = await fetch(`/api/projects/${projectId}`);
-    if (!res.ok) {
-      setProject(null);
-      return;
-    }
-    const data = (await res.json()) as { project: Project };
-    setProject(data.project);
-  }, [projectId]);
-
-  useEffect(() => {
-    loadProject().finally(() => setLoading(false));
-  }, [loadProject]);
-
-  useEffect(() => {
-    if (!isRoot) return;
-    fetch("/api/users")
-      .then((res) => (res.ok ? res.json() : { users: [] }))
-      .then((data: { users: User[] }) => setUsers(data.users));
-  }, [isRoot]);
 
   // 默认选中第一个职能（派生，避免 effect 内 setState）
   const selectedResponsibility = useMemo(() => {
@@ -308,7 +307,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       });
   }, [selectedResponsibility]);
 
-
   const stats = useMemo(() => {
     const all =
       project?.responsibilities.flatMap((r) =>
@@ -323,7 +321,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   }, [project]);
 
   const selectedResponsibilityForCreate = selectedResponsibility as TicketCreateResponsibility | null;
-
 
   async function handleTicketCreated() {
     setShowCreate(false);
@@ -343,7 +340,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     setMessage("单子已删除");
     await loadProject();
   }
-  if (loading) {
+
+  if (isLoading) {
     return <ProjectDetailLoading />;
   }
 
