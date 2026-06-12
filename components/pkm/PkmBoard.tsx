@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ImageLightbox } from "@/components/ImageLightbox";
-import { MarkdownContent } from "@/components/MarkdownContent";
-import { IconPkm, IconPlus, IconTag, IconTrash } from "@/components/icons";
+import { ImageLightbox } from "@/components/common/ImageLightbox";
+import { MarkdownContent } from "@/components/common/MarkdownContent";
+import { IconPkm, IconPlus, IconTag, IconTrash } from "@/components/common/icons";
 import {
   composeImageMarkdown,
   extractInlineImages,

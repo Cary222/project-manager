@@ -4,9 +4,9 @@ import { useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { type Ticket } from "./types";
-import { type CommitSummary } from "@/components/CommitDiffModal";
-import { CommitList } from "@/components/CommitList";
-import { CommitDiffModal } from "@/components/CommitDiffModal";
+import { type CommitSummary } from "@/components/modal/CommitDiffModal";
+import { CommitList } from "@/components/repo/CommitList";
+import { CommitDiffModal } from "@/components/modal/CommitDiffModal";
 import { fetchJson } from "@/lib/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
 

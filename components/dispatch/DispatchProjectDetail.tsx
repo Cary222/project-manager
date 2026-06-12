@@ -2,18 +2,18 @@
 
 import Link from "next/link";
 import useSWR from "swr";
-import { formatAssigneeNames } from "@/components/AssigneePicker";
+import { formatAssigneeNames } from "@/components/dispatch/AssigneePicker";
 import {
   TicketCreateForm,
   type TicketCreateResponsibility,
   type TicketCreateUser,
-} from "@/components/TicketCreateForm";
+} from "@/components/ticket/TicketCreateForm";
 import { useSession } from "next-auth/react";
 import { useCallback, useMemo, useState } from "react";
-import { IconArrowLeft, IconEdit, IconPlus, IconTrash } from "@/components/icons";
+import { IconArrowLeft, IconEdit, IconPlus, IconTrash } from "@/components/common/icons";
 import { fetchJson } from "@/lib/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
-import { KIND_LABEL, Module } from "@/components/ticket-detail/types";
+import { KIND_LABEL, Module } from "@/components/ticket/ticket-detail/types";
 import {
   type Ticket,
   type MyTicket,
@@ -21,9 +21,9 @@ import {
   STATUS_LABEL,
   STATUS_STYLE,
   STATUS_ORDER,
-} from "@/components/ticket-detail/types";
+} from "@/components/ticket/ticket-detail/types";
 
-function ProjectDetailHeaderSkeleton() {
+function DispatchProjectDetailHeaderSkeleton() {
   return (
     <div className="flex items-center gap-3">
       <div className="h-8 w-8 animate-pulse rounded-lg bg-ink-200" />
@@ -35,7 +35,7 @@ function ProjectDetailHeaderSkeleton() {
   );
 }
 
-function ProjectDetailContentSkeleton() {
+function DispatchProjectDetailContentSkeleton() {
   return (
     <div className="space-y-5 pm-fade-in">
       <section className="grid gap-4 lg:grid-cols-5">
@@ -98,11 +98,11 @@ function ProjectDetailContentSkeleton() {
   );
 }
 
-export function ProjectDetailLoading() {
-  return <ProjectDetailContentSkeleton />;
+export function DispatchProjectDetailLoading() {
+  return <DispatchProjectDetailContentSkeleton />;
 }
 
-export function ProjectDetail({ projectId }: { projectId: string }) {
+export function DispatchProjectDetail({ projectId }: { projectId: string }) {
   const { data: session } = useSession();
   const isRoot = session?.user?.role === "ROOT";
 
@@ -280,17 +280,17 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   }
 
   if (isLoading) {
-    return <ProjectDetailLoading />;
+    return <DispatchProjectDetailLoading />;
   }
 
   if (!project) {
     return (
       <div className="pm-fade-in p-6">
         <Link
-          href="/projects"
+          href="/dispatchTicket"
           className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-900"
         >
-          <IconArrowLeft className="h-4 w-4" /> 返回项目列表
+          <IconArrowLeft className="h-4 w-4" /> 返回派单
         </Link>
         <p className="mt-6 rounded-xl border border-dashed border-ink-200 bg-white p-12 text-center text-ink-400">
           项目不存在
@@ -577,7 +577,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                                     : "border-ink-200 hover:border-brand-200 hover:shadow-soft"
                                 }`}
                               >
-                                <Link href={`/tickets/${ticket.id}`} className="block">
+                                <Link href={`/dispatchTicket/tickets/${ticket.id}`} className="block">
                                   <div className="flex items-center justify-between gap-3">
                                     <span className="font-mono text-xs text-ink-400">
                                       #{ticket.ticketNo}
@@ -625,3 +625,5 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     </>
   );
 }
+
+export { DispatchProjectDetailHeaderSkeleton };

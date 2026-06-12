@@ -20,7 +20,7 @@ import {
   IconTag,
   IconTeam,
   IconTrend,
-} from "@/components/icons";
+} from "@/components/common/icons";
 
 type ProfileState = {
   id: string;

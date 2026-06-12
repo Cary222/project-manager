@@ -5,7 +5,8 @@ import { useSession } from "next-auth/react";
 import { useMemo, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { AppShell } from "@/components/AppShell";
-import { IconPlus, IconSearch, IconTrash } from "@/components/icons";
+import { IconPlus, IconSearch, IconTrash } from "@/components/common/icons";
+import { SimplePageHeader } from "@/components/ui/headers";
 import { fetchJson } from "@/lib/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
 
@@ -284,12 +285,7 @@ function ProjectsToolbar({
 }
 
 function ProjectsPageHeader() {
-  return (
-    <div>
-      <h1 className="text-lg font-semibold leading-tight">项目</h1>
-      <p className="text-xs text-ink-400">Projects · 管理和查看所有项目</p>
-    </div>
-  );
+  return <SimplePageHeader title="项目" subtitle="Projects · 管理和查看所有项目" />;
 }
 
 export function ProjectsList() {

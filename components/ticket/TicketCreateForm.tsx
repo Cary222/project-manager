@@ -1,8 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { AssigneePicker } from "@/components/AssigneePicker";
-import { ImageLightbox } from "@/components/ImageLightbox";
+import { AssigneePicker } from "@/components/dispatch/AssigneePicker";
+import { ImageLightbox } from "@/components/common/ImageLightbox";
 import { composeImageMarkdown, extractInlineImages } from "@/lib/pkm";
 
 export type TicketCreateUser = {

@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { ReactNode } from "react";
 import { auth } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
-import { IconSettings } from "@/components/icons";
+import { IconSettings } from "@/components/common/icons";
 
 export default async function SettingsLayout({ children }: { children: ReactNode }) {
   const session = await auth();

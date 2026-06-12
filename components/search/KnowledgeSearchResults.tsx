@@ -3,7 +3,7 @@ import {
   IconArrowRight,
   IconBook,
   IconSearch,
-} from "@/components/icons";
+} from "@/components/common/icons";
 import type { SearchResponse, SearchResultItem, SearchResultType } from "@/lib/search-types";
 
 type KnowledgeSearchResultsProps = {

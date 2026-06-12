@@ -3,8 +3,8 @@
 import { useMemo, useState } from "react";
 import { type Ticket, type TicketCreateUser, type TicketCreateResponsibility, type PushRecordSnapshot } from "./types";
 import { TicketPushPanel } from "./TicketPushPanel";
-import { PushConfirmModal } from "@/components/PushConfirmModal";
-import { CommitDiffModal, type CommitSummary } from "@/components/CommitDiffModal";
+import { PushConfirmModal } from "@/components/modal/PushConfirmModal";
+import { CommitDiffModal, type CommitSummary } from "@/components/modal/CommitDiffModal";
 import { branchStyle, repoStyle } from "@/lib/repo-style";
 
 type Props = {

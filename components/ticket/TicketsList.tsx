@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { AppShell } from "@/components/AppShell";
-import { IconSearch } from "@/components/icons";
+import { IconSearch } from "@/components/common/icons";
+import { SimplePageHeader, HeaderSkeleton } from "@/components/ui/headers";
 import { fetchJson } from "@/lib/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
 import {
@@ -12,7 +13,7 @@ import {
   STATUS_LABEL,
   STATUS_STYLE,
   STATUS_ORDER,
-} from "@/components/ticket-detail/types";
+} from "@/components/ticket/ticket-detail/types";
 
 type ListTicket = {
   id: string;
@@ -239,12 +240,7 @@ function TicketsToolbar({
 }
 
 function TicketsListHeader() {
-  return (
-    <div>
-      <h1 className="text-lg font-semibold leading-tight">单子</h1>
-      <p className="text-xs text-ink-400">Tickets · 所有单子列表</p>
-    </div>
-  );
+  return <SimplePageHeader title="单子" subtitle="Tickets · 所有单子列表" />;
 }
 
 export function TicketsList() {
@@ -282,13 +278,5 @@ export function TicketsListLoading() {
 }
 
 export function TicketsListHeaderSkeleton() {
-  return (
-    <div className="flex items-center gap-3">
-      <div className="h-8 w-8 animate-pulse rounded-lg bg-ink-200" />
-      <div className="space-y-2">
-        <div className="h-5 w-20 animate-pulse rounded bg-ink-200" />
-        <div className="h-3 w-32 animate-pulse rounded bg-ink-100" />
-      </div>
-    </div>
-  );
+  return <HeaderSkeleton titleW={5} subtitleW={8} hasBackButton />;
 }

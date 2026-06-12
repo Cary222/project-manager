@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { branchStyle, repoStyle } from "@/lib/repo-style";
-import { type CommitSummary } from "./CommitDiffModal";
+import { type CommitSummary } from "../modal/CommitDiffModal";
 
 type CommitListProps = {
   commits: (CommitSummary & { id?: string })[];

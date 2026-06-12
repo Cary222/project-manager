@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import useSWR from "swr";
-import { IconSearch } from "@/components/icons";
+import { IconSearch } from "@/components/common/icons";
 import { fetchJson } from "@/lib/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
-import { type TicketStatus, type MyTicket } from "@/components/ticket-detail/types";
+import { type TicketStatus, type MyTicket } from "@/components/ticket/ticket-detail/types";
 
 const COLUMNS: { key: TicketStatus; label: string; accent: string; head: string }[] =
   [

@@ -11,7 +11,7 @@ import {
   IconProject,
   IconSearch,
   IconTask,
-} from "@/components/icons";
+} from "@/components/common/icons";
 import { fetchJson } from "@/lib/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
 import {
@@ -19,7 +19,7 @@ import {
   type MyTicket,
   STATUS_LABEL,
   STATUS_ORDER,
-} from "@/components/ticket-detail/types";
+} from "@/components/ticket/ticket-detail/types";
 
 type Project = {
   id: string;

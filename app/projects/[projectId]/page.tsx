@@ -1,18 +1,12 @@
-import dynamic from "next/dynamic";
-import Link from "next/link";
+import { prisma } from "@/lib/db";
+import { requireSession } from "@/lib/permissions";
 import { AppShell } from "@/components/AppShell";
-import { ProjectDetailLoading } from "@/components/ProjectDetail";
-
-const ProjectDetail = dynamic(
-  () => import("@/components/ProjectDetail").then((mod) => mod.ProjectDetail),
-  {
-    loading: () => (
-      <AppShell header={<ProjectDetailHeaderSkeleton />}>
-        <ProjectDetailLoading />
-      </AppShell>
-    ),
-  }
-);
+import {
+  PageHeader,
+  PageHeaderSkeleton,
+  type ProjectWithStatus,
+} from "@/components/project/ProjectDetail";
+import { ProjectDetail } from "@/components/project/ProjectDetail";
 
 export default async function ProjectDetailPage({
   params,
@@ -20,41 +14,53 @@ export default async function ProjectDetailPage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
+  await requireSession();
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      status: true,
+      responsibilities: {
+        orderBy: { kind: "asc" },
+        include: {
+          modules: {
+            orderBy: { name: "asc" },
+            include: {
+              tickets: {
+                orderBy: { ticketNo: "desc" },
+                include: {
+                  assignees: {
+                    include: {
+                      user: {
+                        select: { id: true, name: true, email: true, role: true },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!project) {
+    return (
+      <AppShell header={<PageHeaderSkeleton />}>
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+          项目不存在或无权限访问。
+        </div>
+      </AppShell>
+    );
+  }
+
   return (
-    <AppShell header={<ProjectDetailHeader />}>
-      <ProjectDetail projectId={projectId} />
+    <AppShell header={<PageHeader projectName={project.name} />}>
+      <ProjectDetail project={project as unknown as ProjectWithStatus} />
     </AppShell>
-  );
-}
-
-function ProjectDetailHeaderSkeleton() {
-  return (
-    <div className="flex items-center gap-3">
-      <div className="h-8 w-8 animate-pulse rounded-lg bg-ink-200" />
-      <div className="space-y-2">
-        <div className="h-5 w-32 animate-pulse rounded bg-ink-200" />
-        <div className="h-3 w-48 animate-pulse rounded bg-ink-100" />
-      </div>
-    </div>
-  );
-}
-
-function ProjectDetailHeader() {
-  return (
-    <div className="flex items-center gap-3">
-      <Link
-        href="/projects"
-        className="rounded-lg p-1.5 text-ink-400 hover:bg-ink-100 hover:text-ink-700"
-        aria-label="返回项目列表"
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="15 18 9 12 15 6" />
-        </svg>
-      </Link>
-      <div>
-        <h1 className="text-lg font-semibold leading-tight">项目详情</h1>
-        <p className="text-xs text-ink-400">加载中…</p>
-      </div>
-    </div>
   );
 }

@@ -4,12 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { useSession } from "next-auth/react";
-import { ImageLightbox } from "@/components/ImageLightbox";
-import { MarkdownContent } from "@/components/MarkdownContent";
-import { AssigneePicker } from "@/components/AssigneePicker";
+import { ImageLightbox } from "@/components/common/ImageLightbox";
+import { MarkdownContent } from "@/components/common/MarkdownContent";
+import { AssigneePicker } from "@/components/dispatch/AssigneePicker";
 import { formatAssigneeList } from "@/lib/ticket-assignees";
 import { composeImageMarkdown, extractInlineImages } from "@/lib/pkm";
-import { IconArrowLeft, IconClock, IconEdit } from "@/components/icons";
+import { IconArrowLeft, IconClock, IconEdit } from "@/components/common/icons";
 import { fetchJson } from "@/lib/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
 import {

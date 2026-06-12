@@ -117,29 +117,32 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     await requireSession();
+    const { searchParams } = new URL(request.url);
+    const projectId = searchParams.get("projectId");
+
     const tickets = await prisma.ticket.findMany({
+      where: projectId ? { projectId } : undefined,
       orderBy: { ticketNo: "desc" },
-      include: {
-        module: { include: { responsibility: true } },
-        assignees: {
-          include: { user: { select: assigneeUserSelect } },
+      select: {
+        id: true,
+        ticketNo: true,
+        title: true,
+        status: true,
+        project: {
+          select: { id: true, name: true },
         },
-        repoBindings: true,
-        commits: {
-          orderBy: { committedAt: "desc" },
-          take: 20,
+        module: {
+          select: {
+            name: true,
+            responsibility: { select: { kind: true } },
+          },
         },
       },
     });
-    return NextResponse.json({
-      tickets: tickets.map((ticket) => ({
-        ...ticket,
-        assignees: ticket.assignees.map((item) => item.user),
-      })),
-    });
+    return NextResponse.json({ tickets });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
     return NextResponse.json({ error: message }, { status: 401 });

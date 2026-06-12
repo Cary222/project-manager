@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { IconArrowRight, IconSearch } from "@/components/icons";
+import { IconArrowRight, IconSearch } from "@/components/common/icons";
 import { KnowledgeSearchResults } from "@/components/search/KnowledgeSearchResults";
 import type { SearchResponse } from "@/lib/search-types";
 

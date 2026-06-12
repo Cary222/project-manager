@@ -11,7 +11,7 @@ import {
   type BugRelation,
   type BugResolveResponse,
 } from "./types";
-import { TicketCreateForm } from "@/components/TicketCreateForm";
+import { TicketCreateForm } from "@/components/ticket/TicketCreateForm";
 import { fetchJson } from "@/lib/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
 

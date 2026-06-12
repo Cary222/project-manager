@@ -4,7 +4,7 @@ import { ReactNode } from "react";
 import { auth } from "@/lib/auth";
 import { isRoot } from "@/lib/permissions";
 import { AppShell } from "@/components/AppShell";
-import { IconChevronRight, IconSettings } from "@/components/icons";
+import { IconChevronRight, IconSettings } from "@/components/common/icons";
 import { AdminRoleProvider } from "./AdminRoleProvider";
 
 const ADMIN_NAV_ITEMS = [

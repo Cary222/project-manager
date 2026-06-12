@@ -28,7 +28,7 @@ import {
   IconTask,
   IconTeam,
   IconTicket,
-} from "@/components/icons";
+} from "@/components/common/icons";
 
 type NavItem = {
   href: string;
@@ -47,16 +47,11 @@ const NAV_ITEMS: NavItem[] = [
     match: (p) => p.startsWith("/projects"),
   },
   {
-    href: "/tasks",
-    label: "任务",
-    icon: IconTask,
-    match: (p) => p.startsWith("/tasks"),
-  },
-  {
-    href: "/tickets",
-    label: "单子",
+    href: "/dispatchTicket",
+    label: "派单",
     icon: IconTicket,
-    match: (p) => p.startsWith("/tickets") || /^\/\d+$/.test(p),
+    match: (p) => p.startsWith("/dispatchTicket"),
+    rootOnly: true,
   },
   { href: "/pkm", label: "PKM", icon: IconPkm, match: (p) => p.startsWith("/pkm") },
   {

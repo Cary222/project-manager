@@ -1,8 +1,8 @@
 import dynamic from "next/dynamic";
-import { ProjectsListLoading } from "@/components/ProjectsList";
+import { ProjectsListLoading } from "@/components/project/ProjectsList";
 
 const ProjectsList = dynamic(
-  () => import("@/components/ProjectsList").then((mod) => mod.ProjectsList),
+  () => import("@/components/project/ProjectsList").then((mod) => mod.ProjectsList),
   {
     loading: () => <ProjectsListLoading />,
   }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AssigneePicker } from "@/components/AssigneePicker";
+import { AssigneePicker } from "@/components/dispatch/AssigneePicker";
 import { composeImageMarkdown } from "@/lib/pkm";
 
 export type PushConfirmModalProps = {

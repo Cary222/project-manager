@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import { MarkdownContent } from "@/components/MarkdownContent";
-import { IconArrowRight, IconKnowledge, IconTag } from "@/components/icons";
+import { MarkdownContent } from "@/components/common/MarkdownContent";
+import { IconArrowRight, IconKnowledge, IconTag } from "@/components/common/icons";
 import { prisma } from "@/lib/db";
 import { normalizePkmAttachments } from "@/lib/pkm";
 import { requireSession } from "@/lib/permissions";

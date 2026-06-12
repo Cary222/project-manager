@@ -1,5 +1,5 @@
 import { AppShell } from "@/components/AppShell";
-import { IconRepo } from "@/components/icons";
+import { IconRepo } from "@/components/common/icons";
 
 const REPOS = [
   {

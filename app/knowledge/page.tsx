@@ -1,5 +1,5 @@
 import { AppShell } from "@/components/AppShell";
-import { IconBook, IconTag } from "@/components/icons";
+import { IconBook, IconTag } from "@/components/common/icons";
 import { KnowledgeSearchPanel } from "@/components/search/KnowledgeSearchPanel";
 import { prisma } from "@/lib/db";
 
