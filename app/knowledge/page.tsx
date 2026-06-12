@@ -1,7 +1,7 @@
-import { AppShell } from "@/components/AppShell";
-import { IconBook, IconTag } from "@/components/common/icons";
-import { KnowledgeSearchPanel } from "@/components/search/KnowledgeSearchPanel";
-import { prisma } from "@/lib/db";
+import { AppShell } from "@/shared/ui/AppShell";
+import { IconBook, IconTag } from "@/shared/ui/icons";
+import { KnowledgeSearchPanel } from "@/features/knowledge/ui/KnowledgeSearchPanel";
+import { prisma } from "@/shared/db/client";
 
 const SPACES = [
   { name: "光伏云平台", docs: 42, color: "bg-brand-50 text-brand-600" },

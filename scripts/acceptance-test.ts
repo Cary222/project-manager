@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { parseTicketCommitSubject } from "../lib/git-sync/parse";
-import { allocateTicketNo } from "../lib/ticket-counter";
-import { prisma } from "../lib/db";
+import { parseTicketCommitSubject } from "../entities/ticket/lib/parse-commit";
+import { allocateTicketNo } from "@/entities/ticket/lib/ticket-counter";
+import { prisma } from "@/shared/db/client";
 
 async function testParse() {
   assert.equal(parseTicketCommitSubject("10001: 修复登录")?.ticketNo, 10001);

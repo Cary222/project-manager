@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { searchDocuments } from "@/lib/search";
-import { requireSession } from "@/lib/permissions";
+import { searchDocuments } from "@/shared/lib/search";
+import { requireSession } from "@/shared/lib/permissions";
 
 export async function GET(request: Request) {
   try {

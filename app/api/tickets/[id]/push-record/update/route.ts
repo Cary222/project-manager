@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/permissions";
+import { prisma } from "@/shared/db/client";
+import { requireSession } from "@/shared/lib/permissions";
 
 type PushRecordBody = {
   status?: "FAILED" | "SUCCEEDED" | "PENDING";

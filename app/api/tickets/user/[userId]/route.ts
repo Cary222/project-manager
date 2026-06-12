@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { TicketStatus } from "@prisma/client";
-import { prisma } from "@/lib/db";
-import { requireRoot } from "@/lib/permissions";
+import { prisma } from "@/shared/db/client";
+import { requireRoot } from "@/shared/lib/permissions";
 
 export async function GET(
   request: Request,

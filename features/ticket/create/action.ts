@@ -1,0 +1,222 @@
+"use server";
+
+import { TicketStatus } from "@prisma/client";
+import { prisma } from "@/shared/db/client";
+import {
+  assigneeUserSelect,
+  normalizeAssigneeIds,
+  replaceTicketAssignees,
+} from "@/entities/ticket/lib/ticket-assignees";
+import { requireRoot } from "@/shared/lib/permissions";
+import { allocateTicketNo, syncTicketCounterAfterCreate } from "@/entities/ticket/lib/ticket-counter";
+import { createModerationLog } from "@/features/admin/moderation";
+import {
+  buildAssignedNotification,
+  createManyNotifications,
+} from "@/features/admin/notifications-lib";
+import { syncTicketSearchDocument } from "@/shared/lib/search";
+
+export type CreateTicketInput = {
+  projectId: string;
+  moduleId: string;
+  title: string;
+  description?: string;
+  assigneeIds?: string[];
+  status?: TicketStatus;
+  repoPaths?: string[];
+};
+
+export type CreateTicketResult =
+  | { ok: true; ticket: { id: string; ticketNo: number; title: string } }
+  | { ok: false; error: string };
+
+export async function createTicketAction(input: CreateTicketInput): Promise<CreateTicketResult> {
+  try {
+    const session = await requireRoot();
+
+    if (!input.title.trim() || !input.projectId || !input.moduleId) {
+      return { ok: false, error: "title, projectId and moduleId are required" };
+    }
+
+    const title = input.title.trim();
+    const projectId = input.projectId;
+    const moduleId = input.moduleId;
+    const ticketNo = await allocateTicketNo();
+    const assigneeIds = normalizeAssigneeIds(input.assigneeIds ?? []);
+
+    const ticket = await prisma.$transaction(async (tx) => {
+      const created = await tx.ticket.create({
+        data: {
+          ticketNo,
+          title,
+          description: input.description?.trim() || null,
+          projectId,
+          moduleId,
+          creatorId: session.user.id,
+          status: input.status ?? TicketStatus.DEVELOPING,
+          repoBindings: {
+            create: (input.repoPaths ?? [])
+              .filter((repoPath) => repoPath.trim().length > 0)
+              .map((repoPath) => ({ repoPath: repoPath.trim() })),
+          },
+        },
+        include: { repoBindings: true },
+      });
+
+      await replaceTicketAssignees(tx, created.id, assigneeIds, session.user.id);
+
+      await tx.ticketStatusHistory.create({
+        data: {
+          ticketId: created.id,
+          status: input.status ?? TicketStatus.DEVELOPING,
+          changedById: session.user.id,
+        },
+      });
+
+      return created;
+    });
+
+    await syncTicketCounterAfterCreate(ticket.ticketNo);
+    await syncTicketSearchDocument(ticket.id);
+
+    if (assigneeIds.length > 0) {
+      const actorName = session.user.name || session.user.email || "管理员";
+      const notification = buildAssignedNotification({
+        ticketNo: ticket.ticketNo,
+        title: ticket.title,
+        actorName,
+      });
+      await createManyNotifications({
+        userIds: assigneeIds,
+        type: "TICKET_ASSIGNED",
+        title: notification.title,
+        content: notification.content,
+        ticketId: ticket.id,
+        actorId: session.user.id,
+      });
+    }
+
+    await createModerationLog({
+      action: "CREATE_TICKET" as any,
+      targetId: ticket.ticketNo.toString(),
+      targetType: "Ticket",
+      actorId: session.user.id,
+      reason: `创建单子 #${ticket.ticketNo}: ${ticket.title}`,
+    });
+
+    return { ok: true, ticket: { id: ticket.id, ticketNo: ticket.ticketNo, title: ticket.title } };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown";
+    return { ok: false, error: message };
+  }
+}
+
+export type CreateBugTicketInput = {
+  sourceTicketId: string;
+  title: string;
+  description?: string;
+  assigneeIds?: string[];
+};
+
+export type CreateBugTicketResult =
+  | { ok: true; bugTicket: { id: string; ticketNo: number; title: string } }
+  | { ok: false; error: string };
+
+export async function createBugTicketAction(
+  input: CreateBugTicketInput
+): Promise<CreateBugTicketResult> {
+  try {
+    const session = await requireRoot();
+
+    if (!input.title.trim() || !input.sourceTicketId) {
+      return { ok: false, error: "title and sourceTicketId are required" };
+    }
+
+    const sourceTicket = await prisma.ticket.findUnique({
+      where: { id: input.sourceTicketId },
+      select: { id: true, ticketNo: true, projectId: true, moduleId: true },
+    });
+    if (!sourceTicket) {
+      return { ok: false, error: "source ticket not found" };
+    }
+
+    const ticketNo = await allocateTicketNo();
+    const assigneeIds = normalizeAssigneeIds(input.assigneeIds ?? []);
+
+    const ticket = await prisma.$transaction(async (tx) => {
+      const created = await tx.ticket.create({
+        data: {
+          ticketNo,
+          title: input.title.trim(),
+          description: input.description?.trim() || null,
+          projectId: sourceTicket.projectId,
+          moduleId: sourceTicket.moduleId,
+          creatorId: session.user.id,
+          status: TicketStatus.DEVELOPING,
+        },
+      });
+
+      await tx.bugProgramBinding.create({
+        data: {
+          bugTicketId: created.id,
+          programTicketId: sourceTicket.id,
+          boundById: session.user.id,
+        },
+      });
+
+      await replaceTicketAssignees(tx, created.id, assigneeIds, session.user.id);
+
+      await tx.ticketStatusHistory.create({
+        data: {
+          ticketId: created.id,
+          status: TicketStatus.DEVELOPING,
+          changedById: session.user.id,
+        },
+      });
+
+      return created;
+    });
+
+    await syncTicketCounterAfterCreate(ticket.ticketNo);
+
+    return {
+      ok: true,
+      bugTicket: { id: ticket.id, ticketNo: ticket.ticketNo, title: ticket.title },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown";
+    return { ok: false, error: message };
+  }
+}
+
+export type CreateModuleInput = {
+  responsibilityId: string;
+  name: string;
+};
+
+export type CreateModuleResult =
+  | { ok: true; module: { id: string; name: string } }
+  | { ok: false; error: string };
+
+export async function createModuleAction(input: CreateModuleInput): Promise<CreateModuleResult> {
+  try {
+    await requireRoot();
+
+    if (!input.name.trim() || !input.responsibilityId) {
+      return { ok: false, error: "name and responsibilityId are required" };
+    }
+
+    const module = await prisma.module.create({
+      data: {
+        responsibilityId: input.responsibilityId,
+        name: input.name.trim(),
+      },
+      select: { id: true, name: true },
+    });
+
+    return { ok: true, module };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown";
+    return { ok: false, error: message };
+  }
+}

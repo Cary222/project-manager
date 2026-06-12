@@ -1,5 +1,5 @@
-import { AppShell } from "@/components/AppShell";
-import { IconTrend } from "@/components/common/icons";
+import { AppShell } from "@/shared/ui/AppShell";
+import { IconTrend } from "@/shared/ui/icons";
 
 const KPIS = [
   { label: "进行中项目", value: "18", delta: "+2", up: true, tone: "text-brand-600" },

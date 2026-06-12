@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireSession } from "@/lib/permissions";
+import { requireSession } from "@/shared/lib/permissions";
 import { syncAllManagedRepos } from "@/lib/git-sync/scan";
 
 export async function POST() {

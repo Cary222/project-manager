@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { ModerationAction, ResponsibilityKind } from "@prisma/client";
-import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/permissions";
-import { createModerationLog } from "@/lib/moderation";
-import { allocateTicketNo } from "@/lib/ticket-counter";
+import { prisma } from "@/shared/db/client";
+import { requireSession } from "@/shared/lib/permissions";
+import { createModerationLog } from "@/features/admin/moderation";
+import { allocateTicketNo } from "@/entities/ticket/lib/ticket-counter";
 
 type BugTicketBody = {
   title?: string;

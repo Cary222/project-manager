@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/permissions";
+import { prisma } from "@/shared/db/client";
+import { requireSession } from "@/shared/lib/permissions";
 import { PRIVATE_LIST_CACHE_CONTROL } from "@/lib/cache-control";
-import { normalizePkmAttachments } from "@/lib/pkm";
-import { syncPkmNoteSearchDocument } from "@/lib/search";
+import { normalizePkmAttachments } from "@/shared/lib/pkm";
+import { syncPkmNoteSearchDocument } from "@/shared/lib/search";
 
 function normalizeTags(tags: unknown) {
   if (!Array.isArray(tags)) return [] as string[];

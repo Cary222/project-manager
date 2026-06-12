@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { ResponsibilityKind } from "@prisma/client";
-import { prisma } from "@/lib/db";
-import { requireRoot, requireSession } from "@/lib/permissions";
+import { prisma } from "@/shared/db/client";
+import { requireRoot, requireSession } from "@/shared/lib/permissions";
 
 export async function POST(
   request: Request,

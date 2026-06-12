@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/db";
+import { prisma } from "@/shared/db/client";
 
 export async function getSyncCursor(repoPath: string) {
   return prisma.syncCursor.findUnique({ where: { repoPath } });

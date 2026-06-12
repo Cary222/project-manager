@@ -1,4 +1,4 @@
-import { AppShell } from "@/components/AppShell";
+import { AppShell } from "@/shared/ui/AppShell";
 
 const MEMBERS = [
   { name: "张三", role: "后端负责人", skills: ["Go", "PostgreSQL", "Redis"], tone: "bg-brand-50 text-brand-600" },

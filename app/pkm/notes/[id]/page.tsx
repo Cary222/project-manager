@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AppShell } from "@/components/AppShell";
-import { MarkdownContent } from "@/components/common/MarkdownContent";
-import { IconArrowRight, IconKnowledge, IconTag } from "@/components/common/icons";
-import { prisma } from "@/lib/db";
-import { normalizePkmAttachments } from "@/lib/pkm";
-import { requireSession } from "@/lib/permissions";
+import { AppShell } from "@/shared/ui/AppShell";
+import { MarkdownContent } from "@/shared/ui/MarkdownContent";
+import { IconArrowRight, IconKnowledge, IconTag } from "@/shared/ui/icons";
+import { prisma } from "@/shared/db/client";
+import { normalizePkmAttachments } from "@/shared/lib/pkm";
+import { requireSession } from "@/shared/lib/permissions";
 
 type Params = { params: Promise<{ id: string }> };
 

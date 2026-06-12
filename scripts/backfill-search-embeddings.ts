@@ -1,5 +1,5 @@
 import { loadEnvConfig } from "@next/env";
-import { backfillMissingSearchEmbeddings } from "@/lib/search";
+import { backfillMissingSearchEmbeddings } from "@/shared/lib/search";
 
 loadEnvConfig(process.cwd());
 

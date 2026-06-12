@@ -1,20 +1,20 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma } from "@/shared/db/client";
 import {
   assigneeUserSelect,
   normalizeAssigneeIds,
   replaceTicketAssignees,
   sameAssigneeIds,
-} from "@/lib/ticket-assignees";
-import { requireRoot } from "@/lib/permissions";
-import { createModerationLog } from "@/lib/moderation";
+} from "@/entities/ticket/lib/ticket-assignees";
+import { requireRoot } from "@/shared/lib/permissions";
+import { createModerationLog } from "@/features/admin/moderation";
 import { ModerationAction } from "@prisma/client";
 import {
   buildAssignedNotification,
   createManyNotifications,
   listRootUserIds,
-} from "@/lib/notifications";
-import { syncTicketSearchDocument } from "@/lib/search";
+} from "@/features/admin/notifications-lib";
+import { syncTicketSearchDocument } from "@/shared/lib/search";
 
 export async function PATCH(
   request: Request,

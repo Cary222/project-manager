@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma } from "@/shared/db/client";
 import {
   assigneeUserSelect,
   loadUsersByIds,
   mapAssigneeUsers,
   normalizeAssigneeIds,
   replaceTicketAssignees,
-} from "@/lib/ticket-assignees";
-import { requireRoot, requireSession } from "@/lib/permissions";
-import { createModerationLog } from "@/lib/moderation";
-import { syncTicketCounterAfterDelete } from "@/lib/ticket-counter";
+} from "@/entities/ticket/lib/ticket-assignees";
+import { requireRoot, requireSession } from "@/shared/lib/permissions";
+import { createModerationLog } from "@/features/admin/moderation";
+import { syncTicketCounterAfterDelete } from "@/entities/ticket/lib/ticket-counter";
 import { ModerationAction } from "@prisma/client";
-import { syncTicketSearchDocument } from "@/lib/search";
+import { syncTicketSearchDocument } from "@/shared/lib/search";
 
 async function enrichAssigneeHistory(
   history: {

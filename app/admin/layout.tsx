@@ -2,9 +2,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ReactNode } from "react";
 import { auth } from "@/lib/auth";
-import { isRoot } from "@/lib/permissions";
-import { AppShell } from "@/components/AppShell";
-import { IconChevronRight, IconSettings } from "@/components/common/icons";
+import { isRoot } from "@/shared/lib/permissions";
+import { AppShell } from "@/shared/ui/AppShell";
+import { IconChevronRight, IconSettings } from "@/shared/ui/icons";
 import { AdminRoleProvider } from "./AdminRoleProvider";
 
 const ADMIN_NAV_ITEMS = [

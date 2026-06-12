@@ -1,4 +1,4 @@
-import { SettingsCenter } from "@/components/settings/SettingsCenter";
+import { SettingsCenter } from "@/features/settings/SettingsCenter";
 
 export const dynamic = "force-dynamic";
 

@@ -4,7 +4,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
-import { prisma } from "@/lib/db";
+import { prisma } from "@/shared/db/client";
 
 const baseUrl = process.env.NEXTAUTH_URL || process.env.AUTH_URL;
 

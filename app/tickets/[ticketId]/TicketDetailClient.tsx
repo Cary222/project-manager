@@ -2,15 +2,14 @@
 
 import { default as NextDynamic } from "next/dynamic";
 import useSWR from "swr";
-import { AppShell } from "@/components/AppShell";
-import { BackLink, SimplePageHeader, HeaderSkeleton } from "@/components/ui/headers";
-import { TicketDetailLoading } from "@/components/ticket/ticket-detail/TicketDetail";
-import { TicketDetailHeaderSkeleton } from "@/components/ticket/ticket-detail/TicketDetail";
-import { fetchJson } from "@/lib/fetch-json";
-import { KIND_LABEL } from "@/components/ticket/ticket-detail/types";
+import { AppShell } from "@/shared/ui/AppShell";
+import { BackLink, SimplePageHeader, HeaderSkeleton } from "@/shared/ui/headers";
+import { TicketDetailLoading, TicketDetailHeaderSkeleton } from "@/features/ticket/ui/ticket-detail/TicketDetail";
+import { fetchJson } from "@/shared/api/fetch-json";
+import { KIND_LABEL } from "@/entities/ticket/model/types";
 
 const TicketDetail = NextDynamic(
-  () => import("@/components/ticket/ticket-detail/TicketDetail").then((m) => m.TicketDetail),
+  () => import("@/features/ticket/ui/ticket-detail/TicketDetail").then((m) => m.TicketDetail),
   {
     loading: () => (
       <AppShell header={<TicketDetailHeaderSkeleton />}>

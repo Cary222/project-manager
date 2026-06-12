@@ -3,11 +3,11 @@
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { useRouter } from "next/navigation";
-import { AppShell } from "@/components/AppShell";
-import { IconProject } from "@/components/common/icons";
-import { SimplePageHeader } from "@/components/ui/headers";
-import { fetchJson } from "@/lib/fetch-json";
-import { STALE_SWR_OPTIONS } from "@/lib/swr-config";
+import { AppShell } from "@/shared/ui/AppShell";
+import { IconProject } from "@/shared/ui/icons";
+import { SimplePageHeader } from "@/shared/ui/headers";
+import { fetchJson } from "@/shared/api/fetch-json";
+import { STALE_SWR_OPTIONS } from "@/shared/api/swr-config";
 
 type Project = {
   id: string;

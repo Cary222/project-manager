@@ -9,7 +9,7 @@ import {
   banUserAction,
   unbanUserAction,
   UserSummary,
-} from "@/actions/admin";
+} from "@/features/admin/admin";
 import { UserRole } from "@prisma/client";
 import { useAdminRole } from "../context";
 

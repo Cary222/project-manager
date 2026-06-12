@@ -1,7 +1,7 @@
-import { AppShell } from "@/components/AppShell";
-import { PkmBoard } from "@/components/pkm/PkmBoard";
-import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/permissions";
+import { AppShell } from "@/shared/ui/AppShell";
+import { PkmBoard } from "@/features/knowledge/pkm/PkmBoard";
+import { prisma } from "@/shared/db/client";
+import { requireSession } from "@/shared/lib/permissions";
 
 function serializeNote(note: {
   id: string;

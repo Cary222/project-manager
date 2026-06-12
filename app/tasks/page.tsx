@@ -1,10 +1,10 @@
 import dynamic from "next/dynamic";
-import { AppShell } from "@/components/AppShell";
-import { SimplePageHeader } from "@/components/ui/headers";
-import { TasksBoardLoading, TasksBoardHeaderSkeleton } from "@/components/task/TasksBoard";
+import { AppShell } from "@/shared/ui/AppShell";
+import { SimplePageHeader } from "@/shared/ui/headers";
+import { TasksBoardLoading, TasksBoardHeaderSkeleton } from "@/features/task/TasksBoard";
 
 const TasksBoard = dynamic(
-  () => import("@/components/task/TasksBoard").then((mod) => mod.TasksBoard),
+  () => import("@/features/task/TasksBoard").then((mod) => mod.TasksBoard),
   {
     loading: () => <TasksBoardLoading />,
   }

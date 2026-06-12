@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { prisma } from "@/shared/db/client";
 import { getCommitDiff } from "@/lib/git-sync/diff";
-import { requireSession } from "@/lib/permissions";
+import { requireSession } from "@/shared/lib/permissions";
 
 export async function GET(request: Request) {
   try {

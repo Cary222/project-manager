@@ -1,13 +1,13 @@
 import dynamic from "next/dynamic";
-import { AppShell } from "@/components/AppShell";
-import { BackPageHeader } from "@/components/ui/headers";
+import { AppShell } from "@/shared/ui/AppShell";
+import { BackPageHeader } from "@/shared/ui/headers";
 import {
   DispatchProjectDetailLoading,
   DispatchProjectDetailHeaderSkeleton,
-} from "@/components/dispatch/DispatchProjectDetail";
+} from "@/features/dispatch/ui/DispatchProjectDetail";
 
 const DispatchProjectDetail = dynamic(
-  () => import("@/components/dispatch/DispatchProjectDetail").then((mod) => mod.DispatchProjectDetail),
+  () => import("@/features/dispatch/ui/DispatchProjectDetail").then((mod) => mod.DispatchProjectDetail),
   {
     loading: () => (
       <AppShell header={<DispatchProjectDetailHeaderSkeleton />}>

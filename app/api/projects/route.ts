@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
-import { requireRoot, requireSession } from "@/lib/permissions";
+import { prisma } from "@/shared/db/client";
+import { requireRoot, requireSession } from "@/shared/lib/permissions";
 import { ResponsibilityKind } from "@prisma/client";
-import { createModerationLog } from "@/lib/moderation";
+import { createModerationLog } from "@/features/admin/moderation";
 import { ModerationAction } from "@prisma/client";
 import { PRIVATE_LIST_CACHE_CONTROL } from "@/lib/cache-control";
 

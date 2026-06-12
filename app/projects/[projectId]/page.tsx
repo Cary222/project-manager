@@ -1,12 +1,12 @@
-import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/permissions";
-import { AppShell } from "@/components/AppShell";
+import { prisma } from "@/shared/db/client";
+import { requireSession } from "@/shared/lib/permissions";
+import { AppShell } from "@/shared/ui/AppShell";
 import {
   PageHeader,
   PageHeaderSkeleton,
   type ProjectWithStatus,
-} from "@/components/project/ProjectDetail";
-import { ProjectDetail } from "@/components/project/ProjectDetail";
+} from "@/features/project/ui/ProjectDetail";
+import { ProjectDetail } from "@/features/project/ui/ProjectDetail";
 
 export default async function ProjectDetailPage({
   params,

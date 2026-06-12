@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
-import { requireRoot, requireSession } from "@/lib/permissions";
-import { createModerationLog } from "@/lib/moderation";
+import { prisma } from "@/shared/db/client";
+import { requireRoot, requireSession } from "@/shared/lib/permissions";
+import { createModerationLog } from "@/features/admin/moderation";
 import { ModerationAction } from "@prisma/client";
 
 export async function GET(

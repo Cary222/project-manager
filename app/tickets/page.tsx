@@ -1,8 +1,8 @@
 import dynamic from "next/dynamic";
-import { TicketsListLoading, TicketsListHeaderSkeleton } from "@/components/ticket/TicketsList";
+import { TicketsListLoading, TicketsListHeaderSkeleton } from "@/features/ticket/ui/TicketsList";
 
 const TicketsList = dynamic(
-  () => import("@/components/ticket/TicketsList").then((mod) => mod.TicketsList),
+  () => import("@/features/ticket/ui/TicketsList").then((mod) => mod.TicketsList),
   {
     loading: () => <TicketsListLoading />,
   }

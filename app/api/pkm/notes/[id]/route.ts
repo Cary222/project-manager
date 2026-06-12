@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/permissions";
-import { normalizePkmAttachments } from "@/lib/pkm";
-import { syncPkmNoteSearchDocument } from "@/lib/search";
+import { prisma } from "@/shared/db/client";
+import { requireSession } from "@/shared/lib/permissions";
+import { normalizePkmAttachments } from "@/shared/lib/pkm";
+import { syncPkmNoteSearchDocument } from "@/shared/lib/search";
 
 type Params = { params: Promise<{ id: string }> };
 

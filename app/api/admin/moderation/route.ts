@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { isRoot } from "@/lib/permissions";
-import { getModerationLogs } from "@/lib/moderation";
+import { isRoot } from "@/shared/lib/permissions";
+import { getModerationLogs } from "@/features/admin/moderation";
 
 export async function GET() {
   const session = await auth();

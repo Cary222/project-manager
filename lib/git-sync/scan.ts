@@ -1,14 +1,14 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { prisma } from "@/lib/db";
+import { prisma } from "@/shared/db/client";
 import { getCommitBranches } from "@/lib/git-sync/branches";
-import { parseTicketCommitSubject } from "@/lib/git-sync/parse";
+import { parseTicketCommitSubject } from "@/entities/ticket/lib/parse-commit";
 import { listManagedRepos } from "@/lib/git-sync/repos";
 import {
   buildSearchableCommitDocument,
   backfillSearchDocuments,
   upsertSearchDocument,
-} from "@/lib/search";
+} from "@/shared/lib/search";
 
 const execFileAsync = promisify(execFile);
 const SCAN_LIMIT = 500;

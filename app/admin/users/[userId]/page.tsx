@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { TicketStatus, UserRole } from "@prisma/client";
-import { getUserByIdAction, getUserTicketsAction, UserTicket } from "@/actions/admin";
+import { getUserByIdAction, getUserTicketsAction, UserTicket } from "@/features/admin/admin";
 
 type Props = { params: Promise<{ userId: string }> };
 

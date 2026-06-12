@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 import { TicketStatus, ModerationAction } from "@prisma/client";
-import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/permissions";
-import { createModerationLog } from "@/lib/moderation";
+import { prisma } from "@/shared/db/client";
+import { requireSession } from "@/shared/lib/permissions";
+import { createModerationLog } from "@/features/admin/moderation";
 import {
   buildCompletedNotification,
   buildDeliveredNotification,
   buildStatusChangedNotification,
   createManyNotifications,
   listRootUserIds,
-} from "@/lib/notifications";
-import { syncTicketSearchDocument } from "@/lib/search";
+} from "@/features/admin/notifications-lib";
+import { syncTicketSearchDocument } from "@/shared/lib/search";
 
 const TICKET_STATUS_VALUES = [
   "DEVELOPING",

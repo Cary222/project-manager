@@ -1,19 +1,19 @@
 import { NextResponse } from "next/server";
 import { TicketStatus, ModerationAction } from "@prisma/client";
-import { prisma } from "@/lib/db";
+import { prisma } from "@/shared/db/client";
 import {
   assigneeUserSelect,
   normalizeAssigneeIds,
   replaceTicketAssignees,
-} from "@/lib/ticket-assignees";
-import { requireRoot, requireSession } from "@/lib/permissions";
-import { allocateTicketNo, syncTicketCounterAfterCreate } from "@/lib/ticket-counter";
-import { createModerationLog } from "@/lib/moderation";
+} from "@/entities/ticket/lib/ticket-assignees";
+import { requireRoot, requireSession } from "@/shared/lib/permissions";
+import { allocateTicketNo, syncTicketCounterAfterCreate } from "@/entities/ticket/lib/ticket-counter";
+import { createModerationLog } from "@/features/admin/moderation";
 import {
   buildAssignedNotification,
   createManyNotifications,
-} from "@/lib/notifications";
-import { syncTicketSearchDocument } from "@/lib/search";
+} from "@/features/admin/notifications-lib";
+import { syncTicketSearchDocument } from "@/shared/lib/search";
 
 export async function POST(request: Request) {
   try {
