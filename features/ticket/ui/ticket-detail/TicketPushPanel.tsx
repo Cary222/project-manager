@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
 import {
@@ -82,6 +82,7 @@ export function TicketPushPanel({
   const [bugResolveMode, setBugResolveMode] = useState<BugResolveMode>("unbound");
   const [bugCandidateTicket, setBugCandidateTicket] = useState<{ id: string; ticketNo: number; title: string } | null>(null);
   const [bugDraft, setBugDraft] = useState<ProgramPushDraft | null>(null);
+  const [bugSearchMissed, setBugSearchMissed] = useState(false);
   const [fixCommitInfo, setFixCommitInfo] = useState<{
     count: number;
     fixCommitIds: string[];
@@ -223,8 +224,15 @@ export function TicketPushPanel({
 
   // ---- Program ticket handlers ----
 
+  useEffect(() => {
+    if (!bugSearchMissed) return;
+    const timer = setTimeout(() => setBugSearchMissed(false), 3000);
+    return () => clearTimeout(timer);
+  }, [bugSearchMissed]);
+
   async function openBugSearch() {
     try {
+      setBugSearchMissed(false);
       const res = await fetch(`/api/tickets/${ticketNo}/bug-relations/resolve`);
       if (!res.ok) throw new Error("查询失败");
       const data = await res.json() as BugResolveResponse;
@@ -240,6 +248,7 @@ export function TicketPushPanel({
       if (data.mode === "candidate" && data.candidateTicket) {
         setBugResolveMode("candidate");
         setBugCandidateTicket(data.candidateTicket);
+        setBugSearchMissed(false);
         setBugDraft(programPushDraft ?? {
           title: data.candidateTicket.title,
           description: "",
@@ -253,6 +262,7 @@ export function TicketPushPanel({
 
         setBugResolveMode("unbound");
         setBugCandidateTicket(null);
+        setBugSearchMissed(false);
         setShowBugForm(true);
         setBugDraft(programPushDraft ? {
           ...programPushDraft,
@@ -266,9 +276,10 @@ export function TicketPushPanel({
           programAssigneeIds: [],
         });
       } else {
+        // 没有候选 Bug 单，且没有 fix 提交引导：只提示，不主动拉出新建表单
         setBugResolveMode("unbound");
         setBugCandidateTicket(null);
-        setShowBugForm(true);
+        setBugSearchMissed(true);
         setBugDraft(programPushDraft ?? {
           title: "",
           description: "",
@@ -279,8 +290,21 @@ export function TicketPushPanel({
     } catch {
       setBugResolveMode("unbound");
       setBugCandidateTicket(null);
-      setShowBugForm(true);
+      setBugSearchMissed(true);
     }
+  }
+
+  function openBugForm() {
+    setBugResolveMode("unbound");
+    setBugCandidateTicket(null);
+    setFixCommitInfo(null);
+    setShowBugForm(true);
+    setBugDraft(programPushDraft ?? {
+      title: "",
+      description: "",
+      designAssigneeIds: [],
+      programAssigneeIds: [],
+    });
   }
 
   async function handleBindBugCandidate() {
@@ -304,6 +328,7 @@ export function TicketPushPanel({
     onMessage(`已绑定 Bug 单 #${bugCandidateTicket.ticketNo}`);
     setBugCandidateTicket(null);
     setFixCommitInfo(null);
+    setBugSearchMissed(false);
     await refreshBugBindings();
   }
 
@@ -332,6 +357,7 @@ export function TicketPushPanel({
     setShowBugForm(false);
     setBugCandidateTicket(null);
     setFixCommitInfo(null);
+    setBugSearchMissed(false);
     await refreshBugBindings();
   }
 
@@ -372,24 +398,17 @@ export function TicketPushPanel({
                 检索 Bug 单
               </button>
               <button
-                onClick={() => {
-                  setBugResolveMode("unbound");
-                  setBugCandidateTicket(null);
-                  setFixCommitInfo(null);
-                  setShowBugForm(true);
-                  setBugDraft(programPushDraft ?? {
-                    title: "",
-                    description: "",
-                    designAssigneeIds: [],
-                    programAssigneeIds: [],
-                  });
-                }}
+                onClick={openBugForm}
                 className="rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm hover:bg-ink-100"
               >
                 创建新 Bug 单
               </button>
             </div>
           </div>
+
+          {bugSearchMissed && (
+            <p className="mb-4 text-sm bg-rose-100 text-ink-500">未检索到对应的 Bug 单</p>
+          )}
 
           {bugBindings.length > 0 ? (
             <div className="space-y-3">
@@ -463,10 +482,8 @@ export function TicketPushPanel({
                 </button>
                 <button
                   onClick={() => {
-                    setBugResolveMode("unbound");
-                    setBugCandidateTicket(null);
-                    setFixCommitInfo(null);
-                    setShowBugForm(true);
+                    setBugSearchMissed(false);
+                    openBugForm();
                   }}
                   className="rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm hover:bg-ink-100"
                 >
