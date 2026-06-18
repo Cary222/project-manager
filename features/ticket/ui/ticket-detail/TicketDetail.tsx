@@ -199,6 +199,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
       description: ticket.description || "",
       designAssigneeIds: ticket.assignees.map((u) => u.id),
       programAssigneeIds: [],
+      moduleId: ticket.module.id,
     };
   }, [ticket]);
 

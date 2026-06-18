@@ -257,6 +257,11 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
 
   const selectedResponsibilityForCreate = selectedResponsibility as TicketCreateResponsibility | null;
 
+  const allProjectModules = useMemo(
+    () => project?.responsibilities.flatMap((r) => r.modules) ?? [],
+    [project],
+  );
+
   async function handleTicketCreated() {
     setShowCreate(false);
     await loadProject();
@@ -505,6 +510,7 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
                   onMessage={setMessage}
                   onCreated={handleTicketCreated}
                   onCancel={() => setShowCreate(false)}
+                  allProjectModules={allProjectModules}
                 />
               ) : null}
 

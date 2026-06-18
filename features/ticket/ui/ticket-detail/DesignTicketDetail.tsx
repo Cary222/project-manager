@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { type Ticket, type TicketCreateUser, type ProgramPushDraft, type TicketCreateResponsibility } from "@/entities/ticket/model/types";
 import { TicketPushPanel } from "./TicketPushPanel";
 
@@ -23,6 +24,11 @@ export function DesignTicketDetail({
   if (ticket.status !== "DONE") return null;
   if (ticket.creatorId !== ticket.assignees[0]?.id && !isRoot) return null;
 
+  const allProjectModules = useMemo(
+    () => ticket.project.responsibilities.flatMap((r) => r.modules),
+    [ticket.project.responsibilities],
+  );
+
   return (
     <TicketPushPanel
       ticketNo={ticket.ticketNo}
@@ -34,6 +40,7 @@ export function DesignTicketDetail({
       programPushDraft={programPushDraft}
       onMessage={onMessage}
       color="emerald"
+      allProjectModules={allProjectModules}
     />
   );
 }

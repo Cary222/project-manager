@@ -28,6 +28,8 @@ type Props = {
   programPushDraft: ProgramPushDraft | null;
   onMessage: (msg: string) => void;
   color?: "emerald" | "rose";
+  /** All modules from this project (across all responsibilities) for the create form dropdown */
+  allProjectModules?: { id: string; name: string }[];
 };
 
 export function TicketPushPanel({
@@ -40,6 +42,7 @@ export function TicketPushPanel({
   programPushDraft,
   onMessage,
   color = "emerald",
+  allProjectModules,
 }: Props) {
   const isBug = color === "rose";
 
@@ -554,6 +557,7 @@ export function TicketPushPanel({
               submitMode="create"
               onMessage={onMessage}
               onCreated={handleBindNewBug}
+              allProjectModules={allProjectModules}
               onCancel={() => {
                 setShowBugForm(false);
                 setBugCandidateTicket(null);
@@ -651,6 +655,7 @@ export function TicketPushPanel({
             onCreated={handleCreateTicket}
             onCancel={() => setShowForm(false)}
             className="grid gap-3 rounded-xl border border-ink-100 bg-ink-100/40 p-4"
+            allProjectModules={allProjectModules}
           />
         )}
 

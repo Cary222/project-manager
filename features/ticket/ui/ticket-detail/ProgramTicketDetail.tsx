@@ -37,6 +37,11 @@ export function ProgramTicketDetail({
     [ticket.project.responsibilities],
   );
 
+  const allProjectModules = useMemo(
+    () => ticket.project.responsibilities.flatMap((r) => r.modules),
+    [ticket.project.responsibilities],
+  );
+
   async function handleBugPush(options: {
     title: string;
     description: string;
@@ -112,9 +117,11 @@ export function ProgramTicketDetail({
           description: ticket.description || "",
           designAssigneeIds: ticket.assignees.map((a) => a.id),
           programAssigneeIds: [],
+          moduleId: ticket.module.id,
         }}
         onMessage={onMessage}
         color="rose"
+        allProjectModules={allProjectModules}
       />
 
       <section className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">

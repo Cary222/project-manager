@@ -47,6 +47,8 @@ type CreateTicketFormProps = {
   currentUserId?: string;
   bugTicketMode?: boolean;
   sourceTicketNo?: number;
+  /** All modules from this project (across all responsibilities) for the dropdown */
+  allProjectModules?: { id: string; name: string }[];
 };
 
 export function CreateTicketForm({
@@ -66,6 +68,7 @@ export function CreateTicketForm({
   currentUserId,
   bugTicketMode = false,
   sourceTicketNo,
+  allProjectModules,
 }: CreateTicketFormProps) {
   const [moduleId, setModuleId] = useState(initialValues?.moduleId ?? "");
   const [newModuleName, setNewModuleName] = useState(initialValues?.newModuleName ?? "");
@@ -244,11 +247,30 @@ export function CreateTicketForm({
               className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
             >
               <option value="">不选择，使用新模块</option>
-              {responsibility.modules.map((module) => (
-                <option key={module.id} value={module.id}>
-                  {module.name}
-                </option>
-              ))}
+              {(() => {
+                const seen = new Set<string>();
+                const items: { id: string; name: string }[] = [];
+
+                for (const m of responsibility.modules) {
+                  if (!seen.has(m.id)) {
+                    seen.add(m.id);
+                    items.push(m);
+                  }
+                }
+
+                for (const m of allProjectModules ?? []) {
+                  if (!seen.has(m.id)) {
+                    seen.add(m.id);
+                    items.push(m);
+                  }
+                }
+
+                return items.map((module) => (
+                  <option key={module.id} value={module.id}>
+                    {module.name}
+                  </option>
+                ));
+              })()}
             </select>
           </label>
           <label className="space-y-1 text-sm">
