@@ -105,14 +105,51 @@ export function CreateTicketForm({
     }, 0);
   }
 
-  function insertImage(file: File) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const src = String(reader.result ?? "");
-      if (!src) return;
-      setDescriptionImages((prev) => [...prev, { src, name: file.name }]);
-    };
-    reader.readAsDataURL(file);
+  function compressImage(file: File, maxDim = 1600, quality = 0.82): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const ratio = Math.min(1, maxDim / Math.max(img.width, img.height));
+          const w = Math.max(1, Math.round(img.width * ratio));
+          const h = Math.max(1, Math.round(img.height * ratio));
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            URL.revokeObjectURL(url);
+            resolve(URL.createObjectURL(file));
+            return;
+          }
+          ctx.drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL("image/jpeg", quality);
+          URL.revokeObjectURL(url);
+          resolve(dataUrl);
+        } catch (err) {
+          URL.revokeObjectURL(url);
+          reject(err);
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+        reader.readAsDataURL(file);
+      };
+      img.src = url;
+    });
+  }
+
+  async function insertImage(file: File) {
+    try {
+      const compressed = await compressImage(file);
+      setDescriptionImages((prev) => [...prev, { src: compressed, name: file.name }]);
+    } catch (err) {
+      onMessage?.(`图片处理失败: ${err instanceof Error ? err.message : "unknown"}`);
+    }
   }
 
   function removeImage(index: number) {
@@ -130,95 +167,112 @@ export function CreateTicketForm({
     setSubmitting(true);
     onMessage?.("");
 
-    let targetModuleId = moduleId;
-    if (!targetModuleId && newModuleName.trim()) {
-      const moduleResult = await createModuleAction({
-        responsibilityId: responsibility.id,
-        name: newModuleName.trim(),
-      });
-      if (!moduleResult.ok) {
-        setSubmitting(false);
-        onMessage?.(`创建模块失败: ${moduleResult.error}`);
+    try {
+      let targetModuleId = moduleId;
+      if (!targetModuleId && newModuleName.trim()) {
+        const moduleResult = await createModuleAction({
+          responsibilityId: responsibility.id,
+          name: newModuleName.trim(),
+        });
+        if (!moduleResult.ok) {
+          onMessage?.(`创建模块失败: ${moduleResult.error}`);
+          return;
+        }
+        targetModuleId = moduleResult.module.id;
+      }
+
+      if (!targetModuleId) {
+        onMessage?.("请选择模块或填写新模块名称");
         return;
       }
-      targetModuleId = moduleResult.module.id;
-    }
 
-    if (!targetModuleId) {
-      setSubmitting(false);
-      onMessage?.("请选择模块或填写新模块名称");
-      return;
-    }
+      const effectiveProgramAssigneeIds =
+        programAssigneeIds.length > 0
+          ? programAssigneeIds
+          : currentUserId
+            ? [currentUserId]
+            : [];
 
-    const effectiveProgramAssigneeIds =
-      programAssigneeIds.length > 0
-        ? programAssigneeIds
-        : currentUserId
-          ? [currentUserId]
-          : [];
+      const { content: fullDescription } = composeImageMarkdown(descriptionImages, description.trim());
 
-    const { content: fullDescription } = composeImageMarkdown(descriptionImages, description.trim());
-
-    if (submitMode === "edit") {
-      setSubmitting(false);
-      await onCreated?.({
-        ticket: { id: "", ticketNo: 0, title: title.trim() },
-        programAssigneeIds: effectiveProgramAssigneeIds,
-        designAssigneeIds,
-        title: title.trim(),
-        description: fullDescription,
-        moduleId: targetModuleId,
-        newModuleName: newModuleName.trim(),
-      });
-      return;
-    }
-
-    const input: CreateTicketInput = {
-      projectId,
-      moduleId: targetModuleId,
-      title: title.trim(),
-      description: fullDescription,
-      assigneeIds: effectiveProgramAssigneeIds,
-    };
-
-    const result = await createTicketAction(input);
-
-    setSubmitting(false);
-
-    if (!result.ok) {
-      const errorMessage = `创建单子失败: ${result.error}`;
-      onMessage?.(errorMessage);
-      await onCreateFailed?.(
-        {
-          moduleId: targetModuleId,
-          newModuleName: newModuleName.trim(),
+      if (submitMode === "edit") {
+        await onCreated?.({
+          ticket: { id: "", ticketNo: 0, title: title.trim() },
           programAssigneeIds: effectiveProgramAssigneeIds,
           designAssigneeIds,
           title: title.trim(),
-          description: description.trim(),
-        },
-        errorMessage
-      );
-      return;
-    }
+          description: fullDescription,
+          moduleId: targetModuleId,
+          newModuleName: newModuleName.trim(),
+        });
+        return;
+      }
 
-    setModuleId("");
-    setNewModuleName("");
-    setProgramAssigneeIds([]);
-    setDesignAssigneeIds([]);
-    setTitle("");
-    setDescription("");
-    setDescriptionImages([]);
-    onMessage?.("单子已创建");
-    await onCreated?.({
-      ticket: result.ticket,
-      programAssigneeIds: effectiveProgramAssigneeIds,
-      designAssigneeIds,
-      title: title.trim(),
-      description: description.trim(),
-      moduleId: targetModuleId,
-      newModuleName: newModuleName.trim(),
-    });
+      const input: CreateTicketInput = {
+        projectId,
+        moduleId: targetModuleId,
+        title: title.trim(),
+        description: fullDescription,
+        assigneeIds: effectiveProgramAssigneeIds,
+      };
+
+      let result;
+      try {
+        result = await createTicketAction(input);
+      } catch (err) {
+        const errorMessage = `创建单子失败: ${err instanceof Error ? err.message : "网络错误或请求过大，请减少图片数量"}`;
+        onMessage?.(errorMessage);
+        await onCreateFailed?.(
+          {
+            moduleId: targetModuleId,
+            newModuleName: newModuleName.trim(),
+            programAssigneeIds: effectiveProgramAssigneeIds,
+            designAssigneeIds,
+            title: title.trim(),
+            description: description.trim(),
+          },
+          errorMessage
+        );
+        return;
+      }
+
+      if (!result.ok) {
+        const errorMessage = `创建单子失败: ${result.error}`;
+        onMessage?.(errorMessage);
+        await onCreateFailed?.(
+          {
+            moduleId: targetModuleId,
+            newModuleName: newModuleName.trim(),
+            programAssigneeIds: effectiveProgramAssigneeIds,
+            designAssigneeIds,
+            title: title.trim(),
+            description: description.trim(),
+          },
+          errorMessage
+        );
+        return;
+      }
+
+      setModuleId("");
+      setNewModuleName("");
+      setProgramAssigneeIds([]);
+      setDesignAssigneeIds([]);
+      setTitle("");
+      setDescription("");
+      setDescriptionImages([]);
+      onMessage?.("单子已创建");
+      await onCreated?.({
+        ticket: result.ticket,
+        programAssigneeIds: effectiveProgramAssigneeIds,
+        designAssigneeIds,
+        title: title.trim(),
+        description: description.trim(),
+        moduleId: targetModuleId,
+        newModuleName: newModuleName.trim(),
+      });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -252,16 +306,31 @@ export function CreateTicketForm({
                 const items: { id: string; name: string }[] = [];
 
                 for (const m of responsibility.modules) {
-                  if (!seen.has(m.id)) {
-                    seen.add(m.id);
+                  if (!seen.has(m.name)) {
+                    seen.add(m.name);
                     items.push(m);
                   }
                 }
 
                 for (const m of allProjectModules ?? []) {
-                  if (!seen.has(m.id)) {
-                    seen.add(m.id);
+                  if (!seen.has(m.name)) {
+                    seen.add(m.name);
                     items.push(m);
+                  }
+                }
+
+                if (initialValues?.moduleId) {
+                  const initialModule = (allProjectModules ?? []).find((m) => m.id === initialValues.moduleId);
+                  if (initialModule) {
+                    const existingIdx = items.findIndex((m) => m.id === initialModule.id);
+                    if (existingIdx === -1) {
+                      const seenNameIdx = items.findIndex((m) => m.name === initialModule.name);
+                      if (seenNameIdx !== -1) {
+                        items[seenNameIdx] = initialModule;
+                      } else {
+                        items.push(initialModule);
+                      }
+                    }
                   }
                 }
 
