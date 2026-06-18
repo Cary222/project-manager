@@ -22,8 +22,8 @@ import { normalizePkmAttachments } from "@/shared/lib/pkm";
 
 const SEARCH_LIMIT_DEFAULT = 8;
 const SEARCH_LIMIT_MAX = 20;
-const VECTOR_CANDIDATE_MULTIPLIER = 3;
-const KEYWORD_CANDIDATE_MULTIPLIER = 4;
+const VECTOR_CANDIDATE_MULTIPLIER = 2;
+const KEYWORD_CANDIDATE_MULTIPLIER = 3;
 
 type SearchDocumentRow = {
   id: string;
@@ -198,8 +198,14 @@ async function getSearchDocumentEmbeddingState(id: string) {
   return rows[0] ?? null;
 }
 
+const EMBEDDING_TEXT_MAX_CHARS = 8000;
+
 async function ensureSearchDocumentEmbedding(document: SearchDocumentEmbeddingStateRow) {
-  const embeddingInput = buildEmbeddingInput(document.title, document.content);
+  const truncatedContent =
+    document.content.length > EMBEDDING_TEXT_MAX_CHARS
+      ? `${document.content.slice(0, EMBEDDING_TEXT_MAX_CHARS)}…`
+      : document.content;
+  const embeddingInput = buildEmbeddingInput(document.title, truncatedContent);
   const embeddingHash = buildEmbeddingHash(embeddingInput);
   const metadata = coerceMetadata(document.metadata);
 
@@ -235,7 +241,7 @@ export function buildSearchableTicketDocument(ticket: SearchDocumentTicketRecord
     projectId: ticket.projectId,
     title,
     content,
-    url: `/${ticket.ticketNo}`,
+    url: `/tickets/${ticket.id}`,
     metadata: {
       ticketNo: ticket.ticketNo,
       projectId: ticket.project.id,
@@ -266,7 +272,7 @@ export function buildSearchableCommitDocument(commit: SearchDocumentCommitRecord
     projectId: commit.ticket.project.id,
     title,
     content,
-    url: `/${commit.ticketNo}`,
+    url: `/tickets/${commit.ticket.id}`,
     metadata: {
       ticketNo: commit.ticketNo,
       projectId: commit.ticket.project.id,
@@ -398,7 +404,8 @@ export async function syncCommitSearchDocument(commitId: string) {
     where: { id: commitId },
     include: {
       ticket: {
-        include: {
+        select: {
+          id: true,
           project: { select: { id: true, name: true } },
           module: { select: { name: true } },
         },
@@ -459,7 +466,8 @@ export async function backfillSearchDocuments() {
   const commits = await prisma.ticketCommit.findMany({
     include: {
       ticket: {
-        include: {
+        select: {
+          id: true,
           project: { select: { id: true, name: true } },
           module: { select: { name: true } },
         },
@@ -611,32 +619,42 @@ function mergeCandidates(options: {
   }
 
   for (const document of options.vectorDocuments) {
-    const keywordScore = rankDocument(document.title, document.content, options.terms);
     const semanticScore = normalizeSemanticScore(document.distance);
-    const candidate = toRankedCandidate({
-      document: {
-        id: document.id,
-        sourceType: document.sourceType,
-        title: document.title,
-        content: document.content,
-        url: document.url,
-        metadata: document.metadata,
-        updatedAt: document.updatedAt,
-        project: document.projectId && document.projectName
-          ? { id: document.projectId, name: document.projectName }
-          : null,
-      },
-      query: options.query,
-      terms: options.terms,
-      keywordScore,
-      semanticScore,
-    });
+    if (!merged.has(document.id)) {
+      const keywordScore = rankDocument(document.title, document.content, options.terms);
+      const candidate = toRankedCandidate({
+        document: {
+          id: document.id,
+          sourceType: document.sourceType,
+          title: document.title,
+          content: document.content,
+          url: document.url,
+          metadata: document.metadata,
+          updatedAt: document.updatedAt,
+          project: document.projectId && document.projectName
+            ? { id: document.projectId, name: document.projectName }
+            : null,
+        },
+        query: options.query,
+        terms: options.terms,
+        keywordScore,
+        semanticScore,
+      });
 
-    if (!candidate) continue;
-    if (!canAccessSearchResult(candidate, options.viewerUserId)) continue;
-    const existing = merged.get(candidate.id);
-    if (!existing || candidate.score > existing.score) {
+      if (!candidate) continue;
+      if (!canAccessSearchResult(candidate, options.viewerUserId)) continue;
       merged.set(candidate.id, candidate);
+    } else {
+      const existing = merged.get(document.id)!;
+      const directMatchBoost = hasDirectQueryMatch(document.title, document.content, options.query) ? 2 : 0;
+      const boostedScore = existing.keywordScore + semanticScore * 10 + directMatchBoost;
+      if (boostedScore > existing.score) {
+        merged.set(document.id, {
+          ...existing,
+          semanticScore,
+          score: boostedScore,
+        });
+      }
     }
   }
 
@@ -715,14 +733,21 @@ export async function refreshSearchDocumentEmbeddings(limit = 100) {
       d."metadata",
       (d."embedding" IS NOT NULL) AS "hasEmbedding"
     FROM pm."SearchDocument" d
-    ORDER BY d."updatedAt" DESC
+    WHERE d."embedding" IS NULL
+    ORDER BY LENGTH(d."content") ASC, d."updatedAt" DESC
     LIMIT ${limit}
   `);
 
-  const results = [] as Array<{ id: string; reused: boolean; embeddingHash: string }>;
+  const results = [] as Array<{ id: string; reused: boolean; embeddingHash: string; error?: string }>;
   for (const document of documents) {
-    const result = await ensureSearchDocumentEmbedding(document);
-    results.push({ id: document.id, ...result });
+    try {
+      const result = await ensureSearchDocumentEmbedding(document);
+      results.push({ id: document.id, ...result });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[search:embed] failed for ${document.id}: ${message}`);
+      results.push({ id: document.id, reused: false, embeddingHash: "", error: message });
+    }
   }
   return results;
 }

@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { IconArrowRight, IconSearch } from "@/shared/ui/icons";
 import { KnowledgeSearchResults } from "@/features/knowledge/ui/KnowledgeSearchResults";
@@ -25,16 +24,37 @@ export function KnowledgeSearchPanel({
   initialQuery = "",
   compact = false,
 }: KnowledgeSearchPanelProps) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
   const [query, setQuery] = useState(initialQuery);
   const [data, setData] = useState<SearchResponse>(EMPTY_RESULTS);
   const [loading, setLoading] = useState(false);
 
+  const abortRef = useRef<AbortController | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastUrlQueryRef = useRef(initialQuery);
+
   useEffect(() => {
     setQuery(initialQuery);
+    lastUrlQueryRef.current = initialQuery;
   }, [initialQuery]);
+
+  const runSearch = useCallback((q: string) => {
+    if (abortRef.current) abortRef.current.abort();
+    abortRef.current = new AbortController();
+
+    setLoading(true);
+    fetch(`/api/search?q=${encodeURIComponent(q)}&limit=10`, { signal: abortRef.current.signal })
+      .then((res) => {
+        if (!res.ok) return null;
+        return res.json() as Promise<SearchResponse>;
+      })
+      .then((next) => {
+        if (next) setData(next);
+      })
+      .catch(() => {})
+      .finally(() => {
+        setLoading(false);
+      });
+  }, []);
 
   useEffect(() => {
     const keyword = query.trim();
@@ -44,55 +64,38 @@ export function KnowledgeSearchPanel({
       return;
     }
 
-    const controller = new AbortController();
-    setLoading(true);
-
-    const timer = window.setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(keyword)}&limit=10`, {
-          signal: controller.signal,
-        });
-        if (!res.ok) {
-          setData({ ...EMPTY_RESULTS, query: keyword });
-          return;
-        }
-        const next = (await res.json()) as SearchResponse;
-        setData(next);
-      } catch {
-        if (!controller.signal.aborted) {
-          setData({ ...EMPTY_RESULTS, query: keyword });
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
-      }
-    }, 250);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => runSearch(keyword), 400);
 
     return () => {
-      controller.abort();
-      window.clearTimeout(timer);
+      if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [query]);
+  }, [query, runSearch]);
 
-  const searching = query.trim().length > 0;
-  const hint = useMemo(() => {
-    if (!searching) {
-      return "已支持工单、提交记录与个人笔记检索，后续可继续接入知识文档与项目规范。";
-    }
-    return "可输入问题描述、项目名、单号、提交主题、笔记标题或标签关键词。";
-  }, [searching]);
+  const hint = `可输入问题描述、项目名、单号、提交主题、笔记标题或标签关键词。`;
 
-  function updateUrl(nextQuery: string) {
-    const params = new URLSearchParams(searchParams.toString());
-    if (nextQuery.trim()) {
-      params.set("q", nextQuery.trim());
+  function updateUrl(next: string) {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (next.trim()) {
+      params.set("q", next.trim());
     } else {
       params.delete("q");
     }
-    const next = params.toString();
-    router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false });
+    const newUrl = params.toString()
+      ? `${window.location.pathname}?${params.toString()}`
+      : window.location.pathname;
+    lastUrlQueryRef.current = next.trim();
+    window.history.replaceState(null, "", newUrl);
   }
+
+  function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const next = e.target.value;
+    setQuery(next);
+    updateUrl(next);
+  }
+
+  const searching = query.trim().length > 0;
 
   return (
     <div className="space-y-5">
@@ -101,16 +104,12 @@ export function KnowledgeSearchPanel({
           <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
           <input
             value={query}
-            onChange={(e) => {
-              const next = e.target.value;
-              setQuery(next);
-              updateUrl(next);
-            }}
+            onChange={handleInputChange}
             placeholder={compact ? "全局搜索工单、提交、笔记…" : "搜索工单、提交记录、个人笔记、规范线索…"}
             className="w-full rounded-xl border border-ink-200 bg-white py-3 pl-10 pr-3 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
           />
         </div>
-        <p className="text-xs text-ink-400">{hint}</p>
+        <p className="text-xs text-ink-400">{searching ? hint : "已支持工单、提交记录与个人笔记检索，后续可继续接入知识文档与项目规范。"}</p>
       </div>
 
       {compact && searching ? (

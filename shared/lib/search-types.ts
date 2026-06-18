@@ -87,6 +87,7 @@ export type SearchDocumentCommitRecord = {
   committedAt: Date;
   ticketNo: number;
   ticket: {
+    id: string;
     project: { id: string; name: string };
     module: { name: string };
   };
