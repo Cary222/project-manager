@@ -3,7 +3,7 @@ name: pm-dev
 description: >-
   Develop features for project-manager (Next.js + Prisma pm schema).
   Use when modifying tickets, projects, auth, API routes, or UI in
-  /home/hxy/work/personal/project-manager.
+  /Users/vastgui/Desktop/project-manager.
 ---
 
 # project-manager 开发
@@ -30,3 +30,4 @@ fuser -k 3003/tcp 2>/dev/null; sleep 1; npm run start
 
 - 架构：[docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)
 - 运维：[docs/OPERATIONS.md](../../docs/OPERATIONS.md)
+- ProjectHub 需求与进度：[PROJECT-HUB.md](./PROJECT-HUB.md)（项目管理 / 派单系统 / 员工 PKM / RAG 检索）

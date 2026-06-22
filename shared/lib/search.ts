@@ -19,6 +19,7 @@ import type {
 } from "@/shared/lib/search-types";
 import { SEARCH_DOCUMENT_SOURCE_TYPES } from "@/shared/lib/search-types";
 import { normalizePkmAttachments } from "@/shared/lib/pkm";
+import { cleanMarkdownForEmbedding, formatAttachmentLabel } from "@/shared/lib/markdown";
 
 const SEARCH_LIMIT_DEFAULT = 8;
 const SEARCH_LIMIT_MAX = 20;
@@ -290,13 +291,14 @@ export function buildSearchablePkmNoteDocument(note: SearchDocumentPkmNoteRecord
   const authorName = note.user.name || note.user.email;
   const title = note.title.trim();
   const attachments = normalizePkmAttachments(note.attachments);
+  const cleanedContent = cleanMarkdownForEmbedding(note.content);
   const content = [
     `标题 ${title}`,
     `作者 ${authorName}`,
     note.project ? `项目 ${note.project.name}` : null,
     note.tags.length > 0 ? `标签 ${note.tags.join("、")}` : null,
-    attachments.length > 0 ? `附件 ${attachments.map((item) => item.name).join("、")}` : null,
-    `正文 ${note.content}`,
+    attachments.length > 0 ? `附件 ${attachments.map(formatAttachmentLabel).join("、")}` : null,
+    cleanedContent ? `正文 ${cleanedContent}` : null,
   ]
     .filter(Boolean)
     .join("\n");
