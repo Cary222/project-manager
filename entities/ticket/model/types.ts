@@ -93,7 +93,11 @@ export type ProgramPushDraft = {
   description: string;
   designAssigneeIds: string[];
   programAssigneeIds: string[];
+  /** Source program ticket's module id — used as the bug-form default. */
   moduleId?: string;
+  /** Source program ticket's module name — used to seed the "new module name" field
+   *  when the source module doesn't exist under the bug responsibility. */
+  sourceModuleName?: string;
   newModuleName?: string;
 };
 

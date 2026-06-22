@@ -111,13 +111,15 @@ export function ProgramTicketDetail({
         projectId={ticket.project.id}
         creatorId={ticket.creatorId}
         users={users}
-        programResponsibility={bugResponsibility}
+        programResponsibility={programResponsibility}
+        bugResponsibility={bugResponsibility}
         programPushDraft={{
           title: ticket.title,
           description: ticket.description || "",
           designAssigneeIds: ticket.assignees.map((a) => a.id),
           programAssigneeIds: [],
           moduleId: ticket.module.id,
+          sourceModuleName: ticket.module.name,
         }}
         onMessage={onMessage}
         color="rose"

@@ -16,7 +16,6 @@ import { fetchJson } from "@/shared/api/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/shared/api/swr-config";
 
 type PushResolveMode = "bound" | "candidate" | "unbound";
-type BugResolveMode = "bound" | "candidate" | "unbound";
 
 type Props = {
   ticketNo: number;
@@ -25,6 +24,7 @@ type Props = {
   creatorId: string;
   users: TicketCreateUser[];
   programResponsibility: TicketCreateResponsibility | null;
+  bugResponsibility?: TicketCreateResponsibility | null;
   programPushDraft: ProgramPushDraft | null;
   onMessage: (msg: string) => void;
   color?: "emerald" | "rose";
@@ -39,6 +39,7 @@ export function TicketPushPanel({
   creatorId,
   users,
   programResponsibility,
+  bugResponsibility = null,
   programPushDraft,
   onMessage,
   color = "emerald",
@@ -82,7 +83,6 @@ export function TicketPushPanel({
   const [retryDraft, setRetryDraft] = useState<ProgramPushDraft | null>(null);
 
   // Program ticket: interactive form state
-  const [bugResolveMode, setBugResolveMode] = useState<BugResolveMode>("unbound");
   const [bugCandidateTicket, setBugCandidateTicket] = useState<{ id: string; ticketNo: number; title: string } | null>(null);
   const [bugDraft, setBugDraft] = useState<ProgramPushDraft | null>(null);
   const [bugSearchMissed, setBugSearchMissed] = useState(false);
@@ -170,41 +170,6 @@ export function TicketPushPanel({
     title: string;
     description: string;
   }) {
-    if (isBug) {
-      const res = await fetch(`/api/tickets/${ticketNo}/bug-ticket`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: payload.title,
-          description: payload.description,
-          assigneeIds: payload.programAssigneeIds,
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        onMessage(err.error || "创建 Bug 单失败");
-        return;
-      }
-      const data = await res.json() as { bugTicket: { id: string; ticketNo: number; title: string } };
-      const bindRes = await fetch(`/api/tickets/${ticketNo}/bug-relations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bugTicketId: data.bugTicket.id,
-          draftTitle: payload.title,
-        }),
-      });
-      if (!bindRes.ok) {
-        const err = await bindRes.json();
-        onMessage(err.error || "绑定失败");
-        return;
-      }
-      onMessage(`Bug 单 #${data.bugTicket.ticketNo} 已创建并绑定`);
-      setShowBugForm(false);
-      await refreshBugBindings();
-      return;
-    }
-
     const res = await fetch(`/api/tickets/${ticketNo}/push-record/update`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -249,7 +214,6 @@ export function TicketPushPanel({
         : null);
 
       if (data.mode === "candidate" && data.candidateTicket) {
-        setBugResolveMode("candidate");
         setBugCandidateTicket(data.candidateTicket);
         setBugSearchMissed(false);
         setBugDraft(programPushDraft ?? {
@@ -263,7 +227,6 @@ export function TicketPushPanel({
           ? `## Fix 信息\n\n- 提交: \`${data.fixCommits[0].commitSha}\`\n- 主题: ${data.fixCommits[0].subject}\n- 作者: ${data.fixCommits[0].author}\n- 时间: ${new Date(data.fixCommits[0].committedAt).toLocaleString()}\n- 仓库: ${data.fixCommits[0].repoPath}\n`
           : `## Fix 信息（${data.fixCommits.length} 条）\n\n${data.fixCommits.map((c, i) => `${i + 1}. \`${c.commitSha}\` - ${c.subject}`).join("\n")}\n`;
 
-        setBugResolveMode("unbound");
         setBugCandidateTicket(null);
         setBugSearchMissed(false);
         setShowBugForm(true);
@@ -280,7 +243,6 @@ export function TicketPushPanel({
         });
       } else {
         // 没有候选 Bug 单，且没有 fix 提交引导：只提示，不主动拉出新建表单
-        setBugResolveMode("unbound");
         setBugCandidateTicket(null);
         setBugSearchMissed(true);
         setBugDraft(programPushDraft ?? {
@@ -291,14 +253,12 @@ export function TicketPushPanel({
         });
       }
     } catch {
-      setBugResolveMode("unbound");
       setBugCandidateTicket(null);
       setBugSearchMissed(true);
     }
   }
 
   function openBugForm() {
-    setBugResolveMode("unbound");
     setBugCandidateTicket(null);
     setFixCommitInfo(null);
     setShowBugForm(true);
@@ -335,27 +295,14 @@ export function TicketPushPanel({
     await refreshBugBindings();
   }
 
+  // `createBugTicketAction` already creates the BugProgramBinding inside its
+  // transaction, so this callback only needs to update local UI state and
+  // revalidate the bug bindings list — no extra fetch to /bug-relations.
   async function handleBindNewBug(payload: {
     ticket: { id: string; ticketNo: number; title: string };
     title: string;
     description: string;
   }) {
-    const res = await fetch(`/api/tickets/${ticketNo}/bug-relations`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        bugTicketId: payload.ticket.id,
-        draftTitle: payload.title,
-        fixCommitIds: fixCommitInfo?.fixCommitIds ?? [],
-      }),
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      onMessage(err.error || "绑定失败");
-      return;
-    }
-
     onMessage(`Bug 单 #${payload.ticket.ticketNo} 已创建并绑定`);
     setShowBugForm(false);
     setBugCandidateTicket(null);
@@ -494,7 +441,6 @@ export function TicketPushPanel({
                 </button>
                 <button
                   onClick={() => {
-                    setBugResolveMode("unbound");
                     setBugCandidateTicket(null);
                     setFixCommitInfo(null);
                   }}
@@ -543,11 +489,11 @@ export function TicketPushPanel({
         )}
 
         {/* Bug form */}
-        {showBugForm && programResponsibility && bugDraft && (
+        {showBugForm && bugResponsibility && bugDraft && (
           <section className="rounded-xl border border-ink-200 bg-white p-6">
             <CreateTicketForm
               projectId={projectId}
-              responsibility={programResponsibility}
+              responsibility={bugResponsibility}
               users={users}
               currentUserId={creatorId}
               showDesignAssignees
@@ -564,7 +510,7 @@ export function TicketPushPanel({
               }}
               className="grid gap-3 rounded-xl border border-ink-100 bg-ink-100/40 p-4"
               bugTicketMode={true}
-              sourceTicketNo={ticketNo}
+              sourceTicketId={ticketId}
             />
           </section>
         )}

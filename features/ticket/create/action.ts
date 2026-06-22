@@ -77,7 +77,12 @@ export async function createTicketAction(input: CreateTicketInput): Promise<Crea
     });
 
     await syncTicketCounterAfterCreate(ticket.ticketNo);
-    await syncTicketSearchDocument(ticket.id);
+    // Search embedding is non-critical: run in background so a slow embedding
+    // service does not block ticket creation. The search index will catch up
+    // on the next sync; failures are logged but never block the user.
+    void syncTicketSearchDocument(ticket.id).catch((error) => {
+      console.error("syncTicketSearchDocument failed", error);
+    });
 
     if (assigneeIds.length > 0) {
       const actorName = session.user.name || session.user.email || "管理员";
@@ -86,22 +91,26 @@ export async function createTicketAction(input: CreateTicketInput): Promise<Crea
         title: ticket.title,
         actorName,
       });
-      await createManyNotifications({
+      void createManyNotifications({
         userIds: assigneeIds,
         type: "TICKET_ASSIGNED",
         title: notification.title,
         content: notification.content,
         ticketId: ticket.id,
         actorId: session.user.id,
+      }).catch((error) => {
+        console.error("createManyNotifications failed", error);
       });
     }
 
-    await createModerationLog({
+    void createModerationLog({
       action: "CREATE_TICKET" as any,
       targetId: ticket.ticketNo.toString(),
       targetType: "Ticket",
       actorId: session.user.id,
       reason: `创建单子 #${ticket.ticketNo}: ${ticket.title}`,
+    }).catch((error) => {
+      console.error("createModerationLog failed", error);
     });
 
     return { ok: true, ticket: { id: ticket.id, ticketNo: ticket.ticketNo, title: ticket.title } };
@@ -115,6 +124,8 @@ export type CreateBugTicketInput = {
   sourceTicketId: string;
   title: string;
   description?: string;
+  /** Module under the BUG responsibility. If omitted, falls back to source ticket's moduleId. */
+  moduleId?: string;
   assigneeIds?: string[];
 };
 
@@ -150,7 +161,7 @@ export async function createBugTicketAction(
           title: input.title.trim(),
           description: input.description?.trim() || null,
           projectId: sourceTicket.projectId,
-          moduleId: sourceTicket.moduleId,
+          moduleId: input.moduleId ?? sourceTicket.moduleId,
           creatorId: session.user.id,
           status: TicketStatus.DEVELOPING,
         },
@@ -178,6 +189,16 @@ export async function createBugTicketAction(
     });
 
     await syncTicketCounterAfterCreate(ticket.ticketNo);
+
+    void createModerationLog({
+      action: "CREATE_TICKET" as any,
+      targetId: ticket.ticketNo.toString(),
+      targetType: "Ticket",
+      actorId: session.user.id,
+      reason: `创建 Bug 单 #${ticket.ticketNo}（来源 #${sourceTicket.ticketNo}）: ${ticket.title}`,
+    }).catch((error) => {
+      console.error("createModerationLog failed", error);
+    });
 
     return {
       ok: true,
