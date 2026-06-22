@@ -40,6 +40,8 @@ export type SearchResultItem = {
   } | null;
   url: string;
   score: number;
+  keywordScore: number;
+  semanticScore: number;
   metadata: SearchDocumentMetadata;
 };
 

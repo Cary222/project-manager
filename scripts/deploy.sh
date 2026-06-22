@@ -20,6 +20,7 @@ kill_port() {
         log "停止占用 ${port} 端口的进程: ${pids}"
         kill $pids 2>/dev/null || true
     fi
+    fuser -k "${port}/tcp" 2>/dev/null || true
 }
 
 wait_for_port_free() {
@@ -64,7 +65,7 @@ log "拉取最新代码..."
 git --git-dir="$WORK/.git" --work-tree="$WORK" pull origin main
 
 log "开始安装依赖与生成 Prisma Client..."
-if ! npm install >> "$LOG" 2>&1; then
+if ! npm install --no-audit --no-fund >> "$LOG" 2>&1; then
     log "依赖安装失败！旧服务保持不变。查看日志: tail -60 $LOG"
     exit 1
 fi
@@ -72,6 +73,8 @@ if ! npx prisma generate >> "$LOG" 2>&1; then
     log "Prisma Client 生成失败！旧服务保持不变。查看日志: tail -60 $LOG"
     exit 1
 fi
+log "清理旧的 build 产物..."
+rm -rf "$WORK/.next" 2>/dev/null || true
 log "开始构建..."
 if ! npm run build >> "$LOG" 2>&1; then
     log "构建失败！旧服务保持不变。查看日志: tail -60 $LOG"
