@@ -25,7 +25,7 @@ import {
   PKM_ATTACHMENT_MAX_SIZE,
   type PkmAttachment,
 } from "@/shared/lib/pkm";
-import { cleanMarkdownForEmbedding, formatAttachmentLabel } from "@/shared/lib/markdown";
+import { cleanExtractedTextForEmbedding, cleanMarkdownForEmbedding, formatAttachmentLabel } from "@/shared/lib/markdown";
 
 const SEARCH_LIMIT_DEFAULT = 8;
 const SEARCH_LIMIT_MAX = 20;
@@ -307,7 +307,9 @@ export async function buildSearchablePkmNoteDocument(
     .map((attachment) => {
       const text = attachmentTexts.get(attachment.name);
       if (!text) return null;
-      return `[附件 ${attachment.name} 提取]\n${text}`;
+      const cleaned = cleanExtractedTextForEmbedding(text);
+      if (!cleaned) return null;
+      return `[附件 ${attachment.name} 提取]\n${cleaned}`;
     })
     .filter((section): section is string => Boolean(section));
   const content = [

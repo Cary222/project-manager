@@ -473,3 +473,11 @@ DATABASE_URL="postgresql://community:community@localhost:5432/community?options=
 ## 7. 一句话总结
 
 > **不改召回、改速度、改可调试性。** BGE-M3 对 base64 噪声鲁棒，所以"清洗"对搜索分数没影响；但能让 reindex 从 6.6s/条 降到 35ms/条（189x），`SearchDocument.content` 缩 99%，`content_preview` 变可读。
+
+## 8. 后续：附件文本提取 + 清洗（v2）
+
+本篇文档完成 **正文 markdown 清洗**，随后进一步实现了**附件文本提取 + 清洗**，完整覆盖"正文 + 附件内容均进入向量搜索"：
+
+- 详见 [docs/ATTACHMENT_TEXT_EXTRACTION.md](./ATTACHMENT_TEXT_EXTRACTION.md)
+- 新增 `cleanExtractedTextForEmbedding()`（`shared/lib/markdown.ts:45-95`）—— 清洗 PDF/PPTX 提取出的原始文本（去 base64 残留 / 控制字符 / 冗余空白）
+- 清洗在 `buildSearchablePkmNoteDocument` 注入 content 前执行（`shared/lib/search.ts:310`）
