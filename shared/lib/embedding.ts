@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 const DEFAULT_EMBEDDING_DIMENSION = 1024;
 const DEFAULT_EMBEDDING_TIMEOUT_MS = 30000;
 
-function getEmbeddingApiUrl() {
+export function getEmbeddingApiUrl() {
   const value = process.env.EMBEDDING_API_URL?.trim();
   if (!value) {
     throw new Error("EMBEDDING_API_URL_MISSING");

@@ -5,10 +5,12 @@ import {
   buildEmbeddingHash,
   buildEmbeddingInput,
   fetchEmbedding,
+  getEmbeddingApiUrl,
 } from "@/shared/lib/embedding";
 import type {
   SearchDocumentCommitRecord,
   SearchDocumentMetadata,
+  SearchDocumentPkmAttachmentRecord,
   SearchDocumentPkmNoteRecord,
   SearchDocumentTicketRecord,
   SearchResponse,
@@ -18,13 +20,19 @@ import type {
   SearchableRecord,
 } from "@/shared/lib/search-types";
 import { SEARCH_DOCUMENT_SOURCE_TYPES } from "@/shared/lib/search-types";
-import { normalizePkmAttachments } from "@/shared/lib/pkm";
+import {
+  normalizePkmAttachments,
+  PKM_ATTACHMENT_MAX_SIZE,
+  type PkmAttachment,
+} from "@/shared/lib/pkm";
 import { cleanMarkdownForEmbedding, formatAttachmentLabel } from "@/shared/lib/markdown";
 
 const SEARCH_LIMIT_DEFAULT = 8;
 const SEARCH_LIMIT_MAX = 20;
 const VECTOR_CANDIDATE_MULTIPLIER = 2;
 const KEYWORD_CANDIDATE_MULTIPLIER = 3;
+const EXTRACT_TEXT_TIMEOUT_MS = 15_000;
+const MAX_EXTRACTED_CHARS = 2000;
 
 type SearchDocumentRow = {
   id: string;
@@ -287,11 +295,21 @@ export function buildSearchableCommitDocument(commit: SearchDocumentCommitRecord
   };
 }
 
-export function buildSearchablePkmNoteDocument(note: SearchDocumentPkmNoteRecord): SearchableRecord {
+export async function buildSearchablePkmNoteDocument(
+  note: SearchDocumentPkmNoteRecord,
+  attachmentTexts: Map<string, string> = new Map(),
+): Promise<SearchableRecord> {
   const authorName = note.user.name || note.user.email;
   const title = note.title.trim();
   const attachments = normalizePkmAttachments(note.attachments);
   const cleanedContent = cleanMarkdownForEmbedding(note.content);
+  const attachmentSections = attachments
+    .map((attachment) => {
+      const text = attachmentTexts.get(attachment.name);
+      if (!text) return null;
+      return `[附件 ${attachment.name} 提取]\n${text}`;
+    })
+    .filter((section): section is string => Boolean(section));
   const content = [
     `标题 ${title}`,
     `作者 ${authorName}`,
@@ -299,6 +317,7 @@ export function buildSearchablePkmNoteDocument(note: SearchDocumentPkmNoteRecord
     note.tags.length > 0 ? `标签 ${note.tags.join("、")}` : null,
     attachments.length > 0 ? `附件 ${attachments.map(formatAttachmentLabel).join("、")}` : null,
     cleanedContent ? `正文 ${cleanedContent}` : null,
+    attachmentSections.length > 0 ? attachmentSections.join("\n\n") : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -324,6 +343,90 @@ export function buildSearchablePkmNoteDocument(note: SearchDocumentPkmNoteRecord
 
 function buildSearchDocumentSourceType(sourceType: SearchableRecord["sourceType"]): PrismaSearchDocumentSourceType {
   return sourceType as PrismaSearchDocumentSourceType;
+}
+
+export type AttachmentExtraction = {
+  name: string;
+  text: string;
+  source: string;
+};
+
+export async function extractAttachmentText(
+  attachment: PkmAttachment,
+): Promise<AttachmentExtraction> {
+  if (attachment.size > PKM_ATTACHMENT_MAX_SIZE) {
+    return { name: attachment.name, text: "", source: "skipped_too_large" };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), EXTRACT_TEXT_TIMEOUT_MS);
+
+  try {
+    const base = getEmbeddingApiUrl();
+    const response = await fetch(`${base}/extract-text`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: attachment.url,
+        mimeType: attachment.mimeType,
+        name: attachment.name,
+        size: attachment.size,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return { name: attachment.name, text: "", source: `http_${response.status}` };
+    }
+
+    const payload = (await response.json()) as {
+      text?: unknown;
+      source?: unknown;
+      name?: unknown;
+    };
+    const rawText = typeof payload.text === "string" ? payload.text : "";
+    const text = rawText.length > MAX_EXTRACTED_CHARS
+      ? `${rawText.slice(0, MAX_EXTRACTED_CHARS).trimEnd()}…`
+      : rawText;
+    return {
+      name: attachment.name,
+      text,
+      source: typeof payload.source === "string" ? payload.source : "unknown",
+    };
+  } catch (error) {
+    const source = error instanceof Error && error.name === "AbortError"
+      ? "timeout"
+      : "error";
+    return { name: attachment.name, text: "", source };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function extractAttachmentTexts(
+  attachments: PkmAttachment[],
+): Promise<Map<string, string>> {
+  if (attachments.length === 0) return new Map();
+
+  const results = await Promise.all(
+    attachments.map((attachment) =>
+      extractAttachmentText(attachment).catch((error) => {
+        console.error(
+          `[search:extract] failed for ${attachment.name}:`,
+          error instanceof Error ? error.message : String(error),
+        );
+        return { name: attachment.name, text: "", source: "error" } satisfies AttachmentExtraction;
+      }),
+    ),
+  );
+
+  const map = new Map<string, string>();
+  for (const result of results) {
+    if (result.text.length > 0) {
+      map.set(result.name, result.text);
+    }
+  }
+  return map;
 }
 
 export async function upsertSearchDocument(record: SearchableRecord) {
@@ -447,10 +550,15 @@ export async function syncPkmNoteSearchDocument(noteId: string) {
     return null;
   }
 
-  return upsertSearchDocument(buildSearchablePkmNoteDocument({
-    ...note,
-    attachments: normalizePkmAttachments(note.attachments),
-  }));
+  const attachments = normalizePkmAttachments(note.attachments);
+  const attachmentTexts = await extractAttachmentTexts(attachments);
+
+  return upsertSearchDocument(
+    await buildSearchablePkmNoteDocument(
+      { ...note, attachments },
+      attachmentTexts,
+    ),
+  );
 }
 
 export async function backfillSearchDocuments() {
@@ -487,14 +595,13 @@ export async function backfillSearchDocuments() {
   await Promise.all([
     ...tickets.map((ticket) => upsertSearchDocument(buildSearchableTicketDocument(ticket))),
     ...commits.map((commit) => upsertSearchDocument(buildSearchableCommitDocument(commit))),
-    ...notes.map((note) =>
-      upsertSearchDocument(
-        buildSearchablePkmNoteDocument({
-          ...note,
-          attachments: normalizePkmAttachments(note.attachments),
-        })
-      )
-    ),
+    ...notes.map(async (note) => {
+      const attachments = normalizePkmAttachments(note.attachments);
+      const attachmentTexts = await extractAttachmentTexts(attachments);
+      return upsertSearchDocument(
+        await buildSearchablePkmNoteDocument({ ...note, attachments }, attachmentTexts),
+      );
+    }),
   ]);
 }
 

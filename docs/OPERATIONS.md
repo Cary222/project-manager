@@ -130,3 +130,11 @@ curl -X POST http://localhost:5000/embed -H "Content-Type: application/json" -d 
 |------|--------|------|
 | `DATABASE_URL` | `postgresql://community:community@localhost:5432/community` | 向量存储连接 |
 | `EMBEDDING_API_URL` | `http://localhost:5000` | 客户端调用的远端 API 地址 |
+
+### 端点清单
+
+| 端点 | 用途 |
+|------|------|
+| `GET /`、`GET /health`、`GET /dimension` | 存活 / 维度探活 |
+| `POST /embed`、`POST /embed_batch` | 单条 / 批量向量化 |
+| `POST /extract-text` | 提取附件文本（data URL → 文本）。详见 [docs/ATTACHMENT_TEXT_EXTRACTION.md](ATTACHMENT_TEXT_EXTRACTION.md) |
