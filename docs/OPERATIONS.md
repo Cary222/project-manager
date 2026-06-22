@@ -138,3 +138,7 @@ curl -X POST http://localhost:5000/embed -H "Content-Type: application/json" -d 
 | `GET /`、`GET /health`、`GET /dimension` | 存活 / 维度探活 |
 | `POST /embed`、`POST /embed_batch` | 单条 / 批量向量化 |
 | `POST /extract-text` | 提取附件文本（data URL → 文本）。详见 [docs/ATTACHMENT_TEXT_EXTRACTION.md](ATTACHMENT_TEXT_EXTRACTION.md) |
+
+### 相关文档
+
+- [向量搜索静默失败修复](向量搜索-静默失败修复.md)：embedding 写入失败被静默吞掉导致部分笔记搜不到的 bug 修复记录

@@ -474,7 +474,9 @@ export async function upsertSearchDocument(record: SearchableRecord) {
       await ensureSearchDocumentEmbedding(state);
     }
   } catch (error) {
-    console.error("ensureSearchDocumentEmbedding failed", error);
+    const msg = error instanceof Error ? error.message : String(error);
+    console.warn(`[search:upsert] embedding failed for ${document.id} (${document.title}): ${msg}`);
+    throw error;
   }
 
   return document;
@@ -503,7 +505,13 @@ export async function syncTicketSearchDocument(ticketId: string) {
     return null;
   }
 
-  return upsertSearchDocument(buildSearchableTicketDocument(ticket));
+  const record = buildSearchableTicketDocument(ticket);
+  try {
+    return await upsertSearchDocument(record);
+  } catch (error) {
+    console.error(`[search:syncTicket] embedding failed for ticket ${ticketId}:`, error instanceof Error ? error.message : String(error));
+    return null;
+  }
 }
 
 export async function syncCommitSearchDocument(commitId: string) {
@@ -530,7 +538,13 @@ export async function syncCommitSearchDocument(commitId: string) {
     return null;
   }
 
-  return upsertSearchDocument(buildSearchableCommitDocument(commit));
+  const record = buildSearchableCommitDocument(commit);
+  try {
+    return await upsertSearchDocument(record);
+  } catch (error) {
+    console.error(`[search:syncCommit] embedding failed for commit ${commitId}:`, error instanceof Error ? error.message : String(error));
+    return null;
+  }
 }
 
 export async function syncPkmNoteSearchDocument(noteId: string) {
@@ -555,12 +569,22 @@ export async function syncPkmNoteSearchDocument(noteId: string) {
   const attachments = normalizePkmAttachments(note.attachments);
   const attachmentTexts = await extractAttachmentTexts(attachments);
 
-  return upsertSearchDocument(
-    await buildSearchablePkmNoteDocument(
-      { ...note, attachments },
-      attachmentTexts,
-    ),
-  );
+  const record = await buildSearchablePkmNoteDocument({ ...note, attachments }, attachmentTexts);
+  try {
+    return await upsertSearchDocument(record);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error(`[search:syncNote] embedding failed for note ${noteId} (${note.title}): ${msg}`);
+    // content 已写入 DB，embedding 失败时降级：只靠 keyword 搜索，vector 部分为空
+    // 重新查一次返回已保存的 document
+    const saved = await prisma.searchDocument.findFirst({
+      where: {
+        sourceType: buildSearchDocumentSourceType(SEARCH_DOCUMENT_SOURCE_TYPES.PKM_NOTE),
+        sourceId: noteId,
+      },
+    });
+    return saved;
+  }
 }
 
 export async function backfillSearchDocuments() {
@@ -594,17 +618,37 @@ export async function backfillSearchDocuments() {
     },
   });
 
-  await Promise.all([
-    ...tickets.map((ticket) => upsertSearchDocument(buildSearchableTicketDocument(ticket))),
-    ...commits.map((commit) => upsertSearchDocument(buildSearchableCommitDocument(commit))),
-    ...notes.map(async (note) => {
+  const ticketResults = await Promise.allSettled(
+    tickets.map((ticket) => upsertSearchDocument(buildSearchableTicketDocument(ticket))),
+  );
+  const commitResults = await Promise.allSettled(
+    commits.map((commit) => upsertSearchDocument(buildSearchableCommitDocument(commit))),
+  );
+  const noteResults = await Promise.allSettled(
+    notes.map(async (note) => {
       const attachments = normalizePkmAttachments(note.attachments);
       const attachmentTexts = await extractAttachmentTexts(attachments);
       return upsertSearchDocument(
         await buildSearchablePkmNoteDocument({ ...note, attachments }, attachmentTexts),
       );
     }),
-  ]);
+  );
+
+  const errors = [
+    ...ticketResults.filter((r): r is PromiseRejectedResult => r.status === "rejected"),
+    ...commitResults.filter((r): r is PromiseRejectedResult => r.status === "rejected"),
+    ...noteResults.filter((r): r is PromiseRejectedResult => r.status === "rejected"),
+  ];
+  if (errors.length > 0) {
+    console.warn(`[search:backfill] ${errors.length} items failed embedding, content saved without vector`);
+  }
+
+  return {
+    tickets: ticketResults.length,
+    commits: commitResults.length,
+    notes: noteResults.length,
+    errors: errors.length,
+  };
 }
 
 async function searchKeywordCandidates(options: {

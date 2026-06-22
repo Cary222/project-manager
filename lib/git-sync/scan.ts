@@ -7,7 +7,7 @@ import { listManagedRepos } from "@/lib/git-sync/repos";
 import {
   buildSearchableCommitDocument,
   backfillSearchDocuments,
-  upsertSearchDocument,
+  syncCommitSearchDocument,
 } from "@/shared/lib/search";
 
 const execFileAsync = promisify(execFile);
@@ -117,7 +117,7 @@ export async function syncRepoCommits(repoPath: string) {
       },
     });
     if (linkedCommit) {
-      await upsertSearchDocument(buildSearchableCommitDocument(linkedCommit));
+      await syncCommitSearchDocument(linkedCommit.id);
     }
     linked += 1;
   }
