@@ -814,6 +814,7 @@ function toRankedCandidate(args: {
 
 function canAccessSearchResult(item: SearchResultItem, viewerUserId?: string | null) {
   if (item.type !== "note") return true;
+  if (!item.metadata) return false;
   if (item.metadata.noteUserId && viewerUserId && item.metadata.noteUserId === viewerUserId) return true;
   return item.metadata.noteIsPublic === true;
 }

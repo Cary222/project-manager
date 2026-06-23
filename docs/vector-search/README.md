@@ -7,6 +7,7 @@ PKM 笔记 + 工单 + 提交 的 BGE-M3 向量搜索实现，支持 chunking 长
 | 文件 | 内容 |
 |------|------|
 | `向量搜索-静默失败修复.md` | embedding 超长文本静默失败的问题定位与修复 |
+| `向量搜索-静默失败修复.md` | searchDocuments 返回 0 条（metadata NULL 导致权限过滤静默丢弃） |
 | `PKM_SEARCH_CLEANING.md` | 搜索文本清洗逻辑（去水印、空格等） |
 | `PKM_CHUNKING_IMPL.md` | Chunking 分块策略与聚合搜索实现 |
 | `VECTOR_SEARCH_TROUBLESHOOT.md` | 向量搜索故障排查指南 |

@@ -252,3 +252,123 @@ DATABASE_URL="postgresql://community:community@localhost:5432/community?options=
 - Prisma 的 `?schema=pm` 只设置了**默认表搜索路径**，不影响扩展对象的可见性
 - 但连接层的 `search_path` 被设为 `pm`，导致跨 schema 引用 `vector` 类型时找不到
 - `options=-c search_path=pm,public` 显式设置搜索路径，让 `public` 始终可访问
+
+---
+
+## 排查：笔记存在但搜不到（metadata 为 NULL）
+
+**问题现象**：DOCX 附件笔记"光污染设计需求文档"关键词搜不到，向量搜不到，但数据库里 content 和 embedding 都正常。
+
+**排查链路**（从外到内）：
+
+```
+/api/search 返回 0 条
+  → 关键词候选有 1 条（搜 title "光污染" 有）
+  → 向量候选有 1 条（embedding 正常）
+  → mergeCandidates → 0 条 ← 静默丢弃
+    → canAccessSearchResult() 返回 false
+      → item.metadata.noteIsPublic === true → false ← metadata 是 {}
+        → coalesce 后 noteIsPublic = undefined → undefined === true = false
+```
+
+**诊断 SQL**：
+
+```sql
+-- 1. 确认 embedding 和向量都有
+SELECT title, (embedding IS NOT NULL) AS has_vector, (metadata IS NULL) AS meta_null,
+       metadata->>'noteIsPublic' AS is_public,
+       metadata->>'noteUserId'  AS owner
+FROM pm."SearchDocument"
+WHERE "sourceType" = 'PKM_NOTE'
+ORDER BY "updatedAt" DESC LIMIT 5;
+
+-- 2. 对比：正常笔记 metadata 是 object，异常笔记是 NULL
+-- 正常: meta_null=f, is_public=true
+-- 异常: meta_null=t (metadata 整列为 NULL)
+```
+
+### 根因
+
+`canAccessSearchResult` 权限过滤逻辑：
+
+```startLine:815:shared/lib/search.ts
+function canAccessSearchResult(item: SearchResultItem, viewerUserId?: string | null) {
+  if (item.type !== "note") return true;
+  if (!item.metadata) return false;                              // ← 加了防御
+  if (item.metadata.noteUserId && viewerUserId && item.metadata.noteUserId === viewerUserId) return true;
+  return item.metadata.noteIsPublic === true;                   // ← undefined === true = false
+}
+```
+
+当 `metadata` 为 NULL（`coerceMetadata(null)` → `{}`）时，`noteIsPublic` 是 `undefined`，`undefined === true` → **false**，笔记被静默丢弃。
+
+### 为什么 metadata 会是 NULL
+
+`metadata` 字段在 Prisma schema 中定义为 `Json?`（允许 NULL）。
+
+正常写入路径（`upsertSearchDocument`）会生成 metadata：
+
+```startLine:191:shared/lib/search.ts
+function buildMetadataWithEmbeddingHash(record: SearchableRecord, embeddingHash: string) {
+  return {
+    ...(record.metadata ?? {}),
+    embeddingHash,
+  } satisfies SearchDocumentMetadata;
+}
+```
+
+但这是**单条记录偶发**的 NULL。25 条 PKM 笔记 SearchDocument 中，24 条 metadata 正常，仅此一条为 NULL。
+
+可能原因（无法 100% 确认，但做了防御）：
+
+1. **写入事务中途失败**：第一次 upsert 时 content 写入成功，但 metadata 字段写入失败（如 schema 迁移期间类型不一致）
+2. **Prisma client 缓存或连接问题**：极端情况下某些字段被跳过
+3. **历史遗留数据**：schema 早期 `metadata` 允许 NULL，后来代码才加上默认值
+
+### 修复
+
+**1. 数据热修复（本次操作）**：直接 SQL 补全缺失的 metadata：
+
+```sql
+UPDATE pm."SearchDocument"
+SET metadata = jsonb_build_object(
+  'noteUserId',    '<note.userId>',
+  'noteUserName',  '<note.user.name>',
+  'noteIsPublic', true,
+  'noteTags',     ARRAY['<tag1>'],
+  'projectId',    '<note.projectId>',
+  'projectName',  '<note.project.name>',
+  'author',       '<note.user.name>',
+  'chunkIndex',   0,
+  'totalChunks',  1
+)
+WHERE id = '<doc_id>';
+```
+
+**2. 代码防御（已合入 `shared/lib/search.ts`）**：
+
+在 `canAccessSearchResult` 开头加 `if (!item.metadata) return false;`，确保 metadata 为 null/undefined 时明确返回 false（而不是静默继续导致后续访问 `undefined.noteIsPublic` 报错或产生意外行为）。
+
+### 验证修复
+
+```sql
+-- metadata 已修复：is_public=true, owner=用户ID
+SELECT title, (metadata IS NULL) AS null_meta,
+       metadata->>'noteIsPublic' AS pub,
+       metadata->>'noteUserId'  AS owner
+FROM pm."SearchDocument"
+WHERE title LIKE '%光污染%';
+```
+
+修复后搜索"光污染"、"夜空亮度"均可召回文档，score > 0。
+
+### 预防
+
+未来如有笔记 metadata 缺失，可通过监控发现：
+
+```sql
+-- 发现所有 metadata 为 NULL 的 SearchDocument
+SELECT id, title, "sourceType", "sourceId", (embedding IS NOT NULL) AS has_vec
+FROM pm."SearchDocument"
+WHERE metadata IS NULL;
+```
