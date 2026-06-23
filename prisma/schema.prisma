@@ -89,7 +89,20 @@ model User {
   pushRecords        DesignProgramBinding[]
   bugBindings        BugProgramBinding[]
   pkmNotes           PkmNote[]
+  responsibilities   UserResponsibility[]
 
+  @@schema("pm")
+}
+
+model UserResponsibility {
+  id        String             @id @default(cuid())
+  userId    String
+  kind      ResponsibilityKind
+  createdAt DateTime           @default(now())
+
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind])
   @@schema("pm")
 }
 

@@ -2,9 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/shared/db/client";
-import { requireRoot } from "@/shared/lib/permissions";
+import { requireRoot, requireSession } from "@/shared/lib/permissions";
 import { createModerationLog } from "@/features/admin/moderation";
-import { UserRole, ModerationAction, TicketStatus } from "@prisma/client";
+import { UserRole, ModerationAction, TicketStatus, ResponsibilityKind } from "@prisma/client";
 
 export type UserSummary = {
   id: string;
@@ -198,4 +198,54 @@ export async function unbanUserAction(
 
   revalidatePath("/admin/users");
   return { success: true };
+}
+
+export async function getUserResponsibilitiesAction(
+  userId: string
+): Promise<{ kinds: ResponsibilityKind[] }> {
+  await requireSession();
+  const records = await prisma.userResponsibility.findMany({
+    where: { userId },
+    select: { kind: true },
+  });
+  return { kinds: records.map((r) => r.kind) };
+}
+
+export async function updateUserResponsibilitiesAction(
+  userId: string,
+  kinds: ResponsibilityKind[]
+): Promise<{ success?: boolean; error?: string }> {
+  await requireRoot();
+  await prisma.$transaction([
+    prisma.userResponsibility.deleteMany({ where: { userId } }),
+    ...kinds.map((kind) =>
+      prisma.userResponsibility.create({ data: { userId, kind } })
+    ),
+  ]);
+  revalidatePath("/admin/users");
+  return { success: true };
+}
+
+export async function getMyResponsibilitiesAction(): Promise<{ kinds: ResponsibilityKind[] }> {
+  const session = await requireSession();
+  const records = await prisma.userResponsibility.findMany({
+    where: { userId: session.user.id },
+    select: { kind: true },
+  });
+  return { kinds: records.map((r) => r.kind) };
+}
+
+export async function getAllUserResponsibilitiesAction(): Promise<
+  Record<string, ResponsibilityKind[]>
+> {
+  await requireRoot();
+  const records = await prisma.userResponsibility.findMany({
+    select: { userId: true, kind: true },
+  });
+  const result: Record<string, ResponsibilityKind[]> = {};
+  for (const r of records) {
+    if (!result[r.userId]) result[r.userId] = [];
+    result[r.userId].push(r.kind);
+  }
+  return result;
 }

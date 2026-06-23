@@ -12,6 +12,8 @@ import { composeImageMarkdown, extractInlineImages } from "@/shared/lib/pkm";
 import { IconArrowLeft, IconClock, IconEdit } from "@/shared/ui/icons";
 import { fetchJson } from "@/shared/api/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/shared/api/swr-config";
+import { getMyResponsibilitiesAction } from "@/features/admin/admin";
+import { ResponsibilityKind } from "@prisma/client";
 import {
   type Ticket,
   type TicketStatus,
@@ -112,12 +114,20 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     fetchJson,
     STALE_SWR_OPTIONS,
   );
+  const ticket = ticketData?.ticket ?? null;
+
+  // Responsibilities state — declared early so SWR key can reference it
+  const [userResps, setUserResps] = useState<ResponsibilityKind[]>([]);
+
   const { data: usersData } = useSWR<{ users: TicketCreateUser[] }>(
-    isRoot ? "/api/users" : null,
+    ticket?.module.responsibility.kind
+      ? (isRoot || userResps.includes(ticket.module.responsibility.kind as ResponsibilityKind))
+          ? "/api/users"
+          : null
+      : null,
     fetchJson,
     STALE_SWR_OPTIONS,
   );
-  const ticket = ticketData?.ticket ?? null;
 
   // Derive kind flags from ticket
   const isDesignTicket = ticket?.module.responsibility.kind === "DESIGN";
@@ -158,6 +168,13 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     setLocalAssigneeIds(ticket.assignees.map((a) => a.id));
     setLocalModuleId(ticket.module.id);
   }, [ticket]);
+
+  // Load current user's responsibilities
+  useEffect(() => {
+    getMyResponsibilitiesAction()
+      .then((r) => setUserResps(r.kinds))
+      .catch(() => {});
+  }, []);
 
   // Populate edit fields when entering edit mode
   useEffect(() => {
@@ -519,7 +536,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                     ))
                   )}
                 </div>
-                {isRoot && (
+                {(isRoot || userResps.includes(ticket.module.responsibility.kind as ResponsibilityKind)) && (
                   <div className="space-y-3">
                     <AssigneePicker users={users} value={localAssigneeIds} onChange={setLocalAssigneeIds} />
                     <button type="button" onClick={updateAssignee} className="w-full rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700">

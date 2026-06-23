@@ -35,7 +35,6 @@ type NavItem = {
   label: string;
   icon: (p: { className?: string }) => ReactNode;
   match?: (path: string) => boolean;
-  rootOnly?: boolean;
 };
 
 const NAV_ITEMS: NavItem[] = [
@@ -51,7 +50,6 @@ const NAV_ITEMS: NavItem[] = [
     label: "派单",
     icon: IconTicket,
     match: (p) => p.startsWith("/dispatchTicket"),
-    rootOnly: true,
   },
   { href: "/pkm", label: "PKM", icon: IconPkm, match: (p) => p.startsWith("/pkm") },
   {
@@ -200,10 +198,7 @@ export function AppShell({
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
-          <SidebarNavClient
-            onNavigate={() => setMobileOpen(false)}
-            isRoot={session?.user?.role === "ROOT"}
-          />
+          <SidebarNavClient onNavigate={() => setMobileOpen(false)} />
         </nav>
 
         <div className="border-t border-ink-200 p-3">
@@ -397,17 +392,13 @@ export function AppShell({
 function SidebarNav({
   pathname,
   onNavigate,
-  isRoot,
 }: {
   pathname: string;
   onNavigate: () => void;
-  isRoot: boolean;
 }) {
-  const visibleNav = NAV_ITEMS.filter((item) => !item.rootOnly || isRoot);
-
   return (
     <>
-      {visibleNav.map((item) => {
+      {NAV_ITEMS.map((item) => {
         const active = item.match ? item.match(pathname) : pathname.startsWith(item.href);
         const Icon = item.icon;
         return (
@@ -430,13 +421,11 @@ function SidebarNav({
 
 function SidebarNavClient({
   onNavigate,
-  isRoot,
 }: {
   onNavigate: () => void;
-  isRoot: boolean;
 }) {
   const pathname = usePathname() || "/";
-  return <SidebarNav pathname={pathname} onNavigate={onNavigate} isRoot={isRoot} />;
+  return <SidebarNav pathname={pathname} onNavigate={onNavigate} />;
 }
 
 export function AppShellWithSuspense(props: React.ComponentProps<typeof AppShell>) {

@@ -1,13 +1,13 @@
 "use server";
 
-import { TicketStatus } from "@prisma/client";
+import { TicketStatus, UserRole } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
 import {
   assigneeUserSelect,
   normalizeAssigneeIds,
   replaceTicketAssignees,
 } from "@/entities/ticket/lib/ticket-assignees";
-import { requireRoot } from "@/shared/lib/permissions";
+import { requireRoot, requireSession, requireDesignResponsibility } from "@/shared/lib/permissions";
 import { allocateTicketNo, syncTicketCounterAfterCreate } from "@/entities/ticket/lib/ticket-counter";
 import { createModerationLog } from "@/features/admin/moderation";
 import {
@@ -32,7 +32,7 @@ export type CreateTicketResult =
 
 export async function createTicketAction(input: CreateTicketInput): Promise<CreateTicketResult> {
   try {
-    const session = await requireRoot();
+    const session = await requireSession();
 
     if (!input.title.trim() || !input.projectId || !input.moduleId) {
       return { ok: false, error: "title, projectId and moduleId are required" };
@@ -41,6 +41,20 @@ export async function createTicketAction(input: CreateTicketInput): Promise<Crea
     const title = input.title.trim();
     const projectId = input.projectId;
     const moduleId = input.moduleId;
+
+    const module = await prisma.module.findUnique({
+      where: { id: moduleId },
+      include: { responsibility: { select: { kind: true } } },
+    });
+    if (!module) {
+      return { ok: false, error: "module not found" };
+    }
+    await requireDesignResponsibility(
+      session.user.id,
+      module.responsibility.kind,
+      session.user.role as UserRole
+    );
+
     const ticketNo = await allocateTicketNo();
     const assigneeIds = normalizeAssigneeIds(input.assigneeIds ?? []);
 
@@ -137,7 +151,7 @@ export async function createBugTicketAction(
   input: CreateBugTicketInput
 ): Promise<CreateBugTicketResult> {
   try {
-    const session = await requireRoot();
+    const session = await requireSession();
 
     if (!input.title.trim() || !input.sourceTicketId) {
       return { ok: false, error: "title and sourceTicketId are required" };
@@ -145,11 +159,16 @@ export async function createBugTicketAction(
 
     const sourceTicket = await prisma.ticket.findUnique({
       where: { id: input.sourceTicketId },
-      select: { id: true, ticketNo: true, projectId: true, moduleId: true },
+      include: { module: { include: { responsibility: { select: { kind: true } } } } },
     });
     if (!sourceTicket) {
       return { ok: false, error: "source ticket not found" };
     }
+    await requireDesignResponsibility(
+      session.user.id,
+      sourceTicket.module.responsibility.kind,
+      session.user.role as UserRole
+    );
 
     const ticketNo = await allocateTicketNo();
     const assigneeIds = normalizeAssigneeIds(input.assigneeIds ?? []);

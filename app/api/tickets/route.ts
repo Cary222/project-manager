@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { TicketStatus, ModerationAction } from "@prisma/client";
+import { TicketStatus, ModerationAction, UserRole } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
 import {
   assigneeUserSelect,
   normalizeAssigneeIds,
   replaceTicketAssignees,
 } from "@/entities/ticket/lib/ticket-assignees";
-import { requireRoot, requireSession } from "@/shared/lib/permissions";
+import { requireRoot, requireSession, requireDesignResponsibility } from "@/shared/lib/permissions";
 import { allocateTicketNo, syncTicketCounterAfterCreate } from "@/entities/ticket/lib/ticket-counter";
 import { createModerationLog } from "@/features/admin/moderation";
 import {
@@ -17,7 +17,8 @@ import { syncTicketSearchDocument } from "@/shared/lib/search";
 
 export async function POST(request: Request) {
   try {
-    const session = await requireRoot();
+    const session = await requireSession();
+
     const body = (await request.json()) as {
       title?: string;
       description?: string;
@@ -39,6 +40,19 @@ export async function POST(request: Request) {
     const title = body.title.trim();
     const projectId = body.projectId;
     const moduleId = body.moduleId;
+
+    const module = await prisma.module.findUnique({
+      where: { id: moduleId },
+      include: { responsibility: { select: { kind: true } } },
+    });
+    if (!module) {
+      return NextResponse.json({ error: "module not found" }, { status: 404 });
+    }
+    await requireDesignResponsibility(
+      session.user.id,
+      module.responsibility.kind,
+      session.user.role as UserRole
+    );
     const ticketNo = await allocateTicketNo();
     const assigneeIds = normalizeAssigneeIds(
       body.assigneeIds ?? (body.assigneeId ? [body.assigneeId] : [])

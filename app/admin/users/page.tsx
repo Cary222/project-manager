@@ -8,9 +8,12 @@ import {
   updateUserRoleAction,
   banUserAction,
   unbanUserAction,
+  getUserResponsibilitiesAction,
+  updateUserResponsibilitiesAction,
+  getAllUserResponsibilitiesAction,
   UserSummary,
 } from "@/features/admin/admin";
-import { UserRole } from "@prisma/client";
+import { UserRole, ResponsibilityKind } from "@prisma/client";
 import { useAdminRole } from "../context";
 
 const PAGE_SIZE = 20;
@@ -29,12 +32,15 @@ export default function AdminUsersPage() {
   const [msg, setMsg] = useState("");
 
   const [dialog, setDialog] = useState<{
-    type: "role" | "ban" | "unban";
+    type: "role" | "ban" | "unban" | "resp";
     userId: string;
     userName: string;
   } | null>(null);
   const [dialogValue, setDialogValue] = useState("");
   const [acting, setActing] = useState(false);
+  const [userResps, setUserResps] = useState<Record<string, ResponsibilityKind[]>>({});
+  const [respChecked, setRespChecked] = useState<ResponsibilityKind[]>([]);
+  const [loadingResps, setLoadingResps] = useState(false);
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
@@ -47,6 +53,8 @@ export default function AdminUsersPage() {
       });
       setUsers(result.users);
       setTotal(result.total);
+      const allResps = await getAllUserResponsibilitiesAction();
+      setUserResps(allResps);
       setInitialized(true);
     },
     []
@@ -104,6 +112,32 @@ export default function AdminUsersPage() {
     setDialog({ type: "unban", userId: user.id, userName: user.name || user.email });
   }
 
+  async function openRespDialog(user: UserSummary) {
+    setLoadingResps(true);
+    setRespChecked([]);
+    const result = await getUserResponsibilitiesAction(user.id);
+    setRespChecked(result.kinds);
+    setUserResps((prev) => ({ ...prev, [user.id]: result.kinds }));
+    setLoadingResps(false);
+    setDialog({ type: "resp", userId: user.id, userName: user.name || user.email });
+  }
+
+  function toggleResp(kind: ResponsibilityKind) {
+    setRespChecked((prev) =>
+      prev.includes(kind) ? prev.filter((k) => k !== kind) : [...prev, kind]
+    );
+  }
+
+  async function handleRespSave() {
+    if (!dialog || dialog.type !== "resp") return;
+    setActing(true);
+    await updateUserResponsibilitiesAction(dialog.userId, respChecked);
+    setUserResps((prev) => ({ ...prev, [dialog.userId]: [...respChecked] }));
+    setActing(false);
+    setDialog(null);
+    showMsg("职能保存成功");
+  }
+
   function renderDialog() {
     if (!dialog) return null;
     const { type, userName } = dialog;
@@ -119,9 +153,12 @@ export default function AdminUsersPage() {
       title = "封禁用户";
       confirmLabel = "确认封禁";
       danger = true;
-    } else {
+    } else if (type === "unban") {
       title = "解封用户";
       confirmLabel = "确认解封";
+    } else {
+      title = "管理职能";
+      confirmLabel = "保存";
     }
 
     return (
@@ -154,10 +191,32 @@ export default function AdminUsersPage() {
                 onChange={(e) => setDialogValue(e.target.value)}
               />
             </>
-          ) : (
+          ) : type === "unban" ? (
             <p className="mb-4 text-sm text-zinc-600">
               确定要解封「{userName}」吗？该用户将可以重新登录。
             </p>
+          ) : (
+            <>
+              <p className="mb-4 text-sm text-zinc-600">
+                勾选「{userName}」拥有的职能：
+              </p>
+              <div className="mb-4 space-y-3">
+                {(["PROGRAM", "DESIGN", "BUG"] as ResponsibilityKind[]).map((kind) => (
+                  <label key={kind} className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={respChecked.includes(kind)}
+                      onChange={() => toggleResp(kind)}
+                      className="h-4 w-4 rounded border-zinc-300 text-brand-600"
+                    />
+                    <span className="text-sm text-zinc-700">
+                      {kind === "PROGRAM" ? "PROGRAM（程序）" :
+                       kind === "DESIGN" ? "DESIGN（设计）" : "BUG"}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </>
           )}
           <div className="flex justify-end gap-2">
             <button
@@ -170,6 +229,7 @@ export default function AdminUsersPage() {
             >
               取消
             </button>
+            {type !== "resp" && (
             <button
               type="button"
               onClick={handleDialogConfirm}
@@ -182,6 +242,17 @@ export default function AdminUsersPage() {
             >
               {confirmLabel}
             </button>
+            )}
+            {type === "resp" && (
+              <button
+                type="button"
+                onClick={handleRespSave}
+                disabled={acting || loadingResps}
+                className="rounded-md bg-brand-600 px-3 py-1.5 text-sm text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                保存
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -236,6 +307,7 @@ export default function AdminUsersPage() {
                   <th className="px-4 py-3 font-medium text-zinc-500">用户</th>
                   <th className="px-4 py-3 font-medium text-zinc-500">角色</th>
                   <th className="px-4 py-3 font-medium text-zinc-500">状态</th>
+                  <th className="px-4 py-3 font-medium text-zinc-500">职能</th>
                   <th className="px-4 py-3 font-medium text-zinc-500">注册时间</th>
                   {isRoot && (
                     <th className="px-4 py-3 font-medium text-zinc-500">操作</th>
@@ -274,6 +346,19 @@ export default function AdminUsersPage() {
                         <span className="inline-flex items-center rounded bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-600">
                           正常
                         </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {isRoot && (
+                        <button
+                          type="button"
+                          onClick={() => openRespDialog(user)}
+                          className="rounded border border-zinc-200 px-2 py-0.5 text-xs text-zinc-500 transition hover:border-brand-300 hover:text-brand-600"
+                        >
+                          {userResps[user.id]?.length
+                            ? userResps[user.id].join(", ")
+                            : "未设置"}
+                        </button>
                       )}
                     </td>
                     <td className="px-4 py-3 text-zinc-400">

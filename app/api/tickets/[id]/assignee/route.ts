@@ -6,9 +6,9 @@ import {
   replaceTicketAssignees,
   sameAssigneeIds,
 } from "@/entities/ticket/lib/ticket-assignees";
-import { requireRoot } from "@/shared/lib/permissions";
+import { requireRoot, requireSession, requireDesignResponsibility } from "@/shared/lib/permissions";
 import { createModerationLog } from "@/features/admin/moderation";
-import { ModerationAction } from "@prisma/client";
+import { ModerationAction, UserRole } from "@prisma/client";
 import {
   buildAssignedNotification,
   createManyNotifications,
@@ -21,7 +21,7 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await requireRoot();
+    const session = await requireSession();
     const { id } = await context.params;
     const body = (await request.json()) as { assigneeIds?: string[] };
     const ticketNo = Number(id);
@@ -34,11 +34,18 @@ export async function PATCH(
         ticketNo: true,
         title: true,
         assignees: { select: { userId: true } },
+        module: { include: { responsibility: { select: { kind: true } } } },
       },
     });
     if (!current) {
       return NextResponse.json({ error: "ticket not found" }, { status: 404 });
     }
+
+    await requireDesignResponsibility(
+      session.user.id,
+      current.module.responsibility.kind,
+      session.user.role as UserRole
+    );
 
     const currentAssigneeIds = current.assignees.map((item) => item.userId);
     if (sameAssigneeIds(currentAssigneeIds, nextAssigneeIds)) {

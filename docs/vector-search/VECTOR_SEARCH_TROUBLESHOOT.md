@@ -304,26 +304,29 @@ function canAccessSearchResult(item: SearchResultItem, viewerUserId?: string | n
 
 ### 为什么 metadata 会是 NULL
 
-`metadata` 字段在 Prisma schema 中定义为 `Json?`（允许 NULL）。
+**时间线确认**：
 
-正常写入路径（`upsertSearchDocument`）会生成 metadata：
+| 时间 | 事件 |
+|------|------|
+| 03:36 | 笔记创建（`PkmNote.createdAt`） |
+| 10:50 | chunking 代码部署（8e4429b 上线） |
+| 12:54 | `syncPkmNoteSearchDocument` 执行，SearchDocument 写入（`createdAt=updatedAt`） |
+| 12:54 | embedding 写入成功（向量存在） |
+| 14:25 | SQL UPDATE 修复 metadata |
 
-```startLine:191:shared/lib/search.ts
-function buildMetadataWithEmbeddingHash(record: SearchableRecord, embeddingHash: string) {
-  return {
-    ...(record.metadata ?? {}),
-    embeddingHash,
-  } satisfies SearchDocumentMetadata;
-}
-```
+代码链路完整正确——`buildSearchablePkmNoteChunks` → `buildMetadataWithEmbeddingHash` → `upsertSearchDocument`，每一步都应该在 metadata 里写入值。
 
-但这是**单条记录偶发**的 NULL。25 条 PKM 笔记 SearchDocument 中，24 条 metadata 正常，仅此一条为 NULL。
+**这条记录确实是 chunking 改造后的**：`totalChunks=1, chunkIndex=0`（有 chunk 头信息），不是旧记录。
 
-可能原因（无法 100% 确认，但做了防御）：
+**根因无法 100% 复现**，但最可能的原因是 Prisma 写入层的极端情况：
 
-1. **写入事务中途失败**：第一次 upsert 时 content 写入成功，但 metadata 字段写入失败（如 schema 迁移期间类型不一致）
-2. **Prisma client 缓存或连接问题**：极端情况下某些字段被跳过
-3. **历史遗留数据**：schema 早期 `metadata` 允许 NULL，后来代码才加上默认值
+1. **事务半提交**：Prisma `upsert` 的 `create` 分支写入时，content/url/title 等字段先落盘，metadata 作为 JSON 字段在事务提交前的某个中间状态失败，导致 content 写入成功但 metadata 列保持 NULL
+2. **Prisma JSON 序列化偶发问题**：在 `metadata as Prisma.InputJsonValue` 类型转换时，极小概率下 `undefined` 值被跳过（但 `buildMetadataWithEmbeddingHash` 不应该产生 undefined）
+3. **连接层截断**：embedding 写入（`updateSearchDocumentEmbedding`）是独立 SQL，但 metadata 是在 upsert 里一起写的，如果 embedding 写入成功但 upsert 的 metadata 字段在 DB 层被截断
+
+> **用户猜测**：可能是 chunking 改造前的旧记录。但 25 条 PKM 笔记 SearchDocument 中 24 条 metadata 正常、且该记录 `createdAt=updatedAt=12:54`（chunking 代码部署后），表明是改造后写入的。不过代码层面的偶发写入失败仍是最合理的解释。
+
+### 验证记录类型
 
 ### 修复
 
@@ -344,6 +347,33 @@ SET metadata = jsonb_build_object(
 )
 WHERE id = '<doc_id>';
 ```
+
+### 验证记录类型
+
+确认是否 chunking 改造前的旧记录（通过 `createdAt` 对比 `@@unique` 键是否有 `chunkIndex`）：
+
+```sql
+-- 旧记录（chunkIndex 字段默认值 0，unique 键只有 2 个字段）
+-- @@unique([sourceType, sourceId]) → 无 chunkIndex
+
+-- 新记录（chunking 改造后，@@unique 为 3 个字段）
+-- @@unique([sourceType, sourceId, chunkIndex])
+
+-- 判断：查 metadata + chunkIndex
+SELECT title, "chunkIndex",
+       metadata->>'totalChunks' AS total_chunks,
+       metadata->>'chunkIndex'   AS meta_chunk,
+       (metadata IS NULL) AS meta_null
+FROM pm."SearchDocument"
+WHERE "sourceType" = 'PKM_NOTE'
+ORDER BY "updatedAt" DESC;
+
+-- 如果 meta_chunk 有值 → 新版写入（经过了 buildSearchablePkmNoteChunks）
+-- 如果 meta_chunk 为 NULL 且 metadata 不是 NULL → 可能是旧版
+-- 如果 metadata IS NULL → 写入有问题
+```
+
+"光污染"这条记录 `totalChunks=1, chunkIndex=0`，**是 chunking 改造后新版写入**，不是旧记录遗留。
 
 **2. 代码防御（已合入 `shared/lib/search.ts`）**：
 

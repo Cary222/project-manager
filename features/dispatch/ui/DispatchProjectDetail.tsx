@@ -6,11 +6,13 @@ import { formatAssigneeNames } from "@/shared/ui/AssigneePicker";
 import { CreateTicketForm } from "@/features/ticket/create";
 import type { TicketCreateResponsibility, TicketCreateUser } from "@/entities/ticket/model/types";
 import { useSession } from "next-auth/react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconArrowLeft, IconEdit, IconPlus, IconTrash } from "@/shared/ui/icons";
 import { fetchJson } from "@/shared/api/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/shared/api/swr-config";
 import { KIND_LABEL, Module } from "@/entities/ticket/model/types";
+import { getMyResponsibilitiesAction } from "@/features/admin/admin";
+import { ResponsibilityKind } from "@prisma/client";
 import {
   type Ticket,
   type MyTicket,
@@ -108,17 +110,26 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
     fetchJson,
     STALE_SWR_OPTIONS,
   );
-  const { data: usersData } = useSWR<{ users: TicketCreateUser[] }>(
-    isRoot ? "/api/users" : null,
-    fetchJson,
-    STALE_SWR_OPTIONS,
-  );
 
   const project = projectData?.project ?? null;
-  const users = usersData?.users ?? [];
 
   const [selectedResponsibilityId, setSelectedResponsibilityId] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [userResps, setUserResps] = useState<ResponsibilityKind[]>([]);
+
+  // Load current user's responsibilities
+  useEffect(() => {
+    getMyResponsibilitiesAction()
+      .then((r) => setUserResps(r.kinds))
+      .catch(() => {});
+  }, []);
+
+  const { data: usersData } = useSWR<{ users: TicketCreateUser[] }>(
+    isRoot || userResps.length > 0 ? "/api/users" : null,
+    fetchJson,
+    STALE_SWR_OPTIONS,
+  );
+  const users = usersData?.users ?? [];
   const [message, setMessage] = useState("");
 
   const loadProject = useCallback(async () => {
@@ -490,7 +501,7 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
                     : "请选择职能"}
                 </p>
               </div>
-              {isRoot && selectedResponsibility ? (
+              {!!selectedResponsibility ? (
                 <button
                   type="button"
                   onClick={() => setShowCreate((v) => !v)}
@@ -502,7 +513,7 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
             </div>
 
             <div className="p-5">
-              {isRoot && selectedResponsibilityForCreate && showCreate ? (
+              {!!selectedResponsibilityForCreate && showCreate ? (
                 <CreateTicketForm
                   projectId={projectId}
                   responsibility={selectedResponsibilityForCreate}
