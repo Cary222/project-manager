@@ -10,7 +10,8 @@ PKM 笔记 + 工单 + 提交 的 BGE-M3 向量搜索实现，支持 chunking 长
 | `PKM_SEARCH_CLEANING.md` | 搜索文本清洗逻辑（去水印、空格等） |
 | `PKM_CHUNKING_IMPL.md` | Chunking 分块策略与聚合搜索实现 |
 | `VECTOR_SEARCH_TROUBLESHOOT.md` | 向量搜索故障排查指南 |
-| `ATTACHMENT_TEXT_EXTRACTION.md` | PDF/PPTX/文本附件提取到搜索文档的完整流程 |
+| `ATTACHMENT_TEXT_EXTRACTION.md` | PDF/PPTX/文本/DOCX 附件提取到搜索文档的完整流程 |
+| `DOCX_EXTRACT.md` | DOCX 附件提取开发测试复现手册（服务器部署 + 验证） |
 
 ## 脚本
 

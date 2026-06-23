@@ -1,4 +1,7 @@
 """Embedding API 服务 — FastAPI + BGE-M3，监听 0.0.0.0:5000"""
+import os
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
 import asyncio
 import base64
 import io
@@ -10,6 +13,7 @@ import pdfplumber
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pptx import Presentation
+from docx import Document
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 
@@ -27,6 +31,7 @@ MAX_EXTRACT_FILE_SIZE = 10 * 1024 * 1024
 PPTX_MIME = (
     "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 )
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 PDF_MIME = "application/pdf"
 TEXT_MIME_PREFIXES = (
     "text/plain",
@@ -130,6 +135,24 @@ def _extract_text_from_bytes(raw: bytes, mime_type: str) -> str:
                     text = "".join(run.text for run in paragraph.runs).strip()
                     if text:
                         parts.append(text)
+        return "\n".join(parts)
+
+    if normalized == DOCX_MIME:
+        doc = Document(io.BytesIO(raw))
+        parts = []
+        for paragraph in doc.paragraphs:
+            text = paragraph.text.strip()
+            if text:
+                parts.append(text)
+        for table in doc.tables:
+            for row in table.rows:
+                row_texts = []
+                for cell in row.cells:
+                    cell_text = cell.text.strip()
+                    if cell_text:
+                        row_texts.append(cell_text)
+                if row_texts:
+                    parts.append(" | ".join(row_texts))
         return "\n".join(parts)
 
     raise ValueError(f"unsupported_mime:{normalized}")

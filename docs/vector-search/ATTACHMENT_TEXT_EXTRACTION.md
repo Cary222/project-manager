@@ -20,7 +20,7 @@ PKM 笔记的附件存在 `pm.PkmNote.attachments`（`Json` 字段）里，但**
 
 - **不破坏旧链路**：附件为空时退化到原行为（仅正文向量化）
 - **三步走**：FastAPI 加 `/extract-text` → Next.js 客户端调它拿文本 → 文本塞进 `SearchDocument.content` 一起向量化
-- **覆盖三类 mime**：`text/*`（含 `text/markdown`、`text/csv`、`application/json`、`application/xml`）+ `application/pdf` + `application/vnd.openxmlformats-officedocument.presentationml.presentation`
+- **覆盖四类 mime**：`text/*`（含 `text/markdown`、`text/csv`、`application/json`、`application/xml`）+ `application/pdf` + `application/vnd.openxmlformats-officedocument.presentationml.presentation` + `application/vnd.openxmlformats-officedocument.wordprocessingml.document`（含表格提取）
 - **降级优雅**：单附件超时 / 太大 / mime 不支持 → 跳过该附件但笔记仍能入库（source 字段记录原因）
 - **文本先洗再喂**：提取出的原始文本经过 `cleanExtractedTextForEmbedding` 清洗（去 base64 残留 / 控制字符 / 冗余空白），再进 `SearchDocument.content`
 - **数据迁移友好**：跑一次 `scripts/reindex-pkm-notes.ts --batch-size=1` 即可全量重建
@@ -31,8 +31,8 @@ PKM 笔记的附件存在 `pm.PkmNote.attachments`（`Json` 字段）里，但**
 
 | # | 文件 | 类型 | 作用 |
 |---|------|------|------|
-| 1 | `embedding/api.py` | 修改 | 新增 `/extract-text` 端点 + 3 个 mime 解析器（text/pdf/pptx） |
-| 2 | `embedding/requirements.txt` | 修改 | 加 `pdfplumber>=0.10.0` 和 `python-pptx>=0.6.21` |
+| 1 | `embedding/api.py` | 修改 | 新增 `/extract-text` 端点 + 4 个 mime 解析器（text/pdf/pptx/docx，含表格） |
+| 2 | `embedding/requirements.txt` | 修改 | 加 `pdfplumber>=0.10.0`、`python-pptx>=0.6.21`、`python-docx>=1.0.0` |
 | 3 | `shared/lib/embedding.ts` | 修改 | 导出 `getEmbeddingApiUrl()` 给 search 复用 |
 | 4 | `shared/lib/markdown.ts` | 修改 | 新增 `cleanExtractedTextForEmbedding()`，清洗附件提取文本再喂 BGE-M3 |
 | 5 | `shared/lib/search.ts` | 修改 | 新增 `extractAttachmentText(s)` 客户端 + `buildSearchablePkmNoteDocument` 改 async + 接入清洗 |
@@ -375,7 +375,7 @@ export function cleanExtractedTextForEmbedding(raw: string): string {
 |----|----|------|
 | FastAPI 端口 | `0.0.0.0:5000` | 同向量服务复用 |
 | `EMBEDDING_API_URL` | `http://localhost:5000` | 主应用 `.env.production` / `.env` 都需要 |
-| Python 包 | `pdfplumber>=0.10.0`、`python-pptx>=0.6.21` | 新加，已写进 `embedding/requirements.txt` |
+| Python 包 | `pdfplumber>=0.10.0`、`python-pptx>=0.6.21`、`python-docx>=1.0.0` | 新加，已写进 `embedding/requirements.txt` |
 | 前端超时 | `EXTRACT_TEXT_TIMEOUT_MS = 15_000` | `shared/lib/search.ts:34` |
 | 前端大小上限 | `PKM_ATTACHMENT_MAX_SIZE` | `shared/lib/pkm.ts`，默认 10MB |
 | 文本截断 | `MAX_EXTRACTED_CHARS = 2000` | `shared/lib/search.ts:35`，PDF/PPTX 提取后超长会被截 |
@@ -458,16 +458,17 @@ curl -s -w "\nemb=%{http_code}\n" http://localhost:5000/dimension
 
 ## 6. 测试 & 验证
 
-### 6.1 单元 / 端点测试：三 mime 路由
+### 6.1 单元 / 端点测试：四 mime 路由
 
-构造三类样本附件的 data URL，调 `/extract-text`：
+构造四类样本附件的 data URL，调 `/extract-text`：
 
 ```bash
-# 假设你已生成 3 个样本文件：sample.txt / sample.pdf / sample.pptx
+# 假设你已生成 4 个样本文件：sample.txt / sample.pdf / sample.pptx / sample.docx
 # 编码成 data URL
 TXT_URL="data:text/markdown;base64,$(base64 -i sample.txt | tr -d '\n')"
 PDF_URL="data:application/pdf;base64,$(base64 -i sample.pdf | tr -d '\n')"
 PPTX_URL="data:application/vnd.openxmlformats-officedocument.presentationml.presentation;base64,$(base64 -i sample.pptx | tr -d '\n')"
+DOCX_URL="data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,$(base64 -i sample.docx | tr -d '\n')"
 
 # 文本
 curl -s -X POST http://localhost:5000/extract-text \
@@ -486,6 +487,12 @@ curl -s -X POST http://localhost:5000/extract-text \
   -H "Content-Type: application/json" \
   -d "{\"url\":\"$PPTX_URL\",\"mimeType\":\"application/vnd.openxmlformats-officedocument.presentationml.presentation\",\"name\":\"sample.pptx\",\"size\":$(stat -f%z sample.pptx)}"
 # 期望：{"text":"...","source":"ok","name":"sample.pptx"}
+
+# DOCX（含表格提取）
+curl -s -X POST http://localhost:5000/extract-text \
+  -H "Content-Type: application/json" \
+  -d "{\"url\":\"$DOCX_URL\",\"mimeType\":\"application/vnd.openxmlformats-officedocument.wordprocessingml.document\",\"name\":\"sample.docx\",\"size\":$(stat -f%z sample.docx)}"
+# 期望：{"text":"...","source":"ok","name":"sample.docx"}
 
 # 不支持的 mime
 curl -s -X POST http://localhost:5000/extract-text \
@@ -616,13 +623,13 @@ cases.forEach((text, i) => {
 ```markdown
 - [ ] ssh hxy@192.168.1.14 连上远端
 - [ ] 确认 .env.production 里有 EMBEDDING_API_URL=http://localhost:5000
-- [ ] 装好 pdfplumber + python-pptx（pip install -r requirements.txt）
+- [ ] 装好 pdfplumber + python-pptx + python-docx（pip install -r requirements.txt）
 - [ ] 重启 FastAPI（kill 旧 PID + nohup uvicorn ... &）
 - [ ] curl http://localhost:5000/dimension 返回 {"dimension":1024}
 - [ ] 本地 commit + push 到 main（推送即部署）
 - [ ] 远端 npm run build + fuser -k 3003/tcp + npm run start
 - [ ] curl http://localhost:3003 返回 200
-- [ ] 跑 6.1 三个 curl 验证三类 mime 解析器（期望 text/source=ok）
+- [ ] 跑 6.1 四个 curl 验证四类 mime 解析器（期望 text/source=ok）
 - [ ] 跑 `npx tsx scripts/test-clean-extracted-text.ts` 验证清洗效果（控制字符/空白规范化，见 §6.6）
 - [ ] 跑 6.2 reindex（期望 5/5 成功，0 errors）
 - [ ] 跑 6.3 psql 查 SearchDocument.content（期望看到 [附件 xxx 提取] 段落）
