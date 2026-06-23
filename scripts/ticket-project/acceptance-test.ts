@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { parseTicketCommitSubject } from "../entities/ticket/lib/parse-commit";
+import { parseTicketCommitSubject } from "../../entities/ticket/lib/parse-commit";
 import { allocateTicketNo } from "@/entities/ticket/lib/ticket-counter";
 import { prisma } from "@/shared/db/client";
 

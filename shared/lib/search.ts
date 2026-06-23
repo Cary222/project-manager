@@ -5,6 +5,7 @@ import {
   buildEmbeddingHash,
   buildEmbeddingInput,
   fetchEmbedding,
+  fetchEmbeddingsBatch,
   getEmbeddingApiUrl,
 } from "@/shared/lib/embedding";
 import type {
@@ -29,7 +30,7 @@ import { cleanExtractedTextForEmbedding, cleanMarkdownForEmbedding, formatAttach
 
 const SEARCH_LIMIT_DEFAULT = 8;
 const SEARCH_LIMIT_MAX = 20;
-const VECTOR_CANDIDATE_MULTIPLIER = 2;
+const VECTOR_CANDIDATE_MULTIPLIER = 10;
 const KEYWORD_CANDIDATE_MULTIPLIER = 3;
 const EXTRACT_TEXT_TIMEOUT_MS = 15_000;
 const MAX_EXTRACTED_CHARS = 2000;
@@ -161,6 +162,30 @@ function rankDocument(title: string, content: string, terms: string[]) {
 function hasDirectQueryMatch(title: string, content: string, query: string) {
   const lowerQuery = query.toLowerCase();
   return title.toLowerCase().includes(lowerQuery) || content.toLowerCase().includes(lowerQuery);
+}
+
+const CHUNK_SIZE = 1500;
+const CHUNK_OVERLAP = 200;
+
+export function splitIntoChunks(
+  text: string,
+  maxChars = CHUNK_SIZE,
+  overlapChars = CHUNK_OVERLAP,
+): string[] {
+  if (text.length <= maxChars) return [text];
+  overlapChars = Math.min(overlapChars, maxChars - 1);
+
+  const chunks: string[] = [];
+  let start = 0;
+
+  while (start < text.length) {
+    const end = Math.min(start + maxChars, text.length);
+    chunks.push(text.slice(start, end));
+    if (end === text.length) break;
+    start = end - overlapChars;
+  }
+
+  return chunks;
 }
 
 function buildMetadataWithEmbeddingHash(record: SearchableRecord, embeddingHash: string) {
@@ -295,41 +320,27 @@ export function buildSearchableCommitDocument(commit: SearchDocumentCommitRecord
   };
 }
 
-export async function buildSearchablePkmNoteDocument(
+function buildSearchablePkmNoteDocumentContent(
   note: SearchDocumentPkmNoteRecord,
-  attachmentTexts: Map<string, string> = new Map(),
-): Promise<SearchableRecord> {
+  content: string,
+  chunkIndex: number,
+  totalChunks: number,
+): SearchableRecord {
   const authorName = note.user.name || note.user.email;
-  const title = note.title.trim();
-  const attachments = normalizePkmAttachments(note.attachments);
-  const cleanedContent = cleanMarkdownForEmbedding(note.content);
-  const attachmentSections = attachments
-    .map((attachment) => {
-      const text = attachmentTexts.get(attachment.name);
-      if (!text) return null;
-      const cleaned = cleanExtractedTextForEmbedding(text);
-      if (!cleaned) return null;
-      return `[附件 ${attachment.name} 提取]\n${cleaned}`;
-    })
-    .filter((section): section is string => Boolean(section));
-  const content = [
-    `标题 ${title}`,
+
+  const header = [
+    `标题 ${note.title.trim()}`,
     `作者 ${authorName}`,
     note.project ? `项目 ${note.project.name}` : null,
-    note.tags.length > 0 ? `标签 ${note.tags.join("、")}` : null,
-    attachments.length > 0 ? `附件 ${attachments.map(formatAttachmentLabel).join("、")}` : null,
-    cleanedContent ? `正文 ${cleanedContent}` : null,
-    attachmentSections.length > 0 ? attachmentSections.join("\n\n") : null,
-  ]
-    .filter(Boolean)
-    .join("\n");
+    `[chunk ${chunkIndex + 1}/${totalChunks}]`,
+  ].filter(Boolean).join("\n");
 
   return {
     sourceType: SEARCH_DOCUMENT_SOURCE_TYPES.PKM_NOTE,
     sourceId: note.id,
     projectId: note.projectId,
-    title,
-    content,
+    title: note.title.trim(),
+    content: `${header}\n${content}`,
     url: `/pkm/notes/${note.id}`,
     metadata: {
       projectId: note.project?.id,
@@ -339,8 +350,37 @@ export async function buildSearchablePkmNoteDocument(
       noteTags: note.tags,
       noteIsPublic: note.isPublic,
       author: authorName,
+      chunkIndex,
+      totalChunks,
     },
   };
+}
+
+export async function buildSearchablePkmNoteChunks(
+  note: SearchDocumentPkmNoteRecord,
+  attachmentTexts: Map<string, string> = new Map(),
+): Promise<SearchableRecord[]> {
+  const attachments = normalizePkmAttachments(note.attachments);
+
+  const rawChunks: string[] = [];
+
+  if (note.content) {
+    const cleaned = cleanMarkdownForEmbedding(note.content);
+    if (cleaned) rawChunks.push(...splitIntoChunks(cleaned));
+  }
+
+  for (const attachment of attachments) {
+    const text = attachmentTexts.get(attachment.name);
+    if (!text) continue;
+    const cleaned = cleanExtractedTextForEmbedding(text);
+    if (!cleaned) continue;
+    rawChunks.push(...splitIntoChunks(cleaned));
+  }
+
+  const totalChunks = rawChunks.length;
+  return rawChunks.map((content, idx) =>
+    buildSearchablePkmNoteDocumentContent(note, content, idx, totalChunks),
+  );
 }
 
 function buildSearchDocumentSourceType(sourceType: SearchableRecord["sourceType"]): PrismaSearchDocumentSourceType {
@@ -431,17 +471,23 @@ export async function extractAttachmentTexts(
   return map;
 }
 
-export async function upsertSearchDocument(record: SearchableRecord) {
+export async function upsertSearchDocument(
+  record: SearchableRecord,
+  chunkIndex = 0,
+  skipEmbedding = false,
+) {
+  const sourceType = buildSearchDocumentSourceType(record.sourceType);
+
   const embeddingInput = buildEmbeddingInput(record.title, record.content);
   const embeddingHash = buildEmbeddingHash(embeddingInput);
   const metadata = buildMetadataWithEmbeddingHash(record, embeddingHash);
-  const sourceType = buildSearchDocumentSourceType(record.sourceType);
 
   const document = await prisma.searchDocument.upsert({
     where: {
-      sourceType_sourceId: {
+      sourceType_sourceId_chunkIndex: {
         sourceType,
         sourceId: record.sourceId,
+        chunkIndex,
       },
     },
     update: {
@@ -454,6 +500,7 @@ export async function upsertSearchDocument(record: SearchableRecord) {
     create: {
       sourceType,
       sourceId: record.sourceId,
+      chunkIndex,
       projectId: record.projectId ?? null,
       title: record.title,
       content: record.content,
@@ -467,6 +514,8 @@ export async function upsertSearchDocument(record: SearchableRecord) {
       metadata: true,
     },
   });
+
+  if (skipEmbedding) return document;
 
   try {
     const state = await getSearchDocumentEmbeddingState(document.id);
@@ -569,22 +618,35 @@ export async function syncPkmNoteSearchDocument(noteId: string) {
   const attachments = normalizePkmAttachments(note.attachments);
   const attachmentTexts = await extractAttachmentTexts(attachments);
 
-  const record = await buildSearchablePkmNoteDocument({ ...note, attachments }, attachmentTexts);
+  await prisma.searchDocument.deleteMany({
+    where: {
+      sourceType: buildSearchDocumentSourceType(SEARCH_DOCUMENT_SOURCE_TYPES.PKM_NOTE),
+      sourceId: noteId,
+    },
+  });
+
+  const chunks = await buildSearchablePkmNoteChunks({ ...note, attachments }, attachmentTexts);
+
+  if (chunks.length === 0) return [];
+
+  const savedChunks = await Promise.all(
+    chunks.map((chunk, idx) => upsertSearchDocument(chunk, idx, true)),
+  );
+
   try {
-    return await upsertSearchDocument(record);
+    const embeddings = await fetchEmbeddingsBatch(savedChunks.map((c) => c.content));
+    await Promise.all(
+      savedChunks.map(async (c, i) => {
+        await updateSearchDocumentEmbedding(c.id, embeddings[i]);
+      }),
+    );
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error(`[search:syncNote] embedding failed for note ${noteId} (${note.title}): ${msg}`);
-    // content 已写入 DB，embedding 失败时降级：只靠 keyword 搜索，vector 部分为空
-    // 重新查一次返回已保存的 document
-    const saved = await prisma.searchDocument.findFirst({
-      where: {
-        sourceType: buildSearchDocumentSourceType(SEARCH_DOCUMENT_SOURCE_TYPES.PKM_NOTE),
-        sourceId: noteId,
-      },
-    });
-    return saved;
+    console.error(
+      `[search:syncNote] embedding failed for note ${noteId} (${note.title}): ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
+
+  return savedChunks;
 }
 
 export async function backfillSearchDocuments() {
@@ -625,13 +687,7 @@ export async function backfillSearchDocuments() {
     commits.map((commit) => upsertSearchDocument(buildSearchableCommitDocument(commit))),
   );
   const noteResults = await Promise.allSettled(
-    notes.map(async (note) => {
-      const attachments = normalizePkmAttachments(note.attachments);
-      const attachmentTexts = await extractAttachmentTexts(attachments);
-      return upsertSearchDocument(
-        await buildSearchablePkmNoteDocument({ ...note, attachments }, attachmentTexts),
-      );
-    }),
+    notes.map((note) => syncPkmNoteSearchDocument(note.id)),
   );
 
   const errors = [
@@ -668,10 +724,18 @@ async function searchKeywordCandidates(options: {
       project: { select: { id: true, name: true } },
     },
     orderBy: { updatedAt: "desc" },
-    take: options.limit,
+    take: options.limit * 10,
   });
 
-  return documents as SearchDocumentRow[];
+  const grouped = new Map<string, SearchDocumentRow>();
+  for (const doc of documents as SearchDocumentRow[]) {
+    const existing = grouped.get(doc.sourceId);
+    if (!existing || doc.content.length > existing.content.length) {
+      grouped.set(doc.sourceId, doc);
+    }
+  }
+
+  return Array.from(grouped.values()).slice(0, options.limit);
 }
 
 async function searchVectorCandidates(options: {
@@ -702,7 +766,15 @@ async function searchVectorCandidates(options: {
     LIMIT ${options.limit}
   `);
 
-  return rows;
+  const grouped = new Map<string, VectorSearchRow>();
+  for (const row of rows) {
+    const existing = grouped.get(row.sourceId);
+    if (!existing || row.distance < existing.distance) {
+      grouped.set(row.sourceId, row);
+    }
+  }
+
+  return Array.from(grouped.values()).slice(0, options.limit);
 }
 
 function normalizeSemanticScore(distance: number) {
@@ -756,6 +828,7 @@ function mergeCandidates(options: {
   const merged = new Map<string, RankedCandidate>();
 
   for (const document of options.keywordDocuments) {
+    const key = `${document.sourceType}:${document.sourceId}`;
     const keywordScore = rankDocument(document.title, document.content, options.terms);
     if (keywordScore <= 0 && !hasDirectQueryMatch(document.title, document.content, options.query)) {
       continue;
@@ -770,12 +843,14 @@ function mergeCandidates(options: {
 
     if (!candidate) continue;
     if (!canAccessSearchResult(candidate, options.viewerUserId)) continue;
-    merged.set(candidate.id, candidate);
+    merged.set(key, candidate);
   }
 
   for (const document of options.vectorDocuments) {
+    const key = `${document.sourceType}:${document.sourceId}`;
     const semanticScore = normalizeSemanticScore(document.distance);
-    if (!merged.has(document.id)) {
+
+    if (!merged.has(key)) {
       const keywordScore = rankDocument(document.title, document.content, options.terms);
       const candidate = toRankedCandidate({
         document: {
@@ -798,13 +873,13 @@ function mergeCandidates(options: {
 
       if (!candidate) continue;
       if (!canAccessSearchResult(candidate, options.viewerUserId)) continue;
-      merged.set(candidate.id, candidate);
+      merged.set(key, candidate);
     } else {
-      const existing = merged.get(document.id)!;
+      const existing = merged.get(key)!;
       const directMatchBoost = hasDirectQueryMatch(document.title, document.content, options.query) ? 2 : 0;
       const boostedScore = existing.keywordScore + semanticScore * 10 + directMatchBoost;
       if (boostedScore > existing.score) {
-        merged.set(document.id, {
+        merged.set(key, {
           ...existing,
           semanticScore,
           score: boostedScore,

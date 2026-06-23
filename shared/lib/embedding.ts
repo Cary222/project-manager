@@ -94,6 +94,19 @@ export async function fetchEmbedding(text: string) {
   }
 }
 
+export async function fetchEmbeddingsBatch(texts: string[]): Promise<number[][]> {
+  const base = getEmbeddingApiUrl();
+
+  const resp = await fetch(`${base}/embed_batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ texts }),
+  });
+  if (!resp.ok) throw new Error(`embed_batch failed: ${resp.status}`);
+  const { embeddings } = (await resp.json()) as { embeddings: number[][] };
+  return embeddings;
+}
+
 export function buildEmbeddingInput(title: string, content: string) {
   return normalizeEmbeddingText(`${title}\n${content}`);
 }

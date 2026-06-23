@@ -159,18 +159,19 @@ enum SearchDocumentSourceType {
 model SearchDocument {
   id          String                   @id @default(cuid())
   sourceType  SearchDocumentSourceType
-  sourceId     String
-  projectId    String?
-  title        String
-  content      String
-  url          String
-  metadata     Json?
-  embedding    Unsupported("public.vector")?
-  createdAt    DateTime                @default(now())
-  updatedAt    DateTime                @updatedAt
-  project      Project?                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sourceId    String
+  chunkIndex  Int                      @default(0)
+  projectId   String?
+  title       String
+  content     String
+  url         String
+  metadata    Json?
+  embedding   Unsupported("public.vector")?
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  project     Project?                @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  @@unique([sourceType, sourceId])
+  @@unique([sourceType, sourceId, chunkIndex])
   @@index([sourceType, updatedAt(sort: Desc)])
   @@index([projectId, updatedAt(sort: Desc)])
   @@schema("pm")

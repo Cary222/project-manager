@@ -27,6 +27,8 @@ export type SearchDocumentMetadata = {
   noteUserName?: string;
   noteTags?: string[];
   noteIsPublic?: boolean;
+  chunkIndex?: number;
+  totalChunks?: number;
 };
 
 export type SearchResultItem = {

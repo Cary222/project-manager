@@ -1,5 +1,5 @@
-import { backfillSearchIndex } from "../lib/git-sync/scan";
-import { prisma } from "../shared/db/client";
+import { backfillSearchIndex } from "../../lib/git-sync/scan";
+import { prisma } from "../../shared/db/client";
 
 async function main() {
   const result = await backfillSearchIndex();
