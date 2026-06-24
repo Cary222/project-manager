@@ -13,7 +13,7 @@ export type NoteDetailProps = {
   note: {
     id: string;
     title: string;
-    project: { id: string | null; name: string | null };
+    project: { id: string; name: string } | null;
   };
 };
 
