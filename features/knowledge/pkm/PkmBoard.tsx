@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
 import { MarkdownContent } from "@/shared/ui/MarkdownContent";
+import { AttachmentItem, type PreviewableFile } from "@/shared/ui/AttachmentItem";
+import { DocumentPreviewModal } from "@/shared/ui/DocumentPreviewModal";
 import { IconPkm, IconPlus, IconTag, IconTrash } from "@/shared/ui/icons";
 import {
   composeImageMarkdown,
@@ -12,6 +14,7 @@ import {
   PKM_ATTACHMENT_MAX_SIZE,
   type PkmAttachment,
 } from "@/shared/lib/pkm";
+import { fileToDataUrl, formatBytes } from "@/shared/lib/upload";
 
 type ProjectOption = {
   id: string;
@@ -91,12 +94,6 @@ function summarizeContent(content: string) {
     .trim();
 }
 
-function formatBytes(size: number) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 function isImageFile(file: File) {
   return file.type.startsWith("image/");
 }
@@ -123,6 +120,7 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [flash, setFlash] = useState<FlashState>(null);
+  const [previewFile, setPreviewFile] = useState<PreviewableFile | null>(null);
 
   useEffect(() => {
     if (initialNoteId && notes.some((note) => note.id === initialNoteId)) {
@@ -193,13 +191,10 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
   }
 
   function insertImage(file: File) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const src = String(reader.result ?? "");
+    fileToDataUrl(file).then((src) => {
       if (!src) return;
       setContentImages((prev) => [...prev, { src, name: file.name }]);
-    };
-    reader.readAsDataURL(file);
+    });
   }
 
   function removeImage(index: number) {
@@ -221,9 +216,7 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = String(reader.result ?? "");
+    fileToDataUrl(file).then((url) => {
       if (!url) return;
 
       setAttachments((prev) =>
@@ -237,8 +230,7 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
           },
         ])
       );
-    };
-    reader.readAsDataURL(file);
+    });
   }
 
   function removeAttachment(index: number) {
@@ -598,17 +590,37 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
                           key={`${attachment.name}-${index}`}
                           className="flex items-center justify-between gap-3 rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm"
                         >
-                          <div className="min-w-0">
-                            <p className="truncate font-medium text-ink-700">{attachment.name}</p>
-                            <p className="text-xs text-ink-400">{attachment.mimeType} · {formatBytes(attachment.size)}</p>
+                          <div className="flex min-w-0 items-center gap-2 flex-1">
+                            <span className="shrink-0 rounded bg-ink-100 px-1.5 py-0.5 text-xs font-medium text-ink-500">
+                              {attachment.name.split(".").pop()?.toUpperCase() ?? "文件"}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate font-medium text-ink-700">{attachment.name}</p>
+                              <p className="text-xs text-ink-400">{attachment.mimeType} · {formatBytes(attachment.size)}</p>
+                            </div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => removeAttachment(index)}
-                            className="rounded-lg border border-ink-200 px-2 py-1 text-xs text-danger hover:bg-rose-50"
-                          >
-                            删除
-                          </button>
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            {(() => {
+                              const p = ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
+                              const canPreview = p.includes(attachment.mimeType) || attachment.mimeType.startsWith("image/");
+                              return canPreview ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewFile({ name: attachment.name, url: attachment.url, mimeType: attachment.mimeType })}
+                                  className="rounded-lg border border-ink-200 bg-white px-2.5 py-1 text-xs text-ink-600 hover:border-brand-300 hover:text-brand-700"
+                                >
+                                  预览
+                                </button>
+                              ) : null;
+                            })()}
+                            <button
+                              type="button"
+                              onClick={() => removeAttachment(index)}
+                              className="rounded-lg border border-ink-200 px-2 py-1 text-xs text-danger hover:bg-rose-50"
+                            >
+                              删除
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -750,20 +762,11 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
                     <h4 className="text-sm font-medium text-ink-800">附件</h4>
                     <div className="mt-3 space-y-2">
                       {normalizePkmAttachments(selectedNote.attachments).map((attachment, index) => (
-                        <a
+                        <AttachmentItem
                           key={`${attachment.name}-${index}`}
-                          href={attachment.url}
-                          download={attachment.name}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center justify-between gap-3 rounded-lg border border-ink-200 px-3 py-2 text-sm hover:border-brand-200 hover:bg-brand-50/40"
-                        >
-                          <div className="min-w-0">
-                            <p className="truncate font-medium text-ink-700">{attachment.name}</p>
-                            <p className="text-xs text-ink-400">{attachment.mimeType} · {formatBytes(attachment.size)}</p>
-                          </div>
-                          <span className="shrink-0 text-xs text-brand-600">下载</span>
-                        </a>
+                          attachment={attachment}
+                          onPreview={setPreviewFile}
+                        />
                       ))}
                     </div>
                   </div>
@@ -772,6 +775,9 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
             ) : null}
           </div>
         </div>
+        {previewFile && (
+          <DocumentPreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+        )}
       </div>
     </>
   );

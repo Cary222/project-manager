@@ -6,6 +6,7 @@ import { IconArrowRight, IconKnowledge, IconTag } from "@/shared/ui/icons";
 import { prisma } from "@/shared/db/client";
 import { normalizePkmAttachments } from "@/shared/lib/pkm";
 import { requireSession } from "@/shared/lib/permissions";
+import { NoteAttachments } from "@/shared/ui/NoteAttachments";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -74,7 +75,7 @@ export default async function PkmNoteDetailPage({ params }: Params) {
 
           {note.tags.length > 0 ? (
             <div className="mt-4 flex flex-wrap gap-2">
-              {note.tags.map((tag) => (
+              {note.tags.map((tag: string) => (
                 <span key={tag} className="inline-flex items-center gap-1 rounded-full bg-ink-100 px-2.5 py-1 text-xs text-ink-600">
                   <IconTag className="h-3 w-3 text-ink-400" />
                   {tag}
@@ -87,29 +88,7 @@ export default async function PkmNoteDetailPage({ params }: Params) {
             <MarkdownContent content={note.content} collapsible collapsedHeight={360} />
           </div>
 
-          {attachments.length > 0 ? (
-            <div className="mt-6 border-t border-ink-100 pt-4">
-              <h2 className="text-sm font-medium text-ink-800">附件</h2>
-              <div className="mt-3 space-y-2">
-                {attachments.map((attachment, index) => (
-                  <a
-                    key={`${attachment.name}-${index}`}
-                    href={attachment.url}
-                    download={attachment.name}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center justify-between gap-3 rounded-lg border border-ink-200 px-3 py-2 text-sm hover:border-brand-200 hover:bg-brand-50/40"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate font-medium text-ink-700">{attachment.name}</p>
-                      <p className="text-xs text-ink-400">{attachment.mimeType} · {attachment.size} B</p>
-                    </div>
-                    <span className="shrink-0 text-xs text-brand-600">下载</span>
-                  </a>
-                ))}
-              </div>
-            </div>
-          ) : null}
+          <NoteAttachments attachments={attachments} />
         </section>
 
         <section className="flex items-center gap-2 rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3 text-sm text-ink-600">

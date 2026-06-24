@@ -14,6 +14,10 @@ export async function GET(
     const project = await prisma.project.findUnique({
       where: { id },
       include: {
+        owner: { select: { id: true, name: true, email: true } },
+        members: {
+          include: { user: { select: { id: true, name: true, email: true } } },
+        },
         responsibilities: {
           orderBy: { kind: "asc" },
           include: {
@@ -64,6 +68,51 @@ export async function GET(
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
     return NextResponse.json({ error: message }, { status: 401 });
+  }
+}
+
+export async function PATCH(
+  request: Request,
+  context: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await requireRoot();
+    const { id } = await context.params;
+    const body = (await request.json()) as {
+      name?: string;
+      description?: string;
+      status?: string;
+      ownerId?: string | null;
+    };
+
+    const project = await prisma.project.findUnique({ where: { id } });
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
+    const updated = await prisma.project.update({
+      where: { id },
+      data: {
+        ...(body.name !== undefined && { name: body.name }),
+        ...(body.description !== undefined && { description: body.description ?? null }),
+        ...(body.status !== undefined && { status: body.status }),
+        ...(body.ownerId !== undefined && { ownerId: body.ownerId }),
+      },
+    });
+
+    await createModerationLog({
+      action: ModerationAction.CREATE_PROJECT,
+      targetId: id,
+      targetType: "Project",
+      actorId: session.user.id,
+      reason: `更新项目: ${updated.name}`,
+    });
+
+    return NextResponse.json({ project: updated });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown";
+    const status = message === "FORBIDDEN" ? 403 : 401;
+    return NextResponse.json({ error: message }, { status });
   }
 }
 

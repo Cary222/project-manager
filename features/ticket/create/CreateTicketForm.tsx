@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { AssigneePicker } from "@/shared/ui/AssigneePicker";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
 import { composeImageMarkdown, extractInlineImages } from "@/shared/lib/pkm";
+import { fileToDataUrl } from "@/shared/lib/upload";
 import {
   createTicketAction,
   createBugTicketAction,
@@ -205,10 +206,7 @@ export function CreateTicketForm({
       };
       img.onerror = () => {
         URL.revokeObjectURL(url);
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result ?? ""));
-        reader.onerror = () => reject(reader.error ?? new Error("read failed"));
-        reader.readAsDataURL(file);
+        fileToDataUrl(file).then(resolve).catch(reject);
       };
       img.src = url;
     });

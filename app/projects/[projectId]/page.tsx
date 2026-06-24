@@ -23,6 +23,23 @@ export default async function ProjectDetailPage({
       name: true,
       description: true,
       status: true,
+      createdAt: true,
+      updatedAt: true,
+      ownerId: true,
+      owner: { select: { id: true, name: true, email: true } },
+      members: {
+        include: { user: { select: { id: true, name: true, email: true } } },
+      },
+      pkmNotes: {
+        orderBy: { updatedAt: "desc" },
+        select: {
+          id: true,
+          title: true,
+          updatedAt: true,
+          attachments: true,
+          user: { select: { id: true, name: true } },
+        },
+      },
       responsibilities: {
         orderBy: { kind: "asc" },
         include: {

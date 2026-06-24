@@ -9,6 +9,7 @@ import { MarkdownContent } from "@/shared/ui/MarkdownContent";
 import { AssigneePicker } from "@/shared/ui/AssigneePicker";
 import { formatAssigneeList } from "@/entities/ticket/lib/ticket-assignees";
 import { composeImageMarkdown, extractInlineImages } from "@/shared/lib/pkm";
+import { fileToDataUrl } from "@/shared/lib/upload";
 import { IconArrowLeft, IconClock, IconEdit } from "@/shared/ui/icons";
 import { fetchJson } from "@/shared/api/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/shared/api/swr-config";
@@ -313,12 +314,9 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   }
 
   function insertDescriptionImage(file: File) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const src = String(reader.result ?? "");
+    fileToDataUrl(file).then((src) => {
       if (src) setEditDescriptionImages((prev) => [...prev, { src, name: file.name }]);
-    };
-    reader.readAsDataURL(file);
+    });
   }
 
   function removeDescriptionImage(index: number) {

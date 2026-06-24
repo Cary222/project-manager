@@ -90,7 +90,24 @@ model User {
   bugBindings        BugProgramBinding[]
   pkmNotes           PkmNote[]
   responsibilities   UserResponsibility[]
+  userOnProjects     UserOnProject[]
+  ownedProjects      Project[]
 
+  @@schema("pm")
+}
+
+model UserOnProject {
+  id        String   @id @default(cuid())
+  userId    String
+  projectId String
+  role      String   @default("MEMBER")
+  joinedAt  DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, projectId])
+  @@index([projectId])
   @@schema("pm")
 }
 
@@ -218,7 +235,10 @@ model Project {
   status           String           @default("ACTIVE")
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
-  responsibilities Responsibility[]
+  ownerId          String?
+  owner            User?            @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  members          UserOnProject[]
+  responsibilities  Responsibility[]
   tickets          Ticket[]
   searchDocuments  SearchDocument[]
   pkmNotes         PkmNote[]

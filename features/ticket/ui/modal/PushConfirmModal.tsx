@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AssigneePicker } from "@/shared/ui/AssigneePicker";
 import { composeImageMarkdown } from "@/shared/lib/pkm";
+import { fileToDataUrl } from "@/shared/lib/upload";
 
 export type PushConfirmModalProps = {
   mode: "program" | "bug";
@@ -65,13 +66,9 @@ export function PushConfirmModal({
   const availableModules = mode === "bug" ? programModules : responsibility.modules;
 
   function insertImage(file: File) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const src = String(reader.result ?? "");
-      if (!src) return;
-      setDescriptionImages((prev) => [...prev, { src, name: file.name }]);
-    };
-    reader.readAsDataURL(file);
+    fileToDataUrl(file).then((src) => {
+      if (src) setDescriptionImages((prev) => [...prev, { src, name: file.name }]);
+    });
   }
 
   function removeImage(index: number) {

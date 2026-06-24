@@ -6,6 +6,7 @@
 
 - [架构说明](docs/ARCHITECTURE.md) — 领域模型、路由、API、权限
 - [运维说明](docs/OPERATIONS.md) — 部署、重启、局域网、环境变量
+- [文档附件预览](docs/DOCUMENT_PREVIEW.md) — PKM 笔记附件上传 / PDF · Word · 图片内嵌预览
 
 ## 技术栈
 

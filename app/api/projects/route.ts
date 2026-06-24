@@ -17,6 +17,9 @@ export async function GET() {
         name: true,
         description: true,
         status: true,
+        ownerId: true,
+        createdAt: true,
+        updatedAt: true,
       },
     });
     return NextResponse.json(
@@ -47,6 +50,15 @@ export async function POST(request: Request) {
         data: {
           name,
           description: body.description?.trim() || null,
+          ownerId: session.user.id,
+        },
+      });
+
+      await tx.userOnProject.create({
+        data: {
+          userId: session.user.id,
+          projectId: created.id,
+          role: "OWNER",
         },
       });
 

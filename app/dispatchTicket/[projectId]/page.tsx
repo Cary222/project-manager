@@ -10,9 +10,7 @@ const DispatchProjectDetail = dynamic(
   () => import("@/features/dispatch/ui/DispatchProjectDetail").then((mod) => mod.DispatchProjectDetail),
   {
     loading: () => (
-      <AppShell header={<DispatchProjectDetailHeaderSkeleton />}>
         <DispatchProjectDetailLoading />
-      </AppShell>
     ),
   }
 );
