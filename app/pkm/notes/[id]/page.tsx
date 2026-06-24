@@ -7,6 +7,15 @@ import { prisma } from "@/shared/db/client";
 import { normalizePkmAttachments } from "@/shared/lib/pkm";
 import { requireSession } from "@/shared/lib/permissions";
 import { NoteAttachments } from "@/shared/ui/NoteAttachments";
+import { NoteDetailRecord } from "./NoteDetailRecord";
+
+export type NoteDetailProps = {
+  note: {
+    id: string;
+    title: string;
+    project: { id: string | null; name: string | null };
+  };
+};
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -60,6 +69,7 @@ export default async function PkmNoteDetailPage({ params }: Params) {
         </div>
       }
     >
+      <NoteDetailRecord note={note} />
       <div className="space-y-5 pm-fade-in">
         <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
           <div className="flex flex-wrap items-center gap-2 text-xs text-ink-400">

@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { IconSearch, IconSettings, IconTask, IconTeam, IconEdit, IconMenu, IconRepo, IconBook } from "@/shared/ui/icons";
 import { BackLink, SimplePageHeader, HeaderSkeleton } from "@/shared/ui/headers";
 import { normalizePkmAttachments, type PkmAttachment } from "@/shared/lib/pkm";
@@ -12,6 +13,7 @@ import { uploadAttachmentAsNote } from "@/shared/lib/upload";
 import { FileUploader } from "@/shared/ui/FileUploader";
 import { DispatchProjectDetail } from "@/features/dispatch/ui/DispatchProjectDetail";
 import { TaskStatsCards, type TaskStats } from "@/shared/ui/TaskStatsCards";
+import { useRecentVisits } from "@/shared/lib/visits-context";
 import {
   KIND_LABEL,
   type TicketStatus,
@@ -530,9 +532,26 @@ export function PageHeaderSkeleton() {
 // ---- Main component ----
 
 export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
-  const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const { record } = useRecentVisits();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab") as TabKey | null;
+
+  const validTabs: TabKey[] = ["overview", "tasks", "dispatch", "code", "docs", "members", "settings"];
+  const [activeTab, setActiveTab] = useState<TabKey>(
+    tabParam && validTabs.includes(tabParam) ? tabParam : "overview"
+  );
 
   const taskCounts = useMemo(() => computeTaskCounts({ project }), [project]);
+
+  const handleTabChange = (tab: TabKey) => {
+    setActiveTab(tab);
+    record({ projectId: project.id, projectName: project.name, tabKey: tab, tabLabel: TABS.find((t) => t.key === tab)?.label ?? tab });
+  };
+
+  useEffect(() => {
+    const tabLabel = TABS.find((t) => t.key === activeTab)?.label ?? activeTab;
+    record({ projectId: project.id, projectName: project.name, tabKey: activeTab, tabLabel });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tickets = useMemo<ProjectTicket[]>(() => {
     return (
@@ -631,7 +650,7 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
         <div className="border-t border-ink-100 px-5 pb-4">
           <TabNav
             active={activeTab}
-            onChange={setActiveTab}
+            onChange={handleTabChange}
             taskCount={taskCounts.total}
           />
         </div>

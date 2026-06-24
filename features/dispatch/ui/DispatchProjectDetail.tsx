@@ -14,6 +14,7 @@ import { KIND_LABEL, Module } from "@/entities/ticket/model/types";
 import { getMyResponsibilitiesAction } from "@/features/admin/admin";
 import { ResponsibilityKind } from "@prisma/client";
 import { TaskStatsCards } from "@/shared/ui/TaskStatsCards";
+import { useRecentVisits } from "@/shared/lib/visits-context";
 import {
   type Ticket,
   type MyTicket,
@@ -113,6 +114,18 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
   );
 
   const project = projectData?.project ?? null;
+  const { record } = useRecentVisits();
+
+  useEffect(() => {
+    if (project) {
+      record({
+        projectId: project.id,
+        projectName: project.name,
+        tabKey: "dispatch",
+        tabLabel: "派单",
+      });
+    }
+  }, [project, record]);
 
   const [selectedResponsibilityId, setSelectedResponsibilityId] = useState("");
   const [showCreate, setShowCreate] = useState(false);

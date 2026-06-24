@@ -22,12 +22,10 @@ import {
   IconPkm,
   IconProject,
   IconReport,
-  IconRepo,
   IconSearch,
   IconSettings,
   IconTask,
   IconTeam,
-  IconTicket,
 } from "@/shared/ui/icons";
 
 type NavItem = {
@@ -45,24 +43,12 @@ const NAV_ITEMS: NavItem[] = [
     icon: IconProject,
     match: (p) => p.startsWith("/projects"),
   },
-  {
-    href: "/dispatchTicket",
-    label: "派单",
-    icon: IconTicket,
-    match: (p) => p.startsWith("/dispatchTicket"),
-  },
   { href: "/pkm", label: "PKM", icon: IconPkm, match: (p) => p.startsWith("/pkm") },
   {
     href: "/knowledge",
     label: "知识库",
     icon: IconKnowledge,
     match: (p) => p.startsWith("/knowledge"),
-  },
-  {
-    href: "/repos",
-    label: "代码仓库",
-    icon: IconRepo,
-    match: (p) => p.startsWith("/repos"),
   },
   { href: "/team", label: "团队", icon: IconTeam, match: (p) => p.startsWith("/team") },
   {

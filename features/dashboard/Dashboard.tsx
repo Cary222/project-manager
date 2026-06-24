@@ -2,18 +2,21 @@
 
 import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { AppShell } from "@/shared/ui/AppShell";
 import {
   IconClock,
-  IconPlus,
   IconProject,
-  IconSearch,
   IconTask,
+  IconTrend,
 } from "@/shared/ui/icons";
 import { fetchJson } from "@/shared/api/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/shared/api/swr-config";
+import {
+  useRecentVisits,
+  useFrequentVisits,
+} from "@/shared/lib/visits-context";
 import {
   type TicketStatus,
   type MyTicket,
@@ -99,6 +102,9 @@ function StatCard({
 
 export function Dashboard() {
   const { data: session } = useSession();
+  const { visits } = useRecentVisits();
+  const { frequent } = useFrequentVisits();
+  const [visitTab, setVisitTab] = useState<"recent" | "frequent">("recent");
   const {
     data: projectsData,
     error: projectsError,
@@ -172,13 +178,6 @@ export function Dashboard() {
     },
   ];
 
-  const quickActions = [
-    { label: "新建项目", href: "/projects", icon: <IconPlus className="h-5 w-5" /> },
-    { label: "我的任务", href: "/tasks", icon: <IconTask className="h-5 w-5" /> },
-    { label: "写笔记", href: "/pkm", icon: <IconProject className="h-5 w-5" /> },
-    { label: "全局搜索", href: "/knowledge", icon: <IconSearch className="h-5 w-5" /> },
-  ];
-
   return (
     <AppShell
       header={
@@ -192,27 +191,90 @@ export function Dashboard() {
         <section className="grid gap-4 lg:grid-cols-3">
           <div className="rounded-xl border border-ink-200 bg-gradient-to-br from-brand-600 to-brand-700 p-6 text-white shadow-base lg:col-span-2">
             <p className="text-2xl font-semibold">
-              {greeting()}，{session?.user?.name || "同学"} 👋
+              {greeting()}，{session?.user?.name || "同学"}
             </p>
             <p className="mt-2 text-sm text-brand-100">
               你有 <span className="font-semibold text-white">{ticketCounts.pending}</span> 个任务待推进，
               当前负责 <span className="font-semibold text-white">{projectCounts.projects}</span> 个项目。
             </p>
           </div>
+
           <div className="rounded-xl border border-ink-200 bg-white p-4 shadow-soft">
-            <p className="mb-3 text-sm font-medium text-ink-500">快捷操作</p>
-            <div className="grid grid-cols-2 gap-2">
-              {quickActions.map((a) => (
-                <Link
-                  key={a.label}
-                  href={a.href}
-                  className="flex flex-col items-center gap-1.5 rounded-lg border border-ink-100 bg-ink-100/60 px-3 py-3 text-center text-xs font-medium text-ink-700 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700"
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex gap-4">
+                <button
+                  onClick={() => setVisitTab("recent")}
+                  className={`flex items-center gap-1.5 text-sm font-medium transition ${
+                    visitTab === "recent"
+                      ? "text-brand-600"
+                      : "text-ink-400 hover:text-ink-600"
+                  }`}
                 >
-                  <span className="text-brand-600">{a.icon}</span>
-                  {a.label}
-                </Link>
-              ))}
+                  <IconClock className="h-4 w-4" />
+                  最近
+                </button>
+                <button
+                  onClick={() => setVisitTab("frequent")}
+                  className={`flex items-center gap-1.5 text-sm font-medium transition ${
+                    visitTab === "frequent"
+                      ? "text-brand-600"
+                      : "text-ink-400 hover:text-ink-600"
+                  }`}
+                >
+                  <IconTrend className="h-4 w-4" />
+                  经常
+                </button>
+              </div>
             </div>
+            {visitTab === "recent" ? (
+              visits.length === 0 ? (
+                <p className="text-xs text-ink-400">暂无访问记录</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {visits.slice(0, 4).map((v) => (
+                    <li key={`${v.projectId}-${v.tabKey}-${v.ticketId ?? ""}`}>
+                      <Link
+                        href={v.ticketId ? `/tickets/${v.ticketId}` : `/projects/${v.projectId}?tab=${v.tabKey}`}
+                        className="flex items-center gap-2 rounded-lg border border-ink-100 bg-ink-50/40 px-2.5 py-2 text-xs transition hover:border-brand-200 hover:bg-brand-50"
+                      >
+                        <span className="truncate min-w-0 flex-1 font-medium text-ink-700">
+                          {v.ticketId ? v.ticketTitle ?? v.projectName : v.projectName}
+                        </span>
+                        <span className="shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] text-brand-600">
+                          {v.ticketId ? "单子" : v.tabLabel}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )
+            ) : frequent.length === 0 ? (
+              <p className="text-xs text-ink-400">暂无经常访问的页面</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {frequent.slice(0, 4).map((f, i) => (
+                  <li key={`${f.projectId}-${f.tabKey}-${f.ticketId ?? ""}`}>
+                    <Link
+                      href={f.ticketId ? `/tickets/${f.ticketId}` : `/projects/${f.projectId}?tab=${f.tabKey}`}
+                      className="flex items-center gap-2 rounded-lg border border-ink-100 bg-ink-50/40 px-2.5 py-2 text-xs transition hover:border-brand-200 hover:bg-brand-50"
+                    >
+                      <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-brand-50 text-[10px] font-semibold text-brand-600">
+                        {i + 1}
+                      </span>
+                      <span className="truncate min-w-0 flex-1 font-medium text-ink-700">
+                        {f.ticketId ? f.ticketTitle ?? f.projectName : f.projectName}
+                      </span>
+                      <span className="shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] text-brand-600">
+                        {f.ticketId ? "单子" : f.tabLabel}
+                      </span>
+                      <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-600">
+                        {f.count}次
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </section>
 
@@ -292,24 +354,39 @@ export function Dashboard() {
                     "bg-purple",
                     "bg-danger",
                   ][i % 5];
+                  const projectVisits = visits.filter((v) => v.projectId === p.id);
                   return (
                     <li key={p.id}>
                       <Link
                         href={`/projects/${p.id}`}
-                        className="flex items-center gap-3 rounded-lg border border-ink-100 px-3 py-3 transition hover:border-brand-200 hover:bg-brand-50/40"
+                        className="block rounded-lg border border-ink-100 px-3 py-3 transition hover:border-brand-200 hover:bg-brand-50/40"
                       >
-                        <span className={`h-2.5 w-2.5 rounded-full ${tone}`} />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium">{p.name}</p>
-                          {p.description ? (
-                            <p className="truncate text-xs text-ink-400">
-                              {p.description}
-                            </p>
-                          ) : null}
+                        <div className="flex items-center gap-3">
+                          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${tone}`} />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium">{p.name}</p>
+                            {p.description ? (
+                              <p className="truncate text-xs text-ink-400">
+                                {p.description}
+                              </p>
+                            ) : null}
+                          </div>
+                          <span className="shrink-0 rounded-full bg-ink-100 px-2.5 py-0.5 text-xs text-ink-500">
+                            {p.status === "ACTIVE" ? "进行中" : p.status}
+                          </span>
                         </div>
-                        <span className="rounded-full bg-ink-100 px-2.5 py-0.5 text-xs text-ink-500">
-                          {p.status === "ACTIVE" ? "进行中" : p.status}
-                        </span>
+                        {projectVisits.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {projectVisits.map((v) => (
+                              <span
+                                key={`${v.projectId}-${v.tabKey}`}
+                                className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-medium text-brand-600"
+                              >
+                                {v.tabLabel}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </Link>
                     </li>
                   );

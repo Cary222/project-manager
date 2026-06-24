@@ -7,6 +7,7 @@ import {
   type ProjectWithStatus,
 } from "@/features/project/ui/ProjectDetail";
 import { ProjectDetail } from "@/features/project/ui/ProjectDetail";
+import { Suspense } from "react";
 
 export default async function ProjectDetailPage({
   params,
@@ -77,7 +78,9 @@ export default async function ProjectDetailPage({
 
   return (
     <AppShell header={<PageHeader projectName={project.name} />}>
-      <ProjectDetail project={project as unknown as ProjectWithStatus} />
+      <Suspense fallback={<div className="animate-pulse rounded-lg border border-ink-100 bg-white p-6 text-sm text-ink-400">加载中…</div>}>
+        <ProjectDetail project={project as unknown as ProjectWithStatus} />
+      </Suspense>
     </AppShell>
   );
 }

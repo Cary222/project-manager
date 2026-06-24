@@ -1,12 +1,14 @@
 "use client";
 
 import { default as NextDynamic } from "next/dynamic";
+import { useEffect } from "react";
 import useSWR from "swr";
 import { AppShell } from "@/shared/ui/AppShell";
 import { BackLink, SimplePageHeader, HeaderSkeleton } from "@/shared/ui/headers";
 import { TicketDetailLoading, TicketDetailHeaderSkeleton } from "@/features/ticket/ui/ticket-detail/TicketDetail";
 import { fetchJson } from "@/shared/api/fetch-json";
 import { KIND_LABEL } from "@/entities/ticket/model/types";
+import { useRecentVisits } from "@/shared/lib/visits-context";
 
 const TicketDetail = NextDynamic(
   () => import("@/features/ticket/ui/ticket-detail/TicketDetail").then((m) => m.TicketDetail),
@@ -41,6 +43,30 @@ function TicketDetailHeader({ ticketId }: { ticketId: string }) {
 }
 
 export function TicketDetailClient({ ticketId }: { ticketId: string }) {
+  const { data } = useSWR<{
+    ticket: {
+      ticketNo: number;
+      title: string;
+      project: { id: string; name: string };
+      module: { name: string };
+    };
+  }>(`/api/tickets/${ticketId}`, fetchJson);
+  const { record } = useRecentVisits();
+
+  useEffect(() => {
+    if (data?.ticket) {
+      const { ticket } = data;
+      record({
+        projectId: ticket.project.id,
+        projectName: ticket.project.name,
+        tabKey: "ticket",
+        tabLabel: `#${ticket.ticketNo}`,
+        ticketId,
+        ticketTitle: ticket.title,
+      });
+    }
+  }, [data, record, ticketId]);
+
   return (
     <AppShell header={<TicketDetailHeader ticketId={ticketId} />}>
       <TicketDetail ticketId={ticketId} />
