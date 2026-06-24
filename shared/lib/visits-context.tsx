@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 export type RecentVisit = {
   projectId: string;
@@ -8,6 +8,7 @@ export type RecentVisit = {
   tabKey: string;
   tabLabel: string;
   ticketId?: string;
+  ticketNo?: number;
   ticketTitle?: string;
   visitedAt: number;
 };
@@ -18,6 +19,7 @@ export type FrequentEntry = {
   tabKey: string;
   tabLabel: string;
   ticketId?: string;
+  ticketNo?: number;
   ticketTitle?: string;
   count: number;
   lastVisitedAt: number;
@@ -34,12 +36,16 @@ const VisitsCtx = createContext<{
   record: (v: RecordInput) => void;
 }>({ visits: [], frequent: [], record: () => {} });
 
-function loadFromStorage(): RecentVisit[] {
+function loadFromStorage(): { visits: RecentVisit[]; counts: Record<string, number> } {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as RecentVisit[]) : [];
+    if (raw) {
+      const data = JSON.parse(raw);
+      return { visits: data.visits ?? [], counts: data.counts ?? {} };
+    }
+    return { visits: [], counts: {} };
   } catch {
-    return [];
+    return { visits: [], counts: {} };
   }
 }
 
@@ -47,29 +53,30 @@ function deduplicateKey(v: RecentVisit | RecordInput): string {
   return [v.projectId, v.tabKey, v.ticketId ?? ""].join("|");
 }
 
-function buildFrequent(visits: RecentVisit[]): FrequentEntry[] {
-  const counts: Record<string, FrequentEntry> = {};
+function buildFrequent(
+  visits: RecentVisit[],
+  counts: Record<string, number>
+): FrequentEntry[] {
+  const map: Record<string, FrequentEntry> = {};
   for (const v of visits) {
     const key = deduplicateKey(v);
-    if (counts[key]) {
-      counts[key].count += 1;
-      if (v.visitedAt > counts[key].lastVisitedAt) {
-        counts[key].lastVisitedAt = v.visitedAt;
-      }
-    } else {
-      counts[key] = {
+    if (!map[key]) {
+      map[key] = {
         projectId: v.projectId,
         projectName: v.projectName,
         tabKey: v.tabKey,
         tabLabel: v.tabLabel,
         ticketId: v.ticketId,
+        ticketNo: v.ticketNo,
         ticketTitle: v.ticketTitle,
-        count: 1,
+        count: counts[key] ?? 1,
         lastVisitedAt: v.visitedAt,
       };
+    } else if (v.visitedAt > map[key].lastVisitedAt) {
+      map[key].lastVisitedAt = v.visitedAt;
     }
   }
-  return Object.values(counts).sort((a, b) => {
+  return Object.values(map).sort((a, b) => {
     if (b.count !== a.count) return b.count - a.count;
     return b.lastVisitedAt - a.lastVisitedAt;
   });
@@ -78,31 +85,48 @@ function buildFrequent(visits: RecentVisit[]): FrequentEntry[] {
 export function VisitsProvider({ children }: { children: ReactNode }) {
   const [mounted, setMounted] = useState(false);
   const [visits, setVisits] = useState<RecentVisit[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const lastRecordRef = useRef<{ key: string; time: number } | null>(null);
+  const DEBOUNCE_MS = 2000;
 
   useEffect(() => {
-    setVisits(loadFromStorage());
+    const data = loadFromStorage();
+    setVisits(data.visits);
+    setCounts(data.counts);
     setMounted(true);
   }, []);
 
-  const frequent = useMemo(() => buildFrequent(mounted ? visits : []), [visits, mounted]);
+  const frequent = useMemo(
+    () => buildFrequent(mounted ? visits : [], mounted ? counts : {}),
+    [visits, counts, mounted]
+  );
 
   useEffect(() => {
     if (!mounted) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(visits));
-  }, [visits, mounted]);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ visits, counts }));
+  }, [visits, counts, mounted]);
 
-  const record = useCallback((v: RecordInput) => {
-    const key = deduplicateKey(v);
-    setVisits((prev) => {
-      const idx = prev.findIndex((p) => deduplicateKey(p) === key);
-      if (idx >= 0) {
-        const hit = prev[idx];
-        const rest = prev.filter((_, i) => i !== idx);
-        return [{ ...hit, ...v, visitedAt: Date.now() }, ...rest];
+  const record = useCallback(
+    (v: RecordInput) => {
+      const key = deduplicateKey(v);
+      const now = Date.now();
+      if (lastRecordRef.current?.key === key && now - lastRecordRef.current.time < DEBOUNCE_MS) {
+        return;
       }
-      return [{ ...v, visitedAt: Date.now() }, ...prev].slice(0, MAX);
-    });
-  }, []);
+      lastRecordRef.current = { key, time: now };
+      setCounts((prev) => ({ ...prev, [key]: (prev[key] ?? 0) + 1 }));
+      setVisits((prev) => {
+        const idx = prev.findIndex((p) => deduplicateKey(p) === key);
+        if (idx >= 0) {
+          const hit = prev[idx];
+          const rest = prev.filter((_, i) => i !== idx);
+          return [{ ...hit, ...v, visitedAt: now }, ...rest];
+        }
+        return [{ ...v, visitedAt: now }, ...prev].slice(0, MAX);
+      });
+    },
+    []
+  );
 
   return (
     <VisitsCtx.Provider value={{ visits: mounted ? visits : [], frequent, record }}>

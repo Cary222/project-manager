@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/shared/ui/AppShell";
 import { MarkdownContent } from "@/shared/ui/MarkdownContent";
-import { IconArrowRight, IconKnowledge, IconTag } from "@/shared/ui/icons";
+import { IconArrowLeft, IconKnowledge, IconTag } from "@/shared/ui/icons";
 import { prisma } from "@/shared/db/client";
 import { normalizePkmAttachments } from "@/shared/lib/pkm";
 import { requireSession } from "@/shared/lib/permissions";
@@ -56,16 +56,13 @@ export default async function PkmNoteDetailPage({ params }: Params) {
   return (
     <AppShell
       header={
-        <div>
-          <div className="flex items-center gap-2 text-xs text-ink-400">
-            <Link href="/knowledge" className="hover:text-brand-600">
-              知识库
-            </Link>
-            <IconArrowRight className="h-3.5 w-3.5" />
-            <span>笔记详情</span>
+        <div className="flex items-center gap-3">
+          <Link href="/pkm" className="rounded-lg p-1.5 text-ink-400 hover:bg-ink-100 hover:text-ink-700" aria-label="返回 PKM 列表">
+            <IconArrowLeft className="h-5 w-5" />
+          </Link>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-base font-semibold leading-tight">{note.title}</h1>
           </div>
-          <h1 className="mt-2 text-lg font-semibold leading-tight">{note.title}</h1>
-          <p className="text-xs text-ink-400">{note.isPublic ? "公开笔记" : "私有笔记"} · {authorName}</p>
         </div>
       }
     >

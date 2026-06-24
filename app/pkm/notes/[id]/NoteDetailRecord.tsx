@@ -9,8 +9,8 @@ export function NoteDetailRecord(props: NoteDetailProps) {
 
   useEffect(() => {
     record({
-      projectId: props.note.project.id ?? "",
-      projectName: props.note.project.name ?? "无关联项目",
+      projectId: props.note.project?.id ?? "",
+      projectName: props.note.project?.name ?? "无关联项目",
       tabKey: "note",
       tabLabel: "笔记",
       ticketId: props.note.id,

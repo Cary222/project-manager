@@ -62,6 +62,7 @@ export function TicketDetailClient({ ticketId }: { ticketId: string }) {
         tabKey: "ticket",
         tabLabel: `#${ticket.ticketNo}`,
         ticketId,
+        ticketNo: ticket.ticketNo,
         ticketTitle: ticket.title,
       });
     }

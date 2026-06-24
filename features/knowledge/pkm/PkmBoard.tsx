@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
 import { MarkdownContent } from "@/shared/ui/MarkdownContent";
 import { AttachmentItem, type PreviewableFile } from "@/shared/ui/AttachmentItem";
@@ -99,6 +100,7 @@ function isImageFile(file: File) {
 }
 
 export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNoteId }: PkmBoardProps) {
+  const router = useRouter();
   const [notes, setNotes] = useState(() =>
     initialNotes.map((note) => ({
       ...note,
@@ -673,7 +675,7 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
                       <div className="flex items-start gap-3">
                         <button
                           type="button"
-                          onClick={() => setSelectedId(note.id)}
+                          onClick={() => router.push(`/pkm/notes/${note.id}`)}
                           className="flex min-w-0 flex-1 items-start gap-3 text-left"
                         >
                           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
@@ -725,54 +727,6 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
                 })
               )}
             </div>
-
-            {selectedNote ? (
-              <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-base font-medium text-ink-900">当前查看</h2>
-                    <p className="mt-1 text-xs text-ink-400">{selectedNote.project?.name || "未关联项目"}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
-                        selectedNote.isPublic ? "bg-emerald-50 text-emerald-700" : "bg-ink-100 text-ink-500"
-                      }`}
-                    >
-                      {selectedNote.isPublic ? "公开笔记" : "私有笔记"}
-                    </span>
-                    <span className="text-xs text-ink-400">更新于 {formatDate(selectedNote.updatedAt)}</span>
-                  </div>
-                </div>
-                <h3 className="mt-4 text-lg font-semibold text-ink-900">{selectedNote.title}</h3>
-                {selectedNote.tags.length > 0 ? (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {selectedNote.tags.map((tag) => (
-                      <span key={tag} className="rounded-full bg-ink-100 px-2.5 py-1 text-xs text-ink-600">
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="mt-4">
-                  <MarkdownContent content={selectedNote.content} collapsible collapsedHeight={240} />
-                </div>
-                {normalizePkmAttachments(selectedNote.attachments).length > 0 ? (
-                  <div className="mt-5 border-t border-ink-100 pt-4">
-                    <h4 className="text-sm font-medium text-ink-800">附件</h4>
-                    <div className="mt-3 space-y-2">
-                      {normalizePkmAttachments(selectedNote.attachments).map((attachment, index) => (
-                        <AttachmentItem
-                          key={`${attachment.name}-${index}`}
-                          attachment={attachment}
-                          onPreview={setPreviewFile}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-              </section>
-            ) : null}
           </div>
         </div>
         {previewFile && (

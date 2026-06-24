@@ -231,17 +231,20 @@ export function Dashboard() {
                 <p className="text-xs text-ink-400">暂无访问记录</p>
               ) : (
                 <ul className="space-y-1.5">
-                  {visits.slice(0, 4).map((v) => (
+                  {visits.slice(0, 4).map((v, i) => (
                     <li key={`${v.projectId}-${v.tabKey}-${v.ticketId ?? ""}`}>
                       <Link
-                        href={v.ticketId ? `/tickets/${v.ticketId}` : `/projects/${v.projectId}?tab=${v.tabKey}`}
+                        href={v.tabKey === "note" ? `/pkm/notes/${v.ticketId}` : v.ticketId ? `/tickets/${v.ticketId}` : `/projects/${v.projectId}?tab=${v.tabKey}`}
                         className="flex items-center gap-2 rounded-lg border border-ink-100 bg-ink-50/40 px-2.5 py-2 text-xs transition hover:border-brand-200 hover:bg-brand-50"
                       >
+                        <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-brand-50 text-[10px] font-semibold text-brand-600">
+                          {i + 1}
+                        </span>
                         <span className="truncate min-w-0 flex-1 font-medium text-ink-700">
-                          {v.ticketId ? v.ticketTitle ?? v.projectName : v.projectName}
+                          {v.ticketNo ? `#${v.ticketNo} ` : ""}{v.ticketId ? v.ticketTitle ?? v.projectName : v.projectName}
                         </span>
                         <span className="shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] text-brand-600">
-                          {v.ticketId ? "单子" : v.tabLabel}
+                          {v.tabKey === "note" ? "笔记" : v.tabKey === "ticket" ? "单子" : v.tabLabel}
                         </span>
                       </Link>
                     </li>
@@ -255,17 +258,17 @@ export function Dashboard() {
                 {frequent.slice(0, 4).map((f, i) => (
                   <li key={`${f.projectId}-${f.tabKey}-${f.ticketId ?? ""}`}>
                     <Link
-                      href={f.ticketId ? `/tickets/${f.ticketId}` : `/projects/${f.projectId}?tab=${f.tabKey}`}
+                      href={f.tabKey === "note" ? `/pkm/notes/${f.ticketId}` : f.ticketId ? `/tickets/${f.ticketId}` : `/projects/${f.projectId}?tab=${f.tabKey}`}
                       className="flex items-center gap-2 rounded-lg border border-ink-100 bg-ink-50/40 px-2.5 py-2 text-xs transition hover:border-brand-200 hover:bg-brand-50"
                     >
                       <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-brand-50 text-[10px] font-semibold text-brand-600">
                         {i + 1}
                       </span>
                       <span className="truncate min-w-0 flex-1 font-medium text-ink-700">
-                        {f.ticketId ? f.ticketTitle ?? f.projectName : f.projectName}
+                        {f.ticketNo ? `#${f.ticketNo} ` : ""}{f.ticketId ? f.ticketTitle ?? f.projectName : f.projectName}
                       </span>
                       <span className="shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] text-brand-600">
-                        {f.ticketId ? "单子" : f.tabLabel}
+                        {f.tabKey === "note" ? "笔记" : f.tabKey === "ticket" ? "单子" : f.tabLabel}
                       </span>
                       <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-600">
                         {f.count}次
@@ -356,11 +359,13 @@ export function Dashboard() {
                   ][i % 5];
                   const projectVisits = visits.filter((v) => v.projectId === p.id);
                   return (
-                    <li key={p.id}>
+                    <li key={p.id} className="group relative">
                       <Link
                         href={`/projects/${p.id}`}
-                        className="block rounded-lg border border-ink-100 px-3 py-3 transition hover:border-brand-200 hover:bg-brand-50/40"
-                      >
+                        aria-label={`打开项目 ${p.name}`}
+                        className="absolute inset-0 z-10 rounded-lg"
+                      />
+                      <div className="block rounded-lg border border-ink-100 bg-white px-3 py-3 transition hover:border-brand-200 hover:bg-brand-50/40">
                         <div className="flex items-center gap-3">
                           <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${tone}`} />
                           <div className="min-w-0 flex-1">
@@ -377,17 +382,18 @@ export function Dashboard() {
                         </div>
                         {projectVisits.length > 0 && (
                           <div className="mt-2 flex flex-wrap gap-1.5">
-                            {projectVisits.map((v) => (
-                              <span
-                                key={`${v.projectId}-${v.tabKey}`}
-                                className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-medium text-brand-600"
+                            {projectVisits.map((v, vi) => (
+                              <Link
+                                key={`${v.projectId}-${v.tabKey}-${v.ticketId ?? "tab"}-${vi}`}
+                                href={v.tabKey === "note" ? `/pkm/notes/${v.ticketId}` : v.ticketId ? `/tickets/${v.ticketId}` : `/projects/${v.projectId}?tab=${v.tabKey}`}
+                                className="relative z-20 inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-medium text-brand-600 hover:bg-brand-100"
                               >
-                                {v.tabLabel}
-                              </span>
+                                {v.ticketNo ? `#${v.ticketNo}` : v.tabKey === "note" ? "笔记" : v.tabLabel}
+                              </Link>
                             ))}
                           </div>
                         )}
-                      </Link>
+                      </div>
                     </li>
                   );
                 })}
