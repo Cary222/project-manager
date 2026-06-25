@@ -13,10 +13,6 @@ import {
 const execFileAsync = promisify(execFile);
 const SCAN_LIMIT = 500;
 
-const SSH_USER = "hxy";
-const SSH_HOST = "192.168.1.14";
-const IS_LOCAL = process.env.NODE_ENV === "development";
-
 export type RawCommit = {
   sha: string;
   committedAt: Date;
@@ -25,13 +21,8 @@ export type RawCommit = {
 };
 
 async function git(repoPath: string, args: string[]) {
-  let cmd: string;
-  if (IS_LOCAL) {
-    cmd = `ssh ${SSH_USER}@${SSH_HOST} "cd '${repoPath}' && git ${args.join(" ")}"`;
-  } else {
-    cmd = `git -C '${repoPath}' ${args.join(" ")}`;
-  }
-  const { stdout } = await execFileAsync("sh", ["-c", cmd], {
+  const fullArgs = ["-C", repoPath, ...args];
+  const { stdout } = await execFileAsync("git", fullArgs, {
     timeout: 120_000,
     maxBuffer: 20 * 1024 * 1024,
   });
@@ -52,7 +43,9 @@ function parseLogLine(line: string): RawCommit | null {
 export async function getRecentCommitsAllBranches(
   repoPath: string
 ): Promise<RawCommit[]> {
+  console.log("DEBUG getRecentCommitsAllBranches called with:", repoPath);
   const cursor = await prisma.syncCursor.findUnique({ where: { repoPath } });
+  console.log("DEBUG cursor:", cursor ? cursor.lastCommitAt : "NO CURSOR");
   const args = [
     "log",
     "--all",
@@ -67,14 +60,24 @@ export async function getRecentCommitsAllBranches(
   }
   // 无游标时仅取最近 SCAN_LIMIT 条，非全仓库历史
 
-  const output = await git(repoPath, args).catch(() => "");
-  if (!output) return [];
+  const output = await git(repoPath, args).catch((e) => {
+    console.error("DEBUG git error:", e.message);
+    return "";
+  });
+  console.log("DEBUG git output length:", output.length);
 
-  return output
+  if (!output) {
+    console.log("DEBUG: output is empty");
+    return [];
+  }
+
+  const result = output
     .split("\n")
     .filter(Boolean)
     .map(parseLogLine)
     .filter((item): item is RawCommit => !!item?.sha);
+  console.log("DEBUG returning commits:", result.length);
+  return result;
 }
 
 export async function syncRepoCommits(repoPath: string) {
