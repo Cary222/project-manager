@@ -51,12 +51,12 @@ export function TicketDetailClient({ ticketId }: { ticketId: string }) {
       module: { name: string };
     };
   }>(`/api/tickets/${ticketId}`, fetchJson);
-  const { record } = useRecentVisits();
+  const { scheduleRecord } = useRecentVisits();
 
   useEffect(() => {
     if (data?.ticket) {
       const { ticket } = data;
-      record({
+      scheduleRecord({
         projectId: ticket.project.id,
         projectName: ticket.project.name,
         tabKey: "ticket",
@@ -66,7 +66,7 @@ export function TicketDetailClient({ ticketId }: { ticketId: string }) {
         ticketTitle: ticket.title,
       });
     }
-  }, [data, record, ticketId]);
+  }, [data, scheduleRecord, ticketId]);
 
   return (
     <AppShell header={<TicketDetailHeader ticketId={ticketId} />}>

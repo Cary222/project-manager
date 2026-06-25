@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { MarkdownContent } from "@/shared/ui/MarkdownContent";
 
 export type PreviewableFile = {
   name: string;
@@ -34,6 +35,8 @@ export function DocumentPreviewModal({ file, onClose }: Props) {
       file.mimeType ===
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     const isImage = file.mimeType.startsWith("image/");
+    const isMarkdown =
+      file.mimeType === "text/markdown" || file.mimeType === "text/x-markdown";
 
     if (isImage) {
       setContent(
@@ -145,6 +148,35 @@ export function DocumentPreviewModal({ file, onClose }: Props) {
         )
         .catch((err: unknown) => {
           console.error("[DocumentPreviewModal] fetch docx failed", err);
+          setContent(
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+              文档下载失败，请稍后重试
+            </div>,
+          );
+        });
+      return;
+    }
+
+    if (isMarkdown) {
+      fetch(file.url)
+        .then((r) => r.text())
+        .then((text) => {
+          if (!text.trim()) {
+            setContent(
+              <div className="rounded-lg border border-ink-200 bg-ink-50 p-4 text-sm text-ink-700">
+                文档内容为空
+              </div>,
+            );
+            return;
+          }
+          setContent(
+            <div className="max-h-[70vh] overflow-auto rounded-lg border border-ink-200 bg-white p-6 text-sm leading-relaxed text-ink-800">
+              <MarkdownContent content={text} />
+            </div>,
+          );
+        })
+        .catch((err: unknown) => {
+          console.error("[DocumentPreviewModal] fetch markdown failed", err);
           setContent(
             <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
               文档下载失败，请稍后重试

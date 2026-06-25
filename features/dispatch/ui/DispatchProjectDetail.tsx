@@ -114,18 +114,18 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
   );
 
   const project = projectData?.project ?? null;
-  const { record } = useRecentVisits();
+  const { scheduleRecord } = useRecentVisits();
 
   useEffect(() => {
     if (project) {
-      record({
+      scheduleRecord({
         projectId: project.id,
         projectName: project.name,
         tabKey: "dispatch",
         tabLabel: "派单",
       });
     }
-  }, [project, record]);
+  }, [project, scheduleRecord]);
 
   const [selectedResponsibilityId, setSelectedResponsibilityId] = useState("");
   const [showCreate, setShowCreate] = useState(false);

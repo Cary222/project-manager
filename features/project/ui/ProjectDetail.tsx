@@ -342,8 +342,8 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
           <FileUploader
             onUpload={(file) => uploadAttachmentAsNote(file, project.id, router)}
             label="上传项目文件"
-            hint="支持 PDF、Word、PPT、TXT（单个文件不超过 10 MB）"
-            accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            hint="支持 PDF、Word、PPT、TXT、Markdown（单个文件不超过 10 MB）"
+            accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/plain"
           />
         </div>
 
@@ -366,7 +366,13 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
               {allAttachments.map((item, i) => (
                 <li key={`${item.noteId}-${item.attachment.name}-${i}`} className="flex flex-col gap-1">
                   <div className="text-xs text-ink-400">
-                    来源笔记：<span className="font-medium text-ink-600">{item.noteTitle}</span>
+                    来源笔记：
+                    <Link
+                      href={`/pkm/notes/${item.noteId}`}
+                      className="font-medium text-ink-600 transition hover:text-brand-600 hover:underline"
+                    >
+                      {item.noteTitle}
+                    </Link>
                     {item.updatedAt && (
                       <> · {item.updatedAt.toLocaleDateString("zh-CN")}</>
                     )}
@@ -532,7 +538,7 @@ export function PageHeaderSkeleton() {
 // ---- Main component ----
 
 export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
-  const { record } = useRecentVisits();
+  const { scheduleRecord } = useRecentVisits();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab") as TabKey | null;
 
@@ -545,12 +551,12 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
 
   const handleTabChange = (tab: TabKey) => {
     setActiveTab(tab);
-    record({ projectId: project.id, projectName: project.name, tabKey: tab, tabLabel: TABS.find((t) => t.key === tab)?.label ?? tab });
+    scheduleRecord({ projectId: project.id, projectName: project.name, tabKey: tab, tabLabel: TABS.find((t) => t.key === tab)?.label ?? tab });
   };
 
   useEffect(() => {
     const tabLabel = TABS.find((t) => t.key === activeTab)?.label ?? activeTab;
-    record({ projectId: project.id, projectName: project.name, tabKey: activeTab, tabLabel });
+    scheduleRecord({ projectId: project.id, projectName: project.name, tabKey: activeTab, tabLabel });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tickets = useMemo<ProjectTicket[]>(() => {

@@ -30,7 +30,7 @@ export async function uploadAttachmentAsNote(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       title,
-      content: "",
+      content: `通过项目文档上传：${file.name}`,
       tags: [],
       projectId,
       isPublic: true,

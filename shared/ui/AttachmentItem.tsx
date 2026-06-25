@@ -30,6 +30,12 @@ function getFileBadge(mimeType: string) {
         IMG
       </span>
     );
+  if (mimeType === "text/markdown" || mimeType === "text/x-markdown")
+    return (
+      <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-xs font-bold text-emerald-600">
+        MD
+      </span>
+    );
   return (
     <span className="rounded bg-ink-100 px-1.5 py-0.5 text-xs font-medium text-ink-500">
       文件
@@ -42,6 +48,8 @@ function isPreviewable(mimeType: string) {
     [
       "application/pdf",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/markdown",
+      "text/x-markdown",
     ].includes(mimeType) ||
     mimeType.startsWith("image/")
   );

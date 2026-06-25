@@ -4,19 +4,22 @@ import { useEffect } from "react";
 import { useRecentVisits } from "@/shared/lib/visits-context";
 import type { NoteDetailProps } from "@/app/pkm/notes/[id]/page";
 
-export function NoteDetailRecord(props: NoteDetailProps) {
-  const { record } = useRecentVisits();
+export function NoteDetailRecord({ note }: NoteDetailProps) {
+  const { scheduleRecord } = useRecentVisits();
 
   useEffect(() => {
-    record({
-      projectId: props.note.project?.id ?? "",
-      projectName: props.note.project?.name ?? "无关联项目",
+    // scheduleRecord 在停留 5 秒后才写 visits 并计次。
+    // 进入页面立即写入的 recordImmediate 已在 visits-context 层合并 dedup，
+    // 这里的 scheduleRecord 只负责触发 counts 增量。
+    scheduleRecord({
+      projectId: note.project?.id ?? "",
+      projectName: note.project?.name ?? "无关联项目",
       tabKey: "note",
       tabLabel: "笔记",
-      ticketId: props.note.id,
-      ticketTitle: props.note.title,
+      ticketId: note.id,
+      ticketTitle: note.title,
     });
-  }, [props.note, record]);
+  }, [note.id, note.project?.id, note.project?.name, note.title, scheduleRecord]);
 
   return null;
 }

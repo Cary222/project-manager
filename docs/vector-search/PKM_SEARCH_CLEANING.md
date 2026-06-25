@@ -81,16 +81,19 @@ const content = [
 
 ### 2.3 新增 4 个脚本
 
-都在 `scripts/` 下：
+都在 `scripts/vector-search/` 下，统一入口为 `search-admin.ts`：
 
-| 脚本 | 行数 | 作用 |
-|------|------|------|
-| `reindex-pkm-notes.ts` | 153 | 批量重建所有 PKM 笔记的 SearchDocument（带清洗后） |
-| `clear-pkm-search-documents.ts` | 23 | 删干净 `SearchDocument` 里所有 `sourceType=PKM_NOTE` 的行（不删其他源类型） |
-| `diagnose-pkm-search.ts` | 224 | 双子命令：`baseline` 选样本 + 推荐搜索词 / `measure` 跑单次搜索并打印测试笔记 T 的命中分数 |
-| `inspect-search-doc.ts` | 59 | 调试用：列所有 PKM SearchDocument 的元数据（hash/length/updatedAt），可指定 noteId 打印正文前 200 字 |
+|| 脚本 / 命令 | 作用 |
+||------|------|
+|| `search-admin.ts status` | 查看 SearchDocument 统计 + 最近笔记 |
+|| `search-admin.ts backfill` | 全量回填（ticket + commit + note） |
+|| `search-admin.ts reindex` | 批量重建所有 PKM 笔记的 SearchDocument |
+|| `search-admin.ts embed` | 补充缺失向量（已有 content 无 vector 的行） |
+|| `search-admin.ts clear` | 删干净 `sourceType=PKM_NOTE` 的行 |
+|| `search-admin.ts inspect [noteId]` | 列 PKM SearchDocument 元数据（hash/length/updatedAt） |
+|| `diagnose-pkm-search.ts` | 双子命令：`baseline` 选样本 / `measure` 跑单次搜索并打印命中分数 |
 
-另外还保留 `debug-vector-search.ts`（30 行）：临时拿一个 query 字符串直接调 BGE-M3 + 拿 top5 向量结果。
+另外还保留 `search-admin.ts search <query>`：直接调 BGE-M3 + 拿 top5 向量结果。
 
 ---
 
@@ -192,9 +195,9 @@ cmq6g4ts5... 向量搜索故障排查指南            5286        no           
 [diagnose:baseline] 下一步
   1. 选一条 candidate.id 作为 '测试笔记 T'
   2. 跑 measure 取改前分数：
-     npx tsx scripts/diagnose-pkm-search.ts measure <noteId> "虚拟列表"
+     npx tsx scripts/vector-search/diagnose-pkm-search.ts measure <noteId> "虚拟列表"
   3. 跑 reindex 重建 SearchDocument
-     npx tsx scripts/reindex-pkm-notes.ts
+     npm run search:reindex --clear
   4. 用同样的搜索词再跑 measure，对比改后分数
 ```
 
@@ -247,7 +250,7 @@ git checkout HEAD -- shared/lib/search.ts
 grep -c cleanMarkdownForEmbedding shared/lib/search.ts   # 期望：0
 
 # 2. 跑 reindex → 写脏 embedding
-npx tsx scripts/reindex-pkm-notes.ts
+npm run search:reindex
 # 观察 elapsedMs：脏版会很长（单条 6+ 秒）
 
 # 3. 跑 measure 拿"脏基线"
@@ -260,7 +263,7 @@ cp /tmp/search.ts.with-clean shared/lib/search.ts
 grep -c cleanMarkdownForEmbedding shared/lib/search.ts   # 期望：2
 
 # 5. 跑 reindex → 写干净 embedding
-npx tsx scripts/reindex-pkm-notes.ts
+npx tsx scripts/vector-search/search-admin.ts reindex
 # 观察 elapsedMs：干净版 100-200ms
 
 # 6. 跑 measure 拿"干净基线"
@@ -305,7 +308,7 @@ npx tsx scripts/diagnose-pkm-search.ts measure <NOTE_ID> "schema"
 ### 3.6 Step 6 — 检查内容质量
 
 ```bash
-npx tsx scripts/inspect-search-doc.ts <NOTE_ID>
+npx tsx scripts/vector-search/search-admin.ts inspect <NOTE_ID>
 ```
 
 **期望看到**：
@@ -340,21 +343,24 @@ first 200 chars: 标题 现有 PKM 链路涉及的 schema、API、搜索与部�
 
 ```bash
 # === 重建 ===
-npx tsx scripts/reindex-pkm-notes.ts                    # 全量
-npx tsx scripts/reindex-pkm-notes.ts --batch-size=10     # 小批次（API 慢时）
-npx tsx scripts/reindex-pkm-notes.ts --concurrency=2     # 并发
-npx tsx scripts/reindex-pkm-notes.ts --dry-run            # 只看不跑
+npm run search:reindex                           # 全量重建
+npm run search:reindex --batch-size=10            # 小批次
+npm run search:reindex --concurrency=2            # 并发
+npm run search:reindex --clear                    # 先清空再重建
+
+# === 补充向量 ===
+npm run search:embed                              # 补充缺失向量
 
 # === 清理 ===
-npx tsx scripts/clear-pkm-search-documents.ts            # 删所有 PKM SearchDocument（不删 ticket/commit）
+npm run search:clear                              # 删 PKM SearchDocument
 
 # === 诊断 ===
-npx tsx scripts/diagnose-pkm-search.ts baseline          # 选样本
-npx tsx scripts/diagnose-pkm-search.ts measure <id> "关键词"
+npx tsx scripts/vector-search/diagnose-pkm-search.ts baseline
+npx tsx scripts/vector-search/diagnose-pkm-search.ts measure <id> "关键词"
 
 # === 调试 ===
-npx tsx scripts/inspect-search-doc.ts <noteId>            # 查 SearchDocument 元数据
-npx tsx scripts/debug-vector-search.ts "一个测试查询"     # 直调 BGE-M3 + 拿 top5
+npm run search:inspect <noteId>                   # 查 SearchDocument 元数据
+npm run search:search "一个测试查询"               # 直调 BGE-M3 + 拿 top5
 ```
 
 ---
@@ -406,12 +412,12 @@ curl -s -w "\nHTTP=%{http_code}\n" http://localhost:5000/
 
 ### 5.2 embedding 跑得很慢（avg 6+ 秒/条）
 
-**症状**：`reindex-pkm-notes.ts` 输出 `avgMs=6000+`
+**症状**：`search:reindex` 输出 `avgMs=6000+`
 **原因**：当前 search.ts 是旧版（没清洗），base64 喂给 BGE-M3
 **修**：换回带清洗的 search.ts：
 ```bash
 cp /tmp/search.ts.with-clean shared/lib/search.ts
-npx tsx scripts/reindex-pkm-notes.ts   # 应该 100-200ms
+npm run search:reindex   # 应该 100-200ms
 ```
 
 ### 5.3 measure 输出 `semantic=0.00`
@@ -420,7 +426,7 @@ npx tsx scripts/reindex-pkm-notes.ts   # 应该 100-200ms
 **原因**：
 1. **embedding 服务挂了**（最常见）→ 按 5.1 修
 2. **新启的 uvicorn 还在加载模型**（冷启动 10-30s）→ 等等再 measure
-3. **SearchDocument 里 embedding 字段是 NULL** → 查 `inspect-search-doc.ts`，看 `has_embedding`
+3. **SearchDocument 里 embedding 字段是 NULL** → 查 `npm run search:inspect`，看 `has_emb`
 
 ### 5.4 `address already in use` 出现在 embedding log
 
@@ -439,7 +445,7 @@ curl http://localhost:5000/  # 200 就 OK
 **调试**：
 ```bash
 # 直接调一次
-npx tsx scripts/debug-vector-search.ts "测试"
+npx tsx scripts/vector-search/search-admin.ts search "测试"
 # 看是 vec 拿不到，还是 SQL 报错
 ```
 
@@ -461,11 +467,8 @@ DATABASE_URL="postgresql://community:community@localhost:5432/community?options=
 |------|------|------|
 | `shared/lib/markdown.ts` | 新增 | 44 行 |
 | `shared/lib/search.ts` | 修改 | +清洗逻辑 |
-| `scripts/reindex-pkm-notes.ts` | 新增 | 153 行 |
-| `scripts/clear-pkm-search-documents.ts` | 新增 | 23 行 |
-| `scripts/diagnose-pkm-search.ts` | 新增 | 224 行 |
-| `scripts/inspect-search-doc.ts` | 新增 | 59 行 |
-| `shared/lib/markdown.test.ts` | 新增 | Vitest 单元测试（如有） |
+| `scripts/vector-search/search-admin.ts` | 新增 | 统一管理 CLI，整合旧 9 个脚本 |
+| `scripts/vector-search/diagnose-pkm-search.ts` | 保留 | 搜索质量诊断 |
 | `docs/PKM_SEARCH_CLEANING.md` | **本文件** | 全流程手册 |
 
 ---

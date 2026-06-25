@@ -1,19 +1,40 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect } from "react";
 import useSWR from "swr";
 import { TicketDetailHeaderSkeleton } from "@/features/ticket/ui/ticket-detail/TicketDetail";
 import { fetchJson } from "@/shared/api/fetch-json";
 import { KIND_LABEL } from "@/entities/ticket/model/types";
+import { useRecentVisits } from "@/shared/lib/visits-context";
 
 export function DispatchTicketDetailHeader({ ticketId }: { ticketId: string }) {
   const { data } = useSWR<{
     ticket: {
       ticketNo: number;
+      title?: string;
       project: { id: string; name: string };
       module: { name: string; responsibility: { kind: string } };
     };
   }>(`/api/tickets/${ticketId}`, fetchJson);
+  const { scheduleRecord } = useRecentVisits();
+
+  useEffect(() => {
+    const ticket = data?.ticket;
+    if (!ticket) return;
+    // scheduleRecord 在停留 5 秒后才写 visits 并计次。
+    // SWR 重新验证 data 变化会重新调度 timer，用户离开后再次停留满 5s 才再计一次。
+    scheduleRecord({
+      projectId: ticket.project.id,
+      projectName: ticket.project.name,
+      tabKey: "ticket",
+      tabLabel: `#${ticket.ticketNo}`,
+      ticketId,
+      ticketNo: ticket.ticketNo,
+      ticketTitle: ticket.title,
+    });
+  }, [data, scheduleRecord, ticketId]);
+
   if (!data?.ticket) return <TicketDetailHeaderSkeleton />;
   const { ticket } = data;
   return (

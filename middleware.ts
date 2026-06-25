@@ -8,6 +8,7 @@ export default auth((req) => {
   const isLoginPage = pathname === "/login";
   const isApiAuth = pathname.startsWith("/api/auth");
   const isRegisterApi = pathname === "/api/register";
+  const isKnowledgeApi = pathname.startsWith("/api/knowledge");
   const isAdmin = pathname.startsWith("/admin");
   const loginUrl = req.nextUrl.clone();
   loginUrl.pathname = "/login";
@@ -16,7 +17,7 @@ export default auth((req) => {
   homeUrl.pathname = "/";
   homeUrl.search = "";
 
-  if (isApiAuth || isRegisterApi) return NextResponse.next();
+  if (isApiAuth || isRegisterApi || isKnowledgeApi) return NextResponse.next();
 
   if (!isLoggedIn && !isLoginPage) {
     return NextResponse.redirect(loginUrl);

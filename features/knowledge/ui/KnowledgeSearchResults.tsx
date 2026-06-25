@@ -1,9 +1,12 @@
+"use client";
+
 import Link from "next/link";
 import {
   IconArrowRight,
   IconBook,
   IconSearch,
 } from "@/shared/ui/icons";
+import { useRecentVisits } from "@/shared/lib/visits-context";
 import type { SearchResponse, SearchResultItem, SearchResultType } from "@/shared/lib/search-types";
 
 type KnowledgeSearchResultsProps = {
@@ -56,9 +59,29 @@ function ResultMeta({ item }: { item: SearchResultItem }) {
 }
 
 function ResultCard({ item }: { item: SearchResultItem }) {
+  const { recordImmediate } = useRecentVisits();
+  const isCommit = item.type === "commit";
+
+  const handleClick = () => {
+    // 提交记录没有专门的详情页，在搜索结果点击时直接写入最近访问。
+    if (isCommit) {
+      recordImmediate({
+        projectId: item.project?.id ?? item.metadata.projectId ?? "",
+        projectName:
+          item.project?.name ?? item.metadata.projectName ?? "未关联项目",
+        tabKey: "commit",
+        tabLabel: item.metadata.commitSha?.slice(0, 7) ?? "提交",
+        ticketTitle: item.title,
+      });
+    }
+    // 笔记（/pkm/notes/[id]）和工单（/tickets/[id]）的记录由各自详情页的
+    // NoteDetailRecord / DispatchTicketDetailHeader 负责，这里不要重复写入。
+  };
+
   return (
     <Link
       href={item.url}
+      onClick={handleClick}
       className="block rounded-xl border border-ink-200 bg-white p-4 shadow-soft transition hover:border-brand-200 hover:shadow-base"
     >
       <div className="flex items-start justify-between gap-3">

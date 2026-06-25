@@ -451,7 +451,7 @@ model Counter {
 model SystemSetting {
   id              String   @id @default(cuid())
   siteName        String   @default("ProjectHub")
-  siteDescription String?  
+  siteDescription String?
   logoUrl         String?
   welcomeMessage  String?
   updatedById     String?
@@ -459,5 +459,46 @@ model SystemSetting {
   updatedAt       DateTime @updatedAt
   updatedBy       User?    @relation("SystemSettingUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 
+  @@schema("pm")
+}
+
+/// 统一行为事件日志（Event Backbone v3）
+/// 前端只负责发送原始事件，后端负责计算 isValidView。
+/// Tier 3（通知/审计）已有独立系统，本表不承接。
+model ActivityLog {
+  id           String   @id @default(cuid())
+
+  /// 事件协议版本（用于 schema 演进时兼容旧数据）
+  eventVersion String   @default("1.0")
+  /// 动作类型（ACTION.*），冗余存储而非外键：避免枚举变更牵连历史
+  action       String
+
+  /// 执行者
+  actorId      String
+  actorName    String?
+
+  /// 目标
+  targetType   String?
+  targetId     String?
+  targetName   String?
+
+  /// 会话
+  sessionId    String?
+
+  /// 原始上下文（前端上报的 dwellMs / enterAt / leaveAt 等）
+  context      Json?
+
+  /// 后端计算字段（可信，前端不可干预）
+  dwellMs      Int?
+  /// dwellMs > 3000 的有效访问标记
+  isValidView  Boolean?
+
+  /// 入库时间
+  createdAt    DateTime @default(now())
+
+  @@index([action, createdAt(sort: Desc)])
+  @@index([actorId, createdAt(sort: Desc)])
+  @@index([targetType, targetId, createdAt(sort: Desc)])
+  @@index([targetType, isValidView, createdAt(sort: Desc)])
   @@schema("pm")
 }

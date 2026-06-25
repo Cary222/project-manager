@@ -115,7 +115,6 @@ export async function DELETE(_request: Request, { params }: Params) {
     }
 
     await prisma.pkmNote.delete({ where: { id } });
-    await syncPkmNoteSearchDocument(id);
 
     return NextResponse.json({ ok: true });
   } catch (error) {

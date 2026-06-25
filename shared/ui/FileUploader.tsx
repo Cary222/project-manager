@@ -36,7 +36,7 @@ export function FileUploader({
       setFlash({ type: "error", message: err instanceof Error ? err.message : "上传失败" });
     } finally {
       setUploading(false);
-      e.currentTarget.value = "";
+      if (inputRef.current) inputRef.current.value = "";
     }
   }
 

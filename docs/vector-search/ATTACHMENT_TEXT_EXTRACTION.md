@@ -23,7 +23,7 @@ PKM 笔记的附件存在 `pm.PkmNote.attachments`（`Json` 字段）里，但**
 - **覆盖四类 mime**：`text/*`（含 `text/markdown`、`text/csv`、`application/json`、`application/xml`）+ `application/pdf` + `application/vnd.openxmlformats-officedocument.presentationml.presentation` + `application/vnd.openxmlformats-officedocument.wordprocessingml.document`（含表格提取）
 - **降级优雅**：单附件超时 / 太大 / mime 不支持 → 跳过该附件但笔记仍能入库（source 字段记录原因）
 - **文本先洗再喂**：提取出的原始文本经过 `cleanExtractedTextForEmbedding` 清洗（去 base64 残留 / 控制字符 / 冗余空白），再进 `SearchDocument.content`
-- **数据迁移友好**：跑一次 `scripts/reindex-pkm-notes.ts --batch-size=1` 即可全量重建
+- **数据迁移友好**：跑一次 `npm run search:reindex` 即可全量重建
 
 ---
 
@@ -507,7 +507,7 @@ curl -s -X POST http://localhost:5000/extract-text \
 ssh hxy@192.168.1.14
 cd /home/hxy/work/personal/project-manager
 set -a && source .env.production && set +a
-npx tsx scripts/reindex-pkm-notes.ts --batch-size=1
+npx tsx scripts/vector-search/search-admin.ts reindex
 ```
 
 **期望输出**（节选）：
