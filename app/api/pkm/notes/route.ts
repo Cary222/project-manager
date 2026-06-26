@@ -103,7 +103,7 @@ export async function POST(request: Request) {
       },
     });
 
-    await syncPkmNoteSearchDocument(note.id);
+    await syncPkmNoteSearchDocument(note.id, { async: true });
 
     return NextResponse.json({ note });
   } catch (error) {

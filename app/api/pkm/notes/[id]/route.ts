@@ -92,7 +92,7 @@ export async function PATCH(request: Request, { params }: Params) {
       },
     });
 
-    await syncPkmNoteSearchDocument(updated.id);
+    await syncPkmNoteSearchDocument(updated.id, { async: true });
 
     return NextResponse.json({ note: updated });
   } catch (error) {
