@@ -12,7 +12,7 @@ type ProjectWithScores = {
   name: string;
   description: string | null;
   status: string;
-  ownerId: string;
+  ownerId: string | null;
   createdAt: Date;
   updatedAt: Date;
   hotScore: number;
@@ -86,7 +86,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "name is required" }, { status: 400 });
     }
 
-    const project = await prisma.$transaction(async (tx: typeof prisma) => {
+    const project = await prisma.$transaction(async (tx) => {
       const created = await tx.project.create({
         data: {
           name,
