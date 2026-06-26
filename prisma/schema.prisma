@@ -207,6 +207,34 @@ model SearchDocument {
   @@schema("pm")
 }
 
+enum IndexJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+
+  @@schema("pm")
+}
+
+model IndexJob {
+  id          String          @id @default(cuid())
+  noteId      String
+  status      IndexJobStatus  @default(PENDING)
+  attempt     Int             @default(0)
+  maxAttempts Int             @default(5)
+  error       String?
+  errorSources Json?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  startedAt   DateTime?
+
+  note        PkmNote? @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt(sort: Asc)])
+  @@index([noteId, status])
+  @@schema("pm")
+}
+
 model PkmNote {
   id          String   @id @default(cuid())
   userId      String
@@ -220,6 +248,7 @@ model PkmNote {
   updatedAt   DateTime @updatedAt
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  indexJobs   IndexJob[]
 
   @@index([userId, updatedAt(sort: Desc)])
   @@index([userId, isPublic, updatedAt(sort: Desc)])

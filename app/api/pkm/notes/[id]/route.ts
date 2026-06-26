@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/shared/db/client";
 import { requireSession } from "@/shared/lib/permissions";
 import { normalizePkmAttachments } from "@/shared/lib/pkm";
-import { syncPkmNoteSearchDocument } from "@/shared/lib/search";
+import { SEARCH_DOCUMENT_SOURCE_TYPES } from "@/shared/lib/search-types";
+import {
+  buildSearchDocumentSourceType,
+  syncPkmNoteSearchDocument,
+} from "@/shared/lib/search";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -113,6 +117,14 @@ export async function DELETE(_request: Request, { params }: Params) {
     if (note.userId !== session.user.id) {
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
     }
+
+    // 清理关联资源（IndexJob 会被 PkmNote FK Cascade 自动清理）
+    await prisma.searchDocument.deleteMany({
+      where: {
+        sourceType: buildSearchDocumentSourceType(SEARCH_DOCUMENT_SOURCE_TYPES.PKM_NOTE),
+        sourceId: id,
+      },
+    });
 
     await prisma.pkmNote.delete({ where: { id } });
 

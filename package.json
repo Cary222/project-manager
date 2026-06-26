@@ -23,7 +23,16 @@
     "search:embed": "tsx scripts/vector-search/search-admin.ts embed",
     "search:clear": "tsx scripts/vector-search/search-admin.ts clear",
     "search:inspect": "tsx scripts/vector-search/search-admin.ts inspect",
-    "search:search": "tsx scripts/vector-search/search-admin.ts search"
+    "search:search": "tsx scripts/vector-search/search-admin.ts search",
+    "job:status": "tsx scripts/vector-search/job-admin.ts status",
+    "job:inspect": "tsx scripts/vector-search/job-admin.ts inspect",
+    "job:retry": "tsx scripts/vector-search/job-admin.ts retry",
+    "job:retry-note": "tsx scripts/vector-search/job-admin.ts retry-note",
+    "job:clear-pending": "tsx scripts/vector-search/job-admin.ts clear-pending",
+    "job:purge": "tsx scripts/vector-search/job-admin.ts purge-completed",
+    "worker": "tsx worker/index.ts",
+    "worker:prod": "NODE_ENV=production tsx worker/index.ts",
+    "test:async-index": "tsx scripts/test-async-index-pipeline.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.2",

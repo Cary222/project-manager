@@ -24,7 +24,7 @@ model = SentenceTransformer("BAAI/bge-m3")
 DIM = model.get_embedding_dimension()
 print(f"模型就绪，向量维度: {DIM}")
 
-EXTRACT_TEXT_TIMEOUT_SECONDS = 15
+EXTRACT_TEXT_TIMEOUT_SECONDS = 60
 MAX_EXTRACTED_CHARS = 2000
 MAX_EXTRACT_FILE_SIZE = 10 * 1024 * 1024
 
@@ -86,6 +86,9 @@ class ExtractRequest(BaseModel):
     mimeType: str
     name: str
     size: int = 0
+    page_from: int | None = None
+    page_to: int | None = None
+    max_chars: int | None = None
 
 
 def _decode_data_url(url: str) -> bytes:
@@ -114,7 +117,12 @@ def _read_bytes(url: str) -> bytes:
     raise ValueError("unsupported_url_scheme")
 
 
-def _extract_text_from_bytes(raw: bytes, mime_type: str) -> str:
+def _extract_text_from_bytes(
+    raw: bytes,
+    mime_type: str,
+    page_from: int | None = None,
+    page_to: int | None = None,
+) -> str:
     normalized = (mime_type or "").split(";")[0].strip().lower()
 
     if normalized.startswith(TEXT_MIME_PREFIXES):
@@ -122,7 +130,15 @@ def _extract_text_from_bytes(raw: bytes, mime_type: str) -> str:
 
     if normalized == PDF_MIME:
         with pdfplumber.open(io.BytesIO(raw)) as pdf:
-            return "\n".join((page.extract_text() or "") for page in pdf.pages)
+            total_pages = len(pdf.pages)
+            start = max(0, (page_from or 1) - 1) if page_from else 0
+            end = min(total_pages, page_to) if page_to else total_pages
+            page_texts = []
+            for idx in range(start, end):
+                page_text = pdf.pages[idx].extract_text() or ""
+                if page_text:
+                    page_texts.append(f"[p{idx + 1}/{total_pages}] {page_text}")
+            return "\n".join(page_texts)
 
     if normalized == PPTX_MIME:
         presentation = Presentation(io.BytesIO(raw))
@@ -158,13 +174,21 @@ def _extract_text_from_bytes(raw: bytes, mime_type: str) -> str:
     raise ValueError(f"unsupported_mime:{normalized}")
 
 
-def _truncate(text: str) -> str:
-    if len(text) <= MAX_EXTRACTED_CHARS:
+def _truncate(text: str, max_chars: int = MAX_EXTRACTED_CHARS) -> str:
+    if len(text) <= max_chars:
         return text
-    return f"{text[:MAX_EXTRACTED_CHARS].rstrip()}…"
+    return f"{text[:max_chars].rstrip()}…"
 
 
-def extract_attachment_text(url: str, mime_type: str, name: str, size: int) -> dict:
+def extract_attachment_text(
+    url: str,
+    mime_type: str,
+    name: str,
+    size: int,
+    page_from: int | None = None,
+    page_to: int | None = None,
+    max_chars: int | None = None,
+) -> dict:
     if size and size > MAX_EXTRACT_FILE_SIZE:
         return {"text": "", "source": "skipped_too_large"}
 
@@ -178,12 +202,16 @@ def extract_attachment_text(url: str, mime_type: str, name: str, size: int) -> d
         return {"text": "", "source": "skipped_too_large"}
 
     try:
-        text = _extract_text_from_bytes(raw, mime_type)
+        text = _extract_text_from_bytes(raw, mime_type, page_from=page_from, page_to=page_to)
     except Exception as exc:
         print(f"[extract-text] parse failed for {name}: {exc}")
         return {"text": "", "source": "parse_error"}
 
-    return {"text": _truncate(text), "source": "ok"}
+    char_limit = max_chars if max_chars and max_chars > 0 else MAX_EXTRACTED_CHARS
+    truncated = _truncate(text, char_limit)
+    if truncated.endswith("…") and len(text) > char_limit:
+        truncated = truncated[:-1] + " [truncated]"
+    return {"text": truncated, "source": "ok"}
 
 
 @app.post("/extract-text")
@@ -197,6 +225,9 @@ async def extract_text(body: ExtractRequest):
                 body.mimeType,
                 body.name,
                 body.size,
+                body.page_from,
+                body.page_to,
+                body.max_chars,
             ),
             timeout=EXTRACT_TEXT_TIMEOUT_SECONDS,
         )

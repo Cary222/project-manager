@@ -1,0 +1,36 @@
+# ~/.config/systemd/user/project-manager-worker.service
+#
+# 安装步骤：
+#   1. 把这份文件放到目标机器的 ~/.config/systemd/user/project-manager-worker.service
+#      （按需替换 WorkingDirectory / ExecStart / EnvironmentFile 路径）
+#   2. systemctl --user daemon-reload
+#   3. systemctl --user enable --now project-manager-worker.service
+#   4. 验证：systemctl --user status project-manager-worker.service
+#   5. 看日志：journalctl --user -u project-manager-worker.service -f
+#
+# 注意事项：
+#   - 这是 user-level unit（不用 sudo）
+#   - 多个 worker 实例可同时跑（依赖 DB 抢 PENDING job，幂等安全）
+#   - Restart=always + RestartSec=5：worker 崩溃自动重启
+#   - 和 Next.js 同样读 .env.production
+
+[Unit]
+Description=project-manager Index Worker (PKM 笔记异步索引)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/hxy/work/personal/project-manager
+Environment=NODE_ENV=production
+EnvironmentFile=/home/hxy/work/personal/project-manager/.env.production
+ExecStart=/home/hxy/work/personal/project-manager/node_modules/.bin/tsx worker/index.ts
+Restart=always
+RestartSec=5
+
+# 日志转 journald（journalctl --user -u project-manager-worker -f 查看）
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=project-manager-worker
+
+[Install]
+WantedBy=default.target

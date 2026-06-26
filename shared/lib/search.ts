@@ -32,7 +32,7 @@ const SEARCH_LIMIT_DEFAULT = 8;
 const SEARCH_LIMIT_MAX = 20;
 const VECTOR_CANDIDATE_MULTIPLIER = 10;
 const KEYWORD_CANDIDATE_MULTIPLIER = 3;
-const EXTRACT_TEXT_TIMEOUT_MS = 15_000;
+const EXTRACT_TEXT_TIMEOUT_MS = 60_000;
 const MAX_EXTRACTED_CHARS = 2000;
 
 type SearchDocumentRow = {
@@ -383,7 +383,7 @@ export async function buildSearchablePkmNoteChunks(
   );
 }
 
-function buildSearchDocumentSourceType(sourceType: SearchableRecord["sourceType"]): PrismaSearchDocumentSourceType {
+export function buildSearchDocumentSourceType(sourceType: SearchableRecord["sourceType"]): PrismaSearchDocumentSourceType {
   return sourceType as PrismaSearchDocumentSourceType;
 }
 
@@ -393,6 +393,17 @@ export type AttachmentExtraction = {
   source: string;
 };
 
+const PAGE_BASED_MIME_TYPES = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+]);
+const PAGE_CHUNK_SIZE = 8;
+const PAGE_CHUNK_MAX_ROUNDS = 6;
+
+function isPageBasedAttachment(attachment: PkmAttachment): boolean {
+  return PAGE_BASED_MIME_TYPES.has(attachment.mimeType);
+}
+
 export async function extractAttachmentText(
   attachment: PkmAttachment,
 ): Promise<AttachmentExtraction> {
@@ -400,6 +411,51 @@ export async function extractAttachmentText(
     return { name: attachment.name, text: "", source: "skipped_too_large" };
   }
 
+  if (!isPageBasedAttachment(attachment)) {
+    return extractAttachmentTextSingle(attachment);
+  }
+
+  const collected: string[] = [];
+  let pageFrom = 1;
+  let totalRounds = 0;
+  let lastSource = "unknown";
+
+  while (totalRounds < PAGE_CHUNK_MAX_ROUNDS) {
+    const pageTo = pageFrom + PAGE_CHUNK_SIZE - 1;
+    const result = await extractAttachmentTextSingle(attachment, {
+      pageFrom,
+      pageTo,
+    });
+    lastSource = result.source;
+    totalRounds += 1;
+
+    if (result.source !== "ok") break;
+
+    const chunk = result.text.trim();
+    if (!chunk) break;
+
+    collected.push(chunk);
+
+    if (chunk.length < MAX_EXTRACTED_CHARS) break;
+    if (chunk.includes("[truncated]")) break;
+
+    pageFrom = pageTo + 1;
+  }
+
+  const joined = collected.join("\n\n");
+  return {
+    name: attachment.name,
+    text: joined.length > MAX_EXTRACTED_CHARS * 4
+      ? `${joined.slice(0, MAX_EXTRACTED_CHARS * 4).trimEnd()}…`
+      : joined,
+    source: collected.length > 0 ? "ok" : lastSource,
+  };
+}
+
+async function extractAttachmentTextSingle(
+  attachment: PkmAttachment,
+  options: { pageFrom?: number; pageTo?: number } = {},
+): Promise<AttachmentExtraction> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), EXTRACT_TEXT_TIMEOUT_MS);
 
@@ -413,6 +469,8 @@ export async function extractAttachmentText(
         mimeType: attachment.mimeType,
         name: attachment.name,
         size: attachment.size,
+        page_from: options.pageFrom,
+        page_to: options.pageTo,
       }),
       signal: controller.signal,
     });
@@ -450,24 +508,22 @@ export async function extractAttachmentTexts(
 ): Promise<Map<string, string>> {
   if (attachments.length === 0) return new Map();
 
-  const results = await Promise.all(
-    attachments.map((attachment) =>
-      extractAttachmentText(attachment).catch((error) => {
-        console.error(
-          `[search:extract] failed for ${attachment.name}:`,
-          error instanceof Error ? error.message : String(error),
-        );
-        return { name: attachment.name, text: "", source: "error" } satisfies AttachmentExtraction;
-      }),
-    ),
-  );
-
   const map = new Map<string, string>();
-  for (const result of results) {
-    if (result.text.length > 0) {
-      map.set(result.name, result.text);
+
+  for (const attachment of attachments) {
+    try {
+      const result = await extractAttachmentText(attachment);
+      if (result.text.length > 0) {
+        map.set(result.name, result.text);
+      }
+    } catch (error) {
+      console.error(
+        `[search:extract] failed for ${attachment.name}:`,
+        error instanceof Error ? error.message : String(error),
+      );
     }
   }
+
   return map;
 }
 
@@ -596,7 +652,11 @@ export async function syncCommitSearchDocument(commitId: string) {
   }
 }
 
-export async function syncPkmNoteSearchDocument(noteId: string) {
+export async function syncPkmNoteSearchDocument(
+  noteId: string,
+  options: { async?: boolean } = { async: true },
+) {
+  const isAsync = options.async !== false;
   const note = await prisma.pkmNote.findUnique({
     where: { id: noteId },
     include: {
@@ -616,7 +676,14 @@ export async function syncPkmNoteSearchDocument(noteId: string) {
   }
 
   const attachments = normalizePkmAttachments(note.attachments);
-  const attachmentTexts = await extractAttachmentTexts(attachments);
+
+  // 异步路径（默认，API 路由用）：跳过附件解析，只写 content 入库，入队 Worker 处理
+  // 同步路径（CLI backfill/reindex/Worker 用）：解析附件 + 生成向量，完整索引
+  const attachmentTexts: Map<string, string> = new Map();
+  if (!isAsync) {
+    const texts = await extractAttachmentTexts(attachments);
+    for (const [k, v] of texts) attachmentTexts.set(k, v);
+  }
 
   await prisma.searchDocument.deleteMany({
     where: {
@@ -627,12 +694,24 @@ export async function syncPkmNoteSearchDocument(noteId: string) {
 
   const chunks = await buildSearchablePkmNoteChunks({ ...note, attachments }, attachmentTexts);
 
-  if (chunks.length === 0) return [];
+  if (chunks.length === 0) {
+    if (isAsync) await enqueueIndexJob(noteId);
+    return [];
+  }
 
+  if (isAsync) {
+    // 异步路径：只写 content，不生成向量，入队
+    const savedChunks = await Promise.all(
+      chunks.map((chunk, idx) => upsertSearchDocument(chunk, idx, true)),
+    );
+    await enqueueIndexJob(noteId);
+    return savedChunks;
+  }
+
+  // 同步路径：完整写入 content + 生成向量
   const savedChunks = await Promise.all(
     chunks.map((chunk, idx) => upsertSearchDocument(chunk, idx, true)),
   );
-
   try {
     const embeddings = await fetchEmbeddingsBatch(savedChunks.map((c) => c.content));
     await Promise.all(
@@ -647,6 +726,41 @@ export async function syncPkmNoteSearchDocument(noteId: string) {
   }
 
   return savedChunks;
+}
+
+export async function syncPkmNoteSearchDocumentFull(noteId: string): ReturnType<typeof syncPkmNoteSearchDocument> {
+  return syncPkmNoteSearchDocument(noteId, { async: false });
+}
+
+export async function enqueueIndexJob(noteId: string): Promise<void> {
+  await prisma.indexJob.deleteMany({
+    where: { noteId, status: "PENDING" },
+  });
+  await prisma.indexJob.create({
+    data: { noteId, status: "PENDING", attempt: 0 },
+  });
+  console.log(`[search:job] enqueued index job for note ${noteId}`);
+}
+
+export async function extractAttachmentTextsWithSources(
+  attachments: PkmAttachment[],
+): Promise<{
+  results: Record<string, AttachmentExtraction>;
+  failedCount: number;
+  timeoutCount: number;
+}> {
+  const results: Record<string, AttachmentExtraction> = {};
+  let failedCount = 0;
+  let timeoutCount = 0;
+  for (const attachment of attachments) {
+    const result = await extractAttachmentText(attachment);
+    results[result.name] = result;
+    if (result.source !== "ok") {
+      failedCount += 1;
+      if (result.source === "timeout") timeoutCount += 1;
+    }
+  }
+  return { results, failedCount, timeoutCount };
 }
 
 export async function backfillSearchDocuments() {

@@ -182,6 +182,7 @@ async function cmdReindex(noteIds: string[], flags: Map<string, string>) {
     const slotSize = Math.max(1, Math.floor(batchSize / concurrency));
     const slots = chunk(batch, slotSize);
 
+    let slotErrors = 0;
     for (const slot of slots) {
       const results = await Promise.allSettled(slot.map((noteId) => syncPkmNoteSearchDocument(noteId)));
       for (const [i, result] of results.entries()) {
@@ -194,9 +195,10 @@ async function cmdReindex(noteIds: string[], flags: Map<string, string>) {
           processed++;
         }
       }
+      slotErrors += results.filter((r) => r.status === "rejected").length;
     }
 
-    console.log(`[reindex] batch ${index + 1}/${batches.length}: done=${batch.length} errors=${results.filter((r) => r.status === "rejected").length}`);
+    console.log(`[reindex] batch ${index + 1}/${batches.length}: done=${batch.length} errors=${slotErrors}`);
   }
 
   console.log(`[reindex] finished total=${ids.length} processed=${processed} failed=${failed}`);
