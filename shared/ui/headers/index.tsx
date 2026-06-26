@@ -21,7 +21,7 @@ export function BackLink({ href, label }: { href: string; label: string }): JSX.
 
 export function SimplePageHeader({ title, subtitle }: { title: string; subtitle?: string }): JSX.Element {
   return (
-    <div>
+    <div className="min-w-0 shrink-0">
       <h1 className="text-lg font-semibold leading-tight">{title}</h1>
       {subtitle && <p className="text-xs text-ink-400">{subtitle}</p>}
     </div>

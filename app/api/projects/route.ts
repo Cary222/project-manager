@@ -5,25 +5,66 @@ import { ResponsibilityKind } from "@prisma/client";
 import { createModerationLog } from "@/features/admin/moderation";
 import { ModerationAction } from "@prisma/client";
 import { PRIVATE_LIST_CACHE_CONTROL } from "@/lib/cache-control";
+import { ACTION } from "@/shared/lib/events/ACTION";
 
+type ProjectWithScores = {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  ownerId: string;
+  createdAt: Date;
+  updatedAt: Date;
+  hotScore: number;
+  combinedScore: number;
+};
 
 export async function GET() {
   try {
     await requireSession();
-    const projects = await prisma.project.findMany({
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        status: true,
-        ownerId: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+    const [projects, noteHotRows] = await Promise.all([
+      prisma.project.findMany({
+        include: {
+          pkmNotes: { select: { id: true } },
+          _count: { select: { pkmNotes: true } },
+        },
+      }),
+      prisma.activityLog.groupBy({
+        by: ["targetId"],
+        where: {
+          action: ACTION.PAGE_VIEW,
+          targetType: "note",
+          isValidView: true,
+        },
+        _count: { targetId: true },
+      }),
+    ]);
+
+    const noteViews = new Map<string, number>();
+    for (const row of noteHotRows as { targetId: string | null; _count: { targetId: number } }[]) {
+      if (row.targetId) noteViews.set(row.targetId, row._count.targetId);
+    }
+
+    const scoredProjects: ProjectWithScores[] = projects.map((p: typeof projects[number]) => {
+      const hotScore = p.pkmNotes.reduce((sum: number, note: { id: string }) => sum + (noteViews.get(note.id) ?? 0), 0);
+      const combinedScore = hotScore + p._count.pkmNotes;
+      return {
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        status: p.status,
+        ownerId: p.ownerId,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+        hotScore,
+        combinedScore,
+      };
     });
+
+    scoredProjects.sort((a, b) => b.combinedScore - a.combinedScore);
+
     return NextResponse.json(
-      { projects },
+      { projects: scoredProjects },
       {
         headers: {
           "Cache-Control": PRIVATE_LIST_CACHE_CONTROL,
@@ -45,7 +86,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "name is required" }, { status: 400 });
     }
 
-    const project = await prisma.$transaction(async (tx) => {
+    const project = await prisma.$transaction(async (tx: typeof prisma) => {
       const created = await tx.project.create({
         data: {
           name,

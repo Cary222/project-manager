@@ -12,6 +12,7 @@ import {
   type NotificationListItem,
 } from "@/features/admin/notifications";
 import { KnowledgeSearchPanel } from "@/features/knowledge/ui/KnowledgeSearchPanel";
+import { SearchInput } from "@/shared/ui/SearchInput";
 import {
   IconBell,
   IconChevronDown,
@@ -96,6 +97,7 @@ export function AppShell({
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [notifications, setNotifications] = useState<NotificationListItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
@@ -210,9 +212,26 @@ export function AppShell({
             <IconMenu />
           </button>
 
-          <div className="min-w-0 flex-1">{header}</div>
+          <div className="min-w-0 flex-1 shrink-0">{header}</div>
 
-          <div className="relative hidden md:block" ref={globalSearchRef}>
+          <div className="relative hidden md:block flex-[1_1_40%] shrink-0" ref={globalSearchRef}>
+            <SearchInput
+              value={searchQuery}
+              onChange={setSearchQuery}
+              onFocus={() => setGlobalSearchOpen(true)}
+              onBlur={() => setTimeout(() => setGlobalSearchOpen(false), 200)}
+              placeholder="全局搜索…"
+            />
+
+            {globalSearchOpen && searchQuery.trim() ? (
+              <div className="absolute left-0 top-12 z-30 w-full rounded-2xl border border-ink-200 bg-white p-4 shadow-elevated pm-fade-in">
+                <KnowledgeSearchPanel compact initialQuery={searchQuery} />
+              </div>
+            ) : null}
+          </div>
+
+          {/*
+          <div className="relative hidden md:block flex-[1_1_40%] shrink-0" ref={globalSearchRef}>
             <button
               type="button"
               onClick={() => {
@@ -220,7 +239,7 @@ export function AppShell({
                 setNotificationsOpen(false);
                 setUserMenuOpen(false);
               }}
-              className="flex items-center gap-2 rounded-lg border border-ink-200 bg-ink-100 px-3 py-1.5 text-sm text-ink-400 transition hover:border-brand-200 hover:bg-white hover:text-ink-600"
+              className="flex items-center gap-2 rounded-lg border border-ink-200 bg-ink-100 px-3 py-1.5 text-sm text-ink-400 transition hover:border-brand-200 hover:bg-white hover:text-ink-600 w-full"
               aria-label="打开全局搜索"
             >
               <IconSearch className="h-4 w-4" />
@@ -228,11 +247,12 @@ export function AppShell({
             </button>
 
             {globalSearchOpen ? (
-              <div className="absolute right-0 top-12 z-30 w-[420px] rounded-2xl border border-ink-200 bg-white p-4 shadow-elevated pm-fade-in">
+              <div className="absolute left-0 top-12 z-30 w-full rounded-2xl border border-ink-200 bg-white p-4 shadow-elevated pm-fade-in">
                 <KnowledgeSearchPanel compact />
               </div>
             ) : null}
           </div>
+          */}
 
           <div className="relative" ref={notificationRef}>
             <button

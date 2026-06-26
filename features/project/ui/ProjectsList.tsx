@@ -9,13 +9,26 @@ import { IconPlus, IconSearch, IconTrash } from "@/shared/ui/icons";
 import { SimplePageHeader } from "@/shared/ui/headers";
 import { fetchJson } from "@/shared/api/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/shared/api/swr-config";
+import { useRecentVisits } from "@/shared/lib/visits-context";
 
 type Project = {
   id: string;
   name: string;
   description: string | null;
   status: string;
+  hotScore: number;
+  combinedScore: number;
+  createdAt: string;
 };
+
+type SortOption = "score" | "name" | "created" | "recent";
+
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: "recent", label: "最近访问" },
+  { value: "score", label: "热度排序" },
+  { value: "name", label: "名称排序" },
+  { value: "created", label: "创建时间" },
+];
 
 const STATUS_STYLE: Record<string, string> = {
   ACTIVE: "bg-brand-50 text-brand-700",
@@ -33,9 +46,10 @@ function ProjectsTableSkeleton() {
   return (
     <div className="overflow-hidden rounded-xl border border-ink-200 bg-white shadow-soft">
       <div className="hidden grid-cols-12 gap-4 border-b border-ink-100 bg-ink-100/60 px-5 py-3 text-xs font-medium text-ink-500 md:grid">
-        <div className="col-span-5">项目名称</div>
+        <div className="col-span-4">项目名称</div>
         <div className="col-span-3">描述</div>
         <div className="col-span-2">状态</div>
+        <div className="col-span-1 text-center">热度</div>
         <div className="col-span-2 text-right">操作</div>
       </div>
       <div className="divide-y divide-ink-100">
@@ -44,7 +58,7 @@ function ProjectsTableSkeleton() {
             key={index}
             className="grid grid-cols-1 gap-2 px-5 py-4 md:grid-cols-12 md:items-center md:gap-4"
           >
-            <div className="col-span-5 flex items-center gap-3">
+            <div className="col-span-4 flex items-center gap-3">
               <div className="h-8 w-8 animate-pulse rounded-lg bg-ink-100" />
               <div className="space-y-2">
                 <div className="h-4 w-40 animate-pulse rounded bg-ink-100" />
@@ -55,7 +69,10 @@ function ProjectsTableSkeleton() {
             <div className="col-span-2">
               <div className="h-6 w-16 animate-pulse rounded-full bg-ink-100" />
             </div>
-            <div className="col-span-2 flex justify-start md:justify-end">
+            <div className="col-span-1 flex items-center justify-center">
+              <div className="h-4 w-8 animate-pulse rounded bg-ink-100" />
+            </div>
+            <div className="col-span-2 flex items-center justify-start gap-3 md:justify-end">
               <div className="h-4 w-12 animate-pulse rounded bg-ink-100" />
             </div>
           </div>
@@ -67,10 +84,12 @@ function ProjectsTableSkeleton() {
 
 function ProjectsTable({
   query,
+  sort,
   isRoot,
   onMessage,
 }: {
   query: string;
+  sort: SortOption;
   isRoot: boolean;
   onMessage: (message: string) => void;
 }) {
@@ -79,17 +98,46 @@ function ProjectsTable({
     fetchJson,
     STALE_SWR_OPTIONS
   );
+  const { visits } = useRecentVisits();
 
   const projects = useMemo(() => data?.projects ?? [], [data]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return projects;
-    return projects.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        (p.description || "").toLowerCase().includes(q)
-    );
-  }, [projects, query]);
+    let result = q
+      ? projects.filter(
+          (p) =>
+            p.name.toLowerCase().includes(q) ||
+            (p.description || "").toLowerCase().includes(q)
+        )
+      : [...projects];
+
+    switch (sort) {
+      case "score":
+        result.sort((a, b) => b.combinedScore - a.combinedScore);
+        break;
+      case "name":
+        result.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+        break;
+      case "created":
+        result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        break;
+      case "recent":
+        {
+          const visitMap = new Map(visits.map((v, i) => [v.projectId, i]));
+          result.sort((a, b) => {
+            const ai = visitMap.get(a.id);
+            const bi = visitMap.get(b.id);
+            if (ai === undefined && bi === undefined) return 0;
+            if (ai === undefined) return 1;
+            if (bi === undefined) return -1;
+            return ai - bi;
+          });
+        }
+        break;
+    }
+
+    return result;
+  }, [projects, query, sort, visits]);
 
   async function deleteProject(project: Project) {
     if (
@@ -117,12 +165,19 @@ function ProjectsTable({
     );
   }
 
+  function formatScore(score: number) {
+    if (score === 0) return "—";
+    if (score >= 1000) return `${(score / 1000).toFixed(1)}k`;
+    return String(score);
+  }
+
   return (
     <div className="overflow-hidden rounded-xl border border-ink-200 bg-white shadow-soft">
       <div className="hidden grid-cols-12 gap-4 border-b border-ink-100 bg-ink-100/60 px-5 py-3 text-xs font-medium text-ink-500 md:grid">
-        <div className="col-span-5">项目名称</div>
+        <div className="col-span-4">项目名称</div>
         <div className="col-span-3">描述</div>
         <div className="col-span-2">状态</div>
+        <div className="col-span-1 text-center">热度</div>
         <div className="col-span-2 text-right">操作</div>
       </div>
       {isLoading ? (
@@ -138,7 +193,7 @@ function ProjectsTable({
               key={p.id}
               className="grid grid-cols-1 gap-2 px-5 py-4 transition hover:bg-ink-100/40 md:grid-cols-12 md:items-center md:gap-4"
             >
-              <div className="col-span-5 flex items-center gap-3">
+              <div className="col-span-4 flex items-center gap-3">
                 <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
                   <IconSearch className="hidden" />
                   {p.name.charAt(0)}
@@ -160,6 +215,16 @@ function ProjectsTable({
                   }`}
                 >
                   {STATUS_LABEL[p.status] || p.status}
+                </span>
+              </div>
+              <div className="col-span-1 text-center">
+                <span
+                  className={`text-sm font-medium ${
+                    p.combinedScore > 0 ? "text-brand-600" : "text-ink-300"
+                  }`}
+                  title={`热度: ${p.combinedScore}`}
+                >
+                  {formatScore(p.combinedScore)}
                 </span>
               </div>
               <div className="col-span-2 flex items-center justify-start gap-3 md:justify-end">
@@ -189,15 +254,19 @@ function ProjectsTable({
 }
 
 function ProjectsToolbar({
+  sort,
   isRoot,
   message,
   onMessage,
   onQueryChange,
+  onSortChange,
 }: {
+  sort: SortOption;
   isRoot: boolean;
   message: string;
   onMessage: (message: string) => void;
   onQueryChange: (query: string) => void;
+  onSortChange: (sort: SortOption) => void;
 }) {
   const [queryInput, setQueryInput] = useState("");
   const [projectName, setProjectName] = useState("");
@@ -227,8 +296,24 @@ function ProjectsToolbar({
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="relative w-full max-w-sm">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-1 rounded-lg border border-ink-200 bg-white p-1">
+          {SORT_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onSortChange(option.value)}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                sort === option.value
+                  ? "bg-brand-100 text-brand-700"
+                  : "text-ink-500 hover:bg-ink-50 hover:text-ink-700"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <div className="relative w-[50%]">
           <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
           <input
             value={queryInput}
@@ -237,15 +322,15 @@ function ProjectsToolbar({
               setQueryInput(nextQuery);
               onQueryChange(nextQuery);
             }}
-            placeholder="搜索项目名称、描述…"
-            className="w-full rounded-lg border border-ink-200 bg-white py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+            placeholder="搜索项目…"
+            className="w-full rounded-lg border border-ink-200 bg-white py-2 pl-8 pr-3 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
           />
         </div>
         {isRoot ? (
           <button
             type="button"
             onClick={() => setShowForm((v) => !v)}
-            className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700"
+            className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700"
           >
             <IconPlus className="h-4 w-4" />
             新建项目
@@ -292,20 +377,24 @@ export function ProjectsList() {
   const { data: session } = useSession();
   const isRoot = session?.user?.role === "ROOT";
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<SortOption>("recent");
   const [message, setMessage] = useState("");
 
   return (
     <AppShell header={<ProjectsPageHeader />}>
       <div className="space-y-5 pm-fade-in">
         <ProjectsToolbar
+          sort={sort}
           isRoot={isRoot}
           message={message}
           onMessage={setMessage}
           onQueryChange={setQuery}
+          onSortChange={setSort}
         />
 
         <ProjectsTable
           query={query}
+          sort={sort}
           isRoot={isRoot}
           onMessage={setMessage}
         />
@@ -318,12 +407,18 @@ export function ProjectsListLoading() {
   return (
     <AppShell header={<ProjectsPageHeader />}>
       <div className="space-y-5 pm-fade-in">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="relative w-full max-w-sm">
-            <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
-            <div className="h-[42px] w-full animate-pulse rounded-lg border border-ink-200 bg-white" />
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-1 rounded-lg border border-ink-200 bg-white p-1">
+            <div className="h-7 w-16 animate-pulse rounded-md bg-ink-100" />
+            <div className="h-7 w-16 animate-pulse rounded-md bg-ink-100" />
+            <div className="h-7 w-16 animate-pulse rounded-md bg-ink-100" />
+            <div className="h-7 w-16 animate-pulse rounded-md bg-ink-100" />
           </div>
-          <div className="h-10 w-28 animate-pulse rounded-lg bg-ink-200" />
+          <div className="relative w-[50%]">
+            <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+            <div className="h-9 w-full animate-pulse rounded-lg border border-ink-200 bg-white" />
+          </div>
+          <div className="h-9 w-24 animate-pulse rounded-lg bg-brand-200" />
         </div>
 
         <ProjectsTableSkeleton />

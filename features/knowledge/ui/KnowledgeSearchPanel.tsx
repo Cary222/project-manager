@@ -99,18 +99,24 @@ export function KnowledgeSearchPanel({
 
   return (
     <div className="space-y-5">
-      <div className="space-y-3">
-        <div className={`relative w-full ${compact ? "max-w-md" : "max-w-2xl"}`}>
-          <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
-          <input
-            value={query}
-            onChange={handleInputChange}
-            placeholder={compact ? "全局搜索工单、提交、笔记…" : "搜索工单、提交记录、个人笔记、规范线索…"}
-            className="w-full rounded-xl border border-ink-200 bg-white py-3 pl-10 pr-3 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
-          />
+      {!compact && (
+        <div className="space-y-3">
+          <div className="relative w-full max-w-2xl">
+            <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+            <input
+              value={query}
+              onChange={handleInputChange}
+              placeholder="搜索工单、提交记录、个人笔记、规范线索…"
+              className="w-full rounded-xl border border-ink-200 bg-white py-3 pl-10 pr-3 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+            />
+          </div>
+          <p className="text-xs text-ink-400">{searching ? hint : "已支持工单、提交记录与个人笔记检索，后续可继续接入知识文档与项目规范。"}</p>
         </div>
+      )}
+
+      {compact && (
         <p className="text-xs text-ink-400">{searching ? hint : "已支持工单、提交记录与个人笔记检索，后续可继续接入知识文档与项目规范。"}</p>
-      </div>
+      )}
 
       {compact && searching ? (
         <div className="rounded-xl border border-ink-200 bg-white p-2 shadow-elevated">
