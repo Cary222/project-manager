@@ -207,3 +207,51 @@ export const IconTicket = (p: IconProps) => (
     <path d="M10 4v6" />
   </svg>
 );
+
+export const IconMic = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="9" y="2" width="6" height="12" rx="3" />
+    <path d="M5 11a7 7 0 0 0 14 0" />
+    <path d="M12 18v3" />
+    <path d="M9 21h6" />
+  </svg>
+);
+
+export const IconMicWave = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="9" y="2" width="6" height="12" rx="3" />
+    <path d="M5 11a7 7 0 0 0 14 0" />
+    <path d="M12 18v3" />
+    <path d="M9 21h6" />
+    <path d="M3 8v8M21 8v8" />
+  </svg>
+);
+
+export const IconPause = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="6" y="4" width="4" height="16" rx="1" />
+    <rect x="14" y="4" width="4" height="16" rx="1" />
+  </svg>
+);
+
+export const IconSend = (p: IconProps) => (
+  <svg {...base(p)}>
+    <line x1="22" y1="2" x2="11" y2="13" />
+    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+  </svg>
+);
+
+export const IconSparkles = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" />
+    <path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8z" />
+    <path d="M5 16l.6 1.6L7 18l-1.4.6L5 20l-.6-1.4L3 18l1.4-.6z" />
+  </svg>
+);
+
+export const IconX = (p: IconProps) => (
+  <svg {...base(p)}>
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);

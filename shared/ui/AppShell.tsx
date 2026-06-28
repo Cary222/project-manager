@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AiFloatingButton } from "@/features/ai/ui/AiFloatingButton";
 import {
   getNotificationsAction,
   getUnreadNotificationCountAction,
@@ -38,6 +39,12 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "工作台", icon: IconDashboard, match: (p) => p === "/" },
+  {
+    href: "/ai",
+    label: "AI 助手",
+    icon: IconTask,
+    match: (p) => p.startsWith("/ai"),
+  },
   {
     href: "/projects",
     label: "项目",
@@ -122,6 +129,11 @@ export function AppShell({
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Pre-load notifications on mount
+  useEffect(() => {
+    loadNotifications();
   }, []);
 
   async function loadNotifications() {
@@ -391,6 +403,9 @@ export function AppShell({
 
         <main className="flex-1 overflow-x-hidden p-4 sm:p-6">{children}</main>
       </div>
+
+      {/* AI Assistant Floating Button */}
+      <AiFloatingButton />
     </div>
   );
 }

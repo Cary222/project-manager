@@ -35,8 +35,10 @@
     "test:async-index": "tsx scripts/test-async-index-pipeline.ts"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.75",
     "@auth/prisma-adapter": "^2.11.2",
     "@prisma/client": "^6.19.3",
+    "ai": "^6.0.211",
     "bcryptjs": "^3.0.3",
     "mammoth": "^1.12.0",
     "next": "16.2.6",

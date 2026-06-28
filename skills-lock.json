@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "skills": {
+    "conversation-memory": {
+      "source": "sickn33/antigravity-awesome-skills",
+      "sourceType": "github",
+      "skillPath": "skills/conversation-memory/SKILL.md",
+      "computedHash": "6ef663c6cec4334033080cbaf84491ee757492f1c5c0d5d2d6f360743340ec39"
+    },
+    "cursor-subagent-creator": {
+      "source": "tech-leads-club/agent-skills",
+      "sourceType": "github",
+      "skillPath": "packages/skills-catalog/skills/(creation)/cursor-subagent-creator/SKILL.md",
+      "computedHash": "658a170d783a694e638814bed35a738184795da2d0f0b36489cac94a478cd8d7"
+    },
+    "dive-into-langgraph": {
+      "source": "luochang212/dive-into-langgraph",
+      "sourceType": "github",
+      "skillPath": "skills/dive-into-langgraph/SKILL.md",
+      "computedHash": "2e4a19dabd135f81394fc12f0e6d932084b17c222212396300e0938d4895c6f9"
+    },
+    "langchain-architecture": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/llm-application-dev/skills/langchain-architecture/SKILL.md",
+      "computedHash": "eb8d13321fbff0a5d64d1106dbcc7ae10da43d41c64753948d4d379ec37c3a68"
+    },
+    "langchain-rag": {
+      "source": "langchain-ai/langchain-skills",
+      "sourceType": "github",
+      "skillPath": "config/skills/langchain-rag/SKILL.md",
+      "computedHash": "53fa807b2094c4ee9136ff23a9330321c1a22959870e4a1f7bd53b753b623f94"
+    },
+    "llm-streaming-response-handler": {
+      "source": "erichowens/some_claude_skills",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/llm-streaming-response-handler/SKILL.md",
+      "computedHash": "be2e51c55bb48af07641e03cd45b9701f3c79523134ca1d6f58cd25d46b39b41"
+    },
+    "rag-retrieval": {
+      "source": "yonatangross/orchestkit",
+      "sourceType": "github",
+      "skillPath": "plugins/ork/skills/rag-retrieval/SKILL.md",
+      "computedHash": "f3f9b009e0f563a3b74e4625b6c82e5abeb217f9c47b2b4acf63d18533d5e419"
+    }
+  }
+}
