@@ -965,11 +965,22 @@ function toRankedCandidate(args: {
   const directMatchBoost = hasDirectQueryMatch(args.document.title, args.document.content, args.query) ? 2 : 0;
   const score = keywordScore + semanticScore * 10 + directMatchBoost;
 
+  // For PKM note chunks, use the full content as the snippet instead of cropping.
+  // A chunk boundary is set at 1500 chars — the whole thing is a coherent section
+  // of the document. Cropping it (even to 800 chars) risks hiding the answer that
+  // the user is looking for if it happens to fall near the boundary.
+  // This matters especially for technical spec queries where the answer (e.g.
+  // "视场角：±15°") sits in the middle of a chunk.
+  const useFullContent = args.document.sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.PKM_NOTE;
+  const snippet = useFullContent
+    ? args.document.content
+    : buildSnippet(args.document.content, args.terms);
+
   return {
     id: args.document.id,
     type,
     title: args.document.title,
-    snippet: buildSnippet(args.document.content, args.terms),
+    snippet,
     project: args.document.project,
     url: args.document.url,
     score,
