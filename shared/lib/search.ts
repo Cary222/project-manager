@@ -145,15 +145,20 @@ function buildSnippet(content: string, terms: string[]) {
   if (plain.length <= SNIPPET_MAX_CHARS) return plain;
 
   const lower = plain.toLowerCase();
-  const hit = terms
+  const hits = terms
     .map((term) => lower.indexOf(term.toLowerCase()))
     .filter((index) => index >= 0)
-    .sort((a, b) => a - b)[0];
+    .sort((a, b) => a - b);
 
-  if (hit === undefined) {
+  if (hits.length === 0) {
     return truncate(plain, SNIPPET_MAX_CHARS);
   }
 
+  // Use the *last* hit as the anchor. With queries like "光污染 视场角",
+  // "光污染" matches near the top of the chunk but "视场角" matches in
+  // the middle — and the middle one is where the user's answer lives.
+  // Picking the last hit keeps both terms inside the snippet window.
+  const hit = hits[hits.length - 1];
   const radius = Math.floor((SNIPPET_MAX_CHARS - 1) / 2);
   const start = Math.max(0, hit - radius);
   const end = Math.min(plain.length, start + SNIPPET_MAX_CHARS - 1);
