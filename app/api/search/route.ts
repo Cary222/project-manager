@@ -19,7 +19,32 @@ export async function GET(request: Request) {
       viewerUserId: session.user.id,
     });
 
-    return NextResponse.json(data);
+    // Deduplicate results by (sourceType, sourceId) for the human-facing search panel.
+    // searchDocuments returns every chunk independently so the AI can find the right
+    // one — but showing three chunks of the same note in the UI is confusing.
+    // Keep the highest-scoring chunk per source.
+    const dedupedResults = (() => {
+      const best = new Map<string, typeof data.results[0]>();
+      for (const item of data.results) {
+        const key = `${item.type}:${item.metadata?.projectId ?? ""}:${item.url}`;
+        if (!best.has(key) || item.score > best.get(key)!.score) {
+          best.set(key, item);
+        }
+      }
+      return Array.from(best.values());
+    })();
+
+    const dedupedGrouped: typeof data.grouped = {
+      ticket: dedupedResults.filter((r) => r.type === "ticket"),
+      commit: dedupedResults.filter((r) => r.type === "commit"),
+      note: dedupedResults.filter((r) => r.type === "note"),
+    };
+
+    return NextResponse.json({
+      ...data,
+      results: dedupedResults,
+      grouped: dedupedGrouped,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
     const status = message === "UNAUTHORIZED" ? 401 : 500;
