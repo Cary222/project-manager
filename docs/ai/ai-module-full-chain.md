@@ -574,6 +574,12 @@ npx tsc --noEmit
 
 ---
 
+## 相关文档
+
+- [`docs/ai/ai-chat-page-polish.md`](./ai-chat-page-polish.md) — AI 对话页"默认选中最近 / 画像可编辑 / 标签可删除"复现手册
+
+---
+
 ## 10. 踩坑记录
 
 ### 坑 1：新对话同时出现两个 AI 气泡

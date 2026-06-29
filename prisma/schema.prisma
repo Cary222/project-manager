@@ -540,6 +540,7 @@ model AiConversation {
   userId         String
   title          String
   summary        Json?
+  tags           String[] @default([])
   messageCount   Int      @default(0)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt

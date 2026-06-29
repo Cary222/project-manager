@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireSession } from "@/shared/lib/permissions";
+import { prisma } from "@/shared/db/client";
 import {
   getConversationsWithMessages,
   deleteConversation,
@@ -8,9 +9,14 @@ import {
 } from "@/features/ai/lib/conversation-store";
 import { enqueueSummarizeConversation } from "@/features/ai/lib/background-jobs";
 
-const renameSchema = z.object({
-  title: z.string().min(1).max(200),
-});
+const patchSchema = z
+  .object({
+    title: z.string().min(1).max(200).optional(),
+    tags: z.array(z.string().min(1).max(50)).max(20).optional(),
+  })
+  .refine((data) => data.title !== undefined || data.tags !== undefined, {
+    message: "Must provide at least one of: title, tags",
+  });
 
 export async function GET(
   _request: NextRequest,
@@ -56,11 +62,47 @@ export async function PATCH(
     const session = await requireSession();
     const { id } = await params;
     const body = await request.json();
-    const { title } = renameSchema.parse(body);
+    const parsed = patchSchema.parse(body);
 
-    const conversation = await renameConversation(id, session.user.id, title);
+    // Ownership check first so a malicious caller can't probe tags on a
+    // conversation that doesn't belong to them.
+    const existing = await prisma.aiConversation.findUnique({
+      where: { id },
+      select: { userId: true },
+    });
+    if (!existing || existing.userId !== session.user.id) {
+      return NextResponse.json(
+        { data: null, error: "Conversation not found" },
+        { status: 404 }
+      );
+    }
 
-    return NextResponse.json({ data: conversation, error: null });
+    // Branch: tags-only update (used by the per-tag × button in the sidebar)
+    if (parsed.tags !== undefined) {
+      const updated = await prisma.aiConversation.update({
+        where: { id },
+        data: { tags: parsed.tags },
+      });
+      return NextResponse.json({ data: updated, error: null });
+    }
+
+    // Otherwise, treat it as a rename. Keep `renameConversation` as the
+    // single source of truth for title mutations so the ownership check and
+    // 404 behavior stay identical to before.
+    if (parsed.title !== undefined) {
+      const conversation = await renameConversation(
+        id,
+        session.user.id,
+        parsed.title
+      );
+      return NextResponse.json({ data: conversation, error: null });
+    }
+
+    // Unreachable thanks to the .refine() guard, but keep a defensive branch.
+    return NextResponse.json(
+      { data: null, error: "Nothing to update" },
+      { status: 400 }
+    );
   } catch (err) {
     if (err instanceof z.ZodError) {
       return NextResponse.json(

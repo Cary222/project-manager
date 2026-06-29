@@ -11,6 +11,7 @@ export interface ConversationSummary {
   messageCount: number;
   lastMessageAt: string;
   summary?: string;
+  tags?: string[];
 }
 
 interface AiConversationSidebarProps {
@@ -190,6 +191,33 @@ export function AiConversationSidebar({ activeId, onSelect, onClose, onNewConver
     }
   }, [activeId, onSelect]);
 
+  // Remove a single tag from a conversation (used by the per-tag × button).
+  // Optimistic update — if the PATCH fails, we just log; the next sidebar
+  // refresh will reconcile the UI with the server.
+  const handleRemoveTag = useCallback(
+    async (convId: string, tagToRemove: string) => {
+      const target = conversations.find((c) => c.id === convId);
+      if (!target) return;
+      const nextTags = (target.tags ?? []).filter((t) => t !== tagToRemove);
+
+      setConversations((prev) =>
+        prev.map((c) => (c.id === convId ? { ...c, tags: nextTags } : c))
+      );
+
+      try {
+        const res = await fetch(`/api/ai/conversations/${convId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tags: nextTags }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch (err) {
+        console.error("[AiConversationSidebar] remove tag error:", err);
+      }
+    },
+    [conversations]
+  );
+
   const startRename = useCallback((id: string, currentTitle: string) => {
     setRenamingId(id);
     setRenameValue(currentTitle);
@@ -305,6 +333,35 @@ export function AiConversationSidebar({ activeId, onSelect, onClose, onNewConver
                         ? conv.title.slice(0, 20) + "…"
                         : conv.title}
                     </p>
+                  )}
+
+                  {/* Conversation tags. Each tag has a × button on the right
+                      that removes it from this conversation via PATCH. The
+                      × button is hidden by default and appears on hover so
+                      the row stays clean. */}
+                  {conv.tags && conv.tags.length > 0 && (
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {conv.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="group/tag inline-flex items-center gap-0.5 rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700"
+                        >
+                          {tag}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleRemoveTag(conv.id, tag);
+                            }}
+                            className="ml-0.5 inline-flex h-3 w-3 items-center justify-center rounded-full text-brand-400 opacity-0 transition hover:bg-brand-200 hover:text-danger group-hover/tag:opacity-100"
+                            aria-label={`删除标签 ${tag}`}
+                            title={`删除标签 ${tag}`}
+                          >
+                            <IconX className="h-2.5 w-2.5" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
                   )}
 
                   <div className="mt-1 flex items-center gap-2">
