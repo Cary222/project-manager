@@ -86,6 +86,13 @@ function truncate(text: string, max = 180) {
   return `${value.slice(0, max - 1).trimEnd()}…`;
 }
 
+// Snippet size for SearchDocument results shown to the LLM. Bumped from
+// 180 to 800 so the LLM can see the answer when it sits in the middle of
+// a long chunk (e.g. a 1500-char spec chunk where the user-asked value
+// appears around char 1000). 800 still fits comfortably in the prompt
+// budget while making RAG useful for question-answering over long docs.
+const SNIPPET_MAX_CHARS = 800;
+
 function splitTerms(query: string) {
   return normalizeQuery(query)
     .split(" ")
@@ -131,6 +138,12 @@ function coerceMetadata(value: Prisma.JsonValue | null): SearchDocumentMetadata 
 function buildSnippet(content: string, terms: string[]) {
   const plain = content.replace(/\s+/g, " ").trim();
   if (!plain) return "";
+
+  // When the chunk is short enough, return it whole — no truncation. This
+  // is important for chunk-level RAG: a 1500-char chunk often *is* the
+  // answer and shouldn't be cropped to 180 chars from the top.
+  if (plain.length <= SNIPPET_MAX_CHARS) return plain;
+
   const lower = plain.toLowerCase();
   const hit = terms
     .map((term) => lower.indexOf(term.toLowerCase()))
@@ -138,13 +151,14 @@ function buildSnippet(content: string, terms: string[]) {
     .sort((a, b) => a - b)[0];
 
   if (hit === undefined) {
-    return truncate(plain, 180);
+    return truncate(plain, SNIPPET_MAX_CHARS);
   }
 
-  const start = Math.max(0, hit - 48);
-  const end = Math.min(plain.length, hit + 132);
+  const radius = Math.floor((SNIPPET_MAX_CHARS - 1) / 2);
+  const start = Math.max(0, hit - radius);
+  const end = Math.min(plain.length, start + SNIPPET_MAX_CHARS - 1);
   const snippet = plain.slice(start, end).trim();
-  return `${start > 0 ? "…" : ""}${truncate(snippet, 180)}${end < plain.length ? "…" : ""}`;
+  return `${start > 0 ? "…" : ""}${snippet}${end < plain.length ? "…" : ""}`;
 }
 
 function rankDocument(title: string, content: string, terms: string[]) {
