@@ -123,6 +123,8 @@ function coerceMetadata(value: Prisma.JsonValue | null): SearchDocumentMetadata 
       ? data.noteTags.filter((tag): tag is string => typeof tag === "string")
       : undefined,
     noteIsPublic: typeof data.noteIsPublic === "boolean" ? data.noteIsPublic : undefined,
+    noteAttachmentCount: typeof data.noteAttachmentCount === "number" ? data.noteAttachmentCount : undefined,
+    noteIndexedAttachmentCount: typeof data.noteIndexedAttachmentCount === "number" ? data.noteIndexedAttachmentCount : undefined,
   };
 }
 
@@ -325,6 +327,7 @@ function buildSearchablePkmNoteDocumentContent(
   content: string,
   chunkIndex: number,
   totalChunks: number,
+  attachmentIndexedCount: number,
 ): SearchableRecord {
   const authorName = note.user.name || note.user.email;
 
@@ -334,6 +337,8 @@ function buildSearchablePkmNoteDocumentContent(
     note.project ? `项目 ${note.project.name}` : null,
     `[chunk ${chunkIndex + 1}/${totalChunks}]`,
   ].filter(Boolean).join("\n");
+
+  const totalAttachmentCount = Array.isArray(note.attachments) ? note.attachments.length : 0;
 
   return {
     sourceType: SEARCH_DOCUMENT_SOURCE_TYPES.PKM_NOTE,
@@ -352,6 +357,8 @@ function buildSearchablePkmNoteDocumentContent(
       author: authorName,
       chunkIndex,
       totalChunks,
+      noteAttachmentCount: totalAttachmentCount,
+      noteIndexedAttachmentCount: attachmentIndexedCount,
     },
   };
 }
@@ -378,8 +385,12 @@ export async function buildSearchablePkmNoteChunks(
   }
 
   const totalChunks = rawChunks.length;
+  const attachmentIndexedCount = attachments.reduce(
+    (count, att) => count + (attachmentTexts.get(att.name) ? 1 : 0),
+    0,
+  );
   return rawChunks.map((content, idx) =>
-    buildSearchablePkmNoteDocumentContent(note, content, idx, totalChunks),
+    buildSearchablePkmNoteDocumentContent(note, content, idx, totalChunks, attachmentIndexedCount),
   );
 }
 
@@ -841,15 +852,12 @@ async function searchKeywordCandidates(options: {
     take: options.limit * 10,
   });
 
-  const grouped = new Map<string, SearchDocumentRow>();
-  for (const doc of documents as SearchDocumentRow[]) {
-    const existing = grouped.get(doc.sourceId);
-    if (!existing || doc.content.length > existing.content.length) {
-      grouped.set(doc.sourceId, doc);
-    }
-  }
-
-  return Array.from(grouped.values()).slice(0, options.limit);
+  // Each chunk is an independent retrieval candidate. Previously this code
+  // grouped by `sourceId` and kept only the longest chunk per note — which
+  // silently dropped the chunk that actually contained the user's answer.
+  // Letting every chunk compete on its own score lets RAG return the right
+  // slice of a long note/attachment.
+  return (documents as SearchDocumentRow[]).slice(0, options.limit);
 }
 
 async function searchVectorCandidates(options: {
@@ -880,15 +888,11 @@ async function searchVectorCandidates(options: {
     LIMIT ${options.limit}
   `);
 
-  const grouped = new Map<string, VectorSearchRow>();
-  for (const row of rows) {
-    const existing = grouped.get(row.sourceId);
-    if (!existing || row.distance < existing.distance) {
-      grouped.set(row.sourceId, row);
-    }
-  }
-
-  return Array.from(grouped.values()).slice(0, options.limit);
+  // Each vector row is an independent candidate. The SQL LIMIT already
+  // returns the closest chunks, so we don't need to collapse multiple
+  // chunks of the same note into one — that would drop the chunk the
+  // user is actually looking for.
+  return rows;
 }
 
 function normalizeSemanticScore(distance: number) {
@@ -940,10 +944,15 @@ function mergeCandidates(options: {
   vectorDocuments: VectorSearchRow[];
   viewerUserId?: string | null;
 }) {
-  const merged = new Map<string, RankedCandidate>();
+  // Each chunk is an independent candidate. Previously we deduped by
+  // `${sourceType}:${sourceId}`, which meant a note with three chunks
+  // could only contribute ONE chunk to the final ranked list — and if
+  // that "winning" chunk didn't contain the answer, the user got nothing.
+  // Now multiple chunks from the same note can appear, ranked by score;
+  // the LLM treats them as different sections of the same document.
+  const candidates: RankedCandidate[] = [];
 
   for (const document of options.keywordDocuments) {
-    const key = `${document.sourceType}:${document.sourceId}`;
     const keywordScore = rankDocument(document.title, document.content, options.terms);
     if (keywordScore <= 0 && !hasDirectQueryMatch(document.title, document.content, options.query)) {
       continue;
@@ -958,52 +967,38 @@ function mergeCandidates(options: {
 
     if (!candidate) continue;
     if (!canAccessSearchResult(candidate, options.viewerUserId)) continue;
-    merged.set(key, candidate);
+    candidates.push(candidate);
   }
 
   for (const document of options.vectorDocuments) {
-    const key = `${document.sourceType}:${document.sourceId}`;
     const semanticScore = normalizeSemanticScore(document.distance);
+    const keywordScore = rankDocument(document.title, document.content, options.terms);
 
-    if (!merged.has(key)) {
-      const keywordScore = rankDocument(document.title, document.content, options.terms);
-      const candidate = toRankedCandidate({
-        document: {
-          id: document.id,
-          sourceType: document.sourceType,
-          title: document.title,
-          content: document.content,
-          url: document.url,
-          metadata: document.metadata,
-          updatedAt: document.updatedAt,
-          project: document.projectId && document.projectName
-            ? { id: document.projectId, name: document.projectName }
-            : null,
-        },
-        query: options.query,
-        terms: options.terms,
-        keywordScore,
-        semanticScore,
-      });
+    const candidate = toRankedCandidate({
+      document: {
+        id: document.id,
+        sourceType: document.sourceType,
+        title: document.title,
+        content: document.content,
+        url: document.url,
+        metadata: document.metadata,
+        updatedAt: document.updatedAt,
+        project: document.projectId && document.projectName
+          ? { id: document.projectId, name: document.projectName }
+          : null,
+      },
+      query: options.query,
+      terms: options.terms,
+      keywordScore,
+      semanticScore,
+    });
 
-      if (!candidate) continue;
-      if (!canAccessSearchResult(candidate, options.viewerUserId)) continue;
-      merged.set(key, candidate);
-    } else {
-      const existing = merged.get(key)!;
-      const directMatchBoost = hasDirectQueryMatch(document.title, document.content, options.query) ? 2 : 0;
-      const boostedScore = existing.keywordScore + semanticScore * 10 + directMatchBoost;
-      if (boostedScore > existing.score) {
-        merged.set(key, {
-          ...existing,
-          semanticScore,
-          score: boostedScore,
-        });
-      }
-    }
+    if (!candidate) continue;
+    if (!canAccessSearchResult(candidate, options.viewerUserId)) continue;
+    candidates.push(candidate);
   }
 
-  return Array.from(merged.values()).sort((a, b) => {
+  return candidates.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
     return b.updatedAt - a.updatedAt;
   });
