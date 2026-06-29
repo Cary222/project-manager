@@ -28,8 +28,22 @@ interface AiMessageBubbleProps {
 const TYPEWRITER_MIN_MS_PER_CHAR = 18;
 const TYPEWRITER_MAX_MS_PER_CHAR = 55;
 
+// Deduplicate sources by URL. The RAG retrieval returns each chunk of a note
+// independently (so the LLM can pick the right slice), but to the user a
+// three-chunk note should look like one source, not three.
+// The first occurrence wins, since the backend serves them in score order.
+function dedupeSourcesByUrl(sources: SourceReference[]): SourceReference[] {
+  const seen = new Set<string>();
+  return sources.filter((source) => {
+    if (seen.has(source.url)) return false;
+    seen.add(source.url);
+    return true;
+  });
+}
+
 export function AiMessageBubble({ role, content, sources, isStreaming }: AiMessageBubbleProps) {
   const isUser = role === "user";
+  const dedupedSources = sources ? dedupeSourcesByUrl(sources) : undefined;
   // User messages always render the full content. Assistant messages start
   // empty and are revealed by the typewriter loop below.
   const [displayed, setDisplayed] = useState(isUser ? content : "");
@@ -187,13 +201,13 @@ export function AiMessageBubble({ role, content, sources, isStreaming }: AiMessa
           )}
         </div>
 
-        {!isUser && sources && sources.length > 0 && (
+        {!isUser && dedupedSources && dedupedSources.length > 0 && (
           <div className="mt-2 rounded-xl border border-ink-200 bg-white p-3 shadow-sm">
             <p className="mb-2 text-xs font-medium text-ink-500">参考来源</p>
             <div className="space-y-1.5">
-              {sources.map((source) => (
+              {dedupedSources.map((source) => (
                 <Link
-                  key={source.index}
+                  key={source.url}
                   href={source.url}
                   target="_blank"
                   rel="noopener noreferrer"
