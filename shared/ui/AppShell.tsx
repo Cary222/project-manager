@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Toaster } from "sonner";
 import { AiFloatingButton } from "@/features/ai/ui/AiFloatingButton";
 import {
   getNotificationsAction,
@@ -58,7 +59,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: IconKnowledge,
     match: (p) => p.startsWith("/knowledge"),
   },
-  { href: "/team", label: "团队", icon: IconTeam, match: (p) => p.startsWith("/team") },
+  { href: "/team", label: "个人与团队", icon: IconTeam, match: (p) => p.startsWith("/team") },
   {
     href: "/reports",
     label: "报表",
@@ -406,6 +407,9 @@ export function AppShell({
 
       {/* AI Assistant Floating Button */}
       <AiFloatingButton />
+
+      {/* Sonner Toast Container */}
+      <Toaster position="top-right" richColors />
     </div>
   );
 }

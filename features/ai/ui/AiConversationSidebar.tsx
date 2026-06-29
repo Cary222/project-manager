@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IconEdit, IconPlus, IconTrash, IconX } from "@/shared/ui/icons";
+import { useToast } from "@/shared/lib/use-toast";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -98,6 +99,7 @@ export function AiConversationSidebar({ activeId, onSelect, onClose, onNewConver
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast();
 
   // Context menu state: id of the conversation being acted on
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
@@ -122,10 +124,12 @@ export function AiConversationSidebar({ activeId, onSelect, onClose, onNewConver
       setConversations(json.data ?? []);
     } catch (err) {
       setError("加载失败，请重试");
+      toast.error("加载失败，请重试");
       console.error("[AiConversationSidebar] load error:", err);
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => { void (async () => { await loadConversations(); })(); }, [loadConversations]);

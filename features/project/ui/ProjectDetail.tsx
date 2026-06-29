@@ -13,6 +13,7 @@ import { uploadAttachmentAsNote } from "@/shared/lib/upload";
 import { FileUploader } from "@/shared/ui/FileUploader";
 import { DispatchProjectDetail } from "@/features/dispatch/ui/DispatchProjectDetail";
 import { TaskStatsCards, type TaskStats } from "@/shared/ui/TaskStatsCards";
+import { useToast } from "@/shared/lib/use-toast";
 import { useRecentVisits } from "@/shared/lib/visits-context";
 import {
   KIND_LABEL,
@@ -541,6 +542,7 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
   const { scheduleRecord } = useRecentVisits();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab") as TabKey | null;
+  const { toast } = useToast();
 
   const validTabs: TabKey[] = ["overview", "tasks", "dispatch", "code", "docs", "members", "settings"];
   const [activeTab, setActiveTab] = useState<TabKey>(
@@ -615,7 +617,7 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
                 <button
                   type="button"
                   className="inline-flex items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-sm text-ink-700 transition hover:border-brand-300 hover:bg-brand-50"
-                  onClick={() => alert("编辑功能即将上线")}
+                  onClick={() => toast.info("编辑功能即将上线")}
                 >
                   <IconEdit className="h-4 w-4" />
                   编辑项目
@@ -624,7 +626,7 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
                   type="button"
                   className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-ink-200 bg-white text-ink-700 transition hover:border-brand-300 hover:bg-brand-50"
                   aria-label="更多操作"
-                  onClick={() => alert("更多操作即将上线")}
+                  onClick={() => toast.info("更多操作即将上线")}
                 >
                   <IconMenu className="h-4 w-4" />
                 </button>

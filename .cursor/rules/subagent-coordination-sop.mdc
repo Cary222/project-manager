@@ -1,0 +1,194 @@
+---
+description: 子代理协作 SOP — 主代理是唯一协调者，子代理间禁止直接通信/互相监控
+globs: .cursor/agents/**/*.md
+alwaysApply: true
+---
+
+# 子代理协作 SOP（主代理调度模式）
+
+## 核心原则
+
+> **主代理是唯一协调者。子代理间禁止直接通信。**
+
+Cursor 的 `Task` 子代理机制特点：
+
+- 每个子代理有**独立的 chat context**，无法看到其他子代理的状态
+- 子代理的 prompt 只能来自**主代理**或被另一子代理**显式同步调用**
+- 子代理**没有自动触发 / 跨代理事件订阅 / 跨代理状态查询**能力
+- 子代理 prompt 中的"等 X 完成后再做 Y"等时序语言**无法生效**
+
+## 错误模式（禁止）
+
+❌ **跨子代理时序**
+
+```ts
+// ❌ 错：两个子代理被同时启动，子代理 B 指望"PR2 完成后做审计"
+Task(fullstack-developer) — 实施 PR2
+Task(ai-learning-mentor) — 等 PR2 完成后做审计
+// ↑ 子代理 B 拿到 prompt 时只能 idle 等指令，永远不会主动去 audit
+```
+
+❌ **子代理里写"监控其他子代理"**
+
+```text
+// ❌ 在子代理 prompt 里写
+"PR2 子代理完成后 10 分钟内开始审计"
+"轮询 transcript 大小，等待完成信号"
+"看到完成响应后立即开始"
+```
+
+子代理没有 listener 机制，它拿不到"完成信号"。这种 prompt 只会让子代理空转直到超时。
+
+## 正确模式（必须）
+
+### 模式 A：主代理轮询 + 主代理委派
+
+```text
+主代理启动 fullstack-developer（实施 X）
+  ↓
+主代理 sleep + 查 transcript 文件大小
+  ↓
+看到"## X 完工报告" 字符串
+  ↓
+主代理启动 ai-learning-mentor（基于 X 的产物做审计）
+  ↓
+ai-learning-mentor 完成 → 主代理汇总 → 给用户
+```
+
+实现细节：
+- 轮询间隔：`block_until_ms: 300000`（5 分钟起），最长等 2-3 次
+- 判断完成的信号：transcript 最后一行 assistant 文本包含"## X 完工报告"关键字
+- 委派下一个子代理时，主代理在 prompt 里写**实际产物路径**，让子代理 Read 那些文件（不要指望子代理自己找）
+
+### 模式 B：链式 `resume`
+
+```text
+主代理启动 subagent A
+  ↓
+subagent A 完成后 → 主代理拿到 final response
+  ↓
+主代理对 subagent A 用 resume(id, "继续做 Y")  ← 把 A 当作持续执行者
+```
+
+适用场景：A 的工作需要基于 A 自己前面的产出（如开发 + 修复）。
+
+### 模式 C：单一子代理完成多阶段
+
+如果任务本质上是串行的（实施 → 自我审计），用**一个子代理**完成。
+
+```text
+Task(fullstack-developer, prompt="
+1. 实施 X
+2. 自我审计 X 的产出，给出 must-fix 列表
+3. 实施修复
+4. 重新跑测试
+")
+```
+
+适用：阶段间有强数据依赖 + 整体规模不大。
+
+### 模式 D：并行审计（code-reviewer + ai-learning-mentor 双线）
+
+适用场景：
+- PR 主实施已完工，主代理需要同时获得**硬技术审查**（类型 / 安全 / N+1 / FSD）+ **软架构审查**（取舍 / 边界 / 可观测性）
+- PR 范围适中（单 PR 内 4-8 个文件改动），双线串行成本太高
+- 想在 PR 早期发现技术债（类型错误、N+1、XSS）
+
+```text
+主代理启动 fullstack-developer（实施 PR N）
+  ↓
+主代理 sleep + poll transcript（等 "## PR N 完工报告" 关键字）
+  ↓
+主代理**同一 message 内并行启动**（都用 run_in_background: false）：
+  ├─ code-reviewer     → prompt 含产物路径 + 必读规则 + 范围限定
+  └─ ai-learning-mentor → prompt 含产物路径 + 必读规则 + 范围限定
+  ↓
+两个子代理各自独立 Read 文件（互不可见，各自报告给主代理）
+  ↓
+主代理 sleep + poll，等两份报告
+  ↓
+主代理合并：
+  - 把双方 cross- 标记的项正确归位（避免双方都漏 / 都重复）
+  - 取出所有 Critical (Must Fix)，一起丢给 fullstack-developer 修复（主代理可修小项）
+  ↓
+修复 → 跑 npx tsc --noEmit + 单元测试 → 全绿
+  ↓
+主代理（或 fullstack-developer 配合）用 dev-to-doc-recap skill 写复现文档
+  ↓
+等用户决策 commit
+```
+
+**关键 SOP 约束**：
+
+1. **并行 ≠ 独立 prompt** — 两个子代理 prompt 必须**独立写明产物路径**，不能"一个说另一个会给你"。都从主代理出发，互不可见。
+
+2. **报告位置固定**：
+   - `code-reviewer` → `docs/reports/PR<N>-<name>-code-review.md`（按本次功能命名）
+   - `ai-learning-mentor` → 沿用现有 ai-audit 报告位置
+
+3. **cross- 转交标记**：
+   - 任何越界的发现（硬技术 agent 写了软架构结论 / 反之）必须标 `cross-mentor:` 或 `cross-reviewer:`
+   - 主代理负责归位，**不**让双子代理互相依赖
+
+4. **不能用 background 模式** — 双子代理都设 `run_in_background: false`，主代理才能并行 sleep + 等
+
+5. **不破坏既有 A/B/C** — D 是补充，不是替代
+
+6. **报告产出物检查**：
+   - 主代理等两份报告时，确认 `docs/reports/PR<N>-<name>-code-review.md` 真实落盘（空文件 = 子代理没真跑，应重新派）
+   - 同样检查 mentor 的 ai-audit 报告（若有要求）
+
+## 主代理编排 checklist
+
+启动多子代理前，确认：
+
+- [ ] 每个子代理的 prompt 都明确"向主代理报告"而不是"等 X 完成"
+- [ ] 子代理 prompt 中没有"等另一个子代理完成"这类时序语言
+- [ ] 子代理需要的输入数据（文件路径、背景信息）写在 prompt 里
+- [ ] 主代理编排轮询 / resume 逻辑
+- [ ] **（模式 D 专用）** 并行启动时，两个子代理的 prompt 都包含 `## 必读产物路径` 段和 `## 范围限定` 段
+
+## 子代理 prompt 模板
+
+**正确的子代理 prompt 结构**：
+
+```text
+你是 <role> 子代理。
+[角色身份 + 必读规则]
+
+## 任务背景
+[主代理传入的上下文：需求、已拍板的决策、产物路径]
+
+## 你的工作
+[具体步骤 1、2、3]
+[每一步要 Read / Edit / Bash 的具体文件]
+
+## 不要做的事
+[明确禁止]
+
+## 汇报格式
+[主代理需要什么形式的最终响应]
+
+## ⚠️ 重要约束
+- 你的最终响应只发给主代理
+- 不要写"等 X 子代理完成后做 Y"——你不知道 X 的状态
+- 如果收到 prompt 时需要等前置产出，请向主代理汇报"缺少前置产物"而不是 idle 等
+```
+
+## 反例
+
+```text
+// ❌ 反例 1：让子代理监控另一个子代理
+"PR2 子代理完成后 10 分钟内开始审计"
+
+// ❌ 反例 2：让子代理查询子代理状态
+"用 Bash 工具 check transcript 大小变化"
+
+// ❌ 反例 3：跨子代理传递数据
+"PR2 子代理的最终报告里包含 X 文件的代码摘要，请审计"
+// ↑ 子代理不会自动拿到 PR2 的报告，必须主代理在 prompt 里复述
+```
+
+## 一句话总结
+
+> **主代理是交通指挥，子代理是各干各的。子代理间通信 = 通过主代理中转。**

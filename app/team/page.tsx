@@ -1,92 +1,122 @@
 import { AppShell } from "@/shared/ui/AppShell";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
+import { getUserProfileAction, getTeamMembersAction } from "@/features/profile/lib/profile-actions";
+import { ProfileHeader } from "@/features/team/ui/ProfileHeader";
+import { ProfileTicketList } from "@/features/team/ui/ProfileTicketList";
+import { ProfileProjectList } from "@/features/team/ui/ProfileProjectList";
+import { TeamMemberCard } from "@/features/team/ui/TeamMemberCard";
+import { getWeekRange, formatWeekLabel } from "@/shared/lib/week";
 
-const MEMBERS = [
-  { name: "张三", role: "后端负责人", skills: ["Go", "PostgreSQL", "Redis"], tone: "bg-brand-50 text-brand-600" },
-  { name: "cary", role: "全栈工程师", skills: ["Vue", "Go", "Docker"], tone: "bg-emerald-50 text-emerald-600" },
-  { name: "李四", role: "前端工程师", skills: ["Vue", "TypeScript"], tone: "bg-violet-50 text-purple" },
-  { name: "王五", role: "运维工程师", skills: ["Kubernetes", "Docker"], tone: "bg-amber-50 text-warning" },
-  { name: "赵六", role: "数据工程师", skills: ["ClickHouse", "Python"], tone: "bg-rose-50 text-rose-600" },
-  { name: "陈七", role: "测试工程师", skills: ["自动化", "性能"], tone: "bg-cyan-50 text-cyan-600" },
-];
+export default async function TeamPage() {
+  const session = await auth();
+  if (!session?.user?.id) {
+    redirect("/login");
+  }
 
-const CAPABILITY = [
-  { label: "Go", value: 90 },
-  { label: "Vue", value: 78 },
-  { label: "PostgreSQL", value: 82 },
-  { label: "Redis", value: 70 },
-  { label: "Docker", value: 85 },
-  { label: "Kubernetes", value: 64 },
-];
+  const [profile, members] = await Promise.all([
+    getUserProfileAction(session.user.id),
+    getTeamMembersAction(),
+  ]);
 
-export default function TeamPage() {
   return (
     <AppShell
       header={
         <div>
-          <h1 className="text-lg font-semibold leading-tight">团队</h1>
-          <p className="text-xs text-ink-400">Team · 成员能力与画像</p>
+          <h1 className="text-lg font-semibold leading-tight">个人与团队</h1>
+          <p className="text-xs text-ink-400">Profile · 成员画像与协作</p>
         </div>
       }
     >
-      <div className="space-y-5 pm-fade-in">
-        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium">预览</span>
-          团队画像功能正在开发中，以下为界面预览（静态示例数据）。
-        </div>
+      <div className="space-y-6 pm-fade-in">
+        {/* 个人区块 */}
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-ink-700">我的工作台</h2>
+            <Link
+              href={`/team/${session.user.id}`}
+              className="text-xs text-brand-600 hover:text-brand-700"
+            >
+              查看完整画像 →
+            </Link>
+          </div>
 
-        <div className="grid gap-5 lg:grid-cols-3">
-          <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft lg:col-span-2">
-            <h2 className="mb-4 font-medium">团队成员</h2>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {MEMBERS.map((m) => (
-                <div
-                  key={m.name}
-                  className="flex items-center gap-3 rounded-lg border border-ink-100 p-3 transition hover:border-brand-200 hover:bg-brand-50/30"
-                >
-                  <span
-                    className={`flex h-11 w-11 items-center justify-center rounded-full text-sm font-semibold ${m.tone}`}
-                  >
-                    {m.name.charAt(0)}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium">{m.name}</p>
-                    <p className="text-xs text-ink-400">{m.role}</p>
-                    <div className="mt-1.5 flex flex-wrap gap-1">
-                      {m.skills.map((s) => (
-                        <span
-                          key={s}
-                          className="rounded bg-ink-100 px-1.5 py-0.5 text-[11px] text-ink-500"
-                        >
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ))}
+          <ProfileHeader profile={profile} />
+
+          <div className="mt-5 grid gap-5 lg:grid-cols-2">
+            <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-medium text-ink-700">最近任务</h3>
+                <Link href="/tasks" className="text-xs text-brand-600 hover:text-brand-700">
+                  全部任务 →
+                </Link>
+              </div>
+              <ProfileTicketList tickets={profile.recentTickets} />
             </div>
-          </section>
 
-          <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
-            <h2 className="mb-4 font-medium">团队技能分布</h2>
-            <ul className="space-y-3">
-              {CAPABILITY.map((c) => (
-                <li key={c.label}>
-                  <div className="mb-1 flex items-center justify-between text-sm">
-                    <span>{c.label}</span>
-                    <span className="text-ink-400">{c.value}</span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-ink-100">
-                    <div
-                      className="h-full rounded-full bg-brand-500"
-                      style={{ width: `${c.value}%` }}
-                    />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </div>
+            <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-medium text-ink-700">参与项目</h3>
+                <Link href="/projects" className="text-xs text-brand-600 hover:text-brand-700">
+                  全部项目 →
+                </Link>
+              </div>
+              <ProfileProjectList projects={profile.projects} />
+            </div>
+          </div>
+
+          {/* 本周周报快捷入口 */}
+          {profile.recentReports.length > 0 && (
+            <div className="mt-5 rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-medium text-ink-700">周报</h3>
+                <Link href="/reports/weekly-reports" className="text-xs text-brand-600 hover:text-brand-700">
+                  全部周报 →
+                </Link>
+              </div>
+              <div className="space-y-2">
+                {profile.recentReports.map((r) => {
+                  const { weekStart, weekEnd } = getWeekRange(r.weekStart);
+                  return (
+                    <Link
+                      key={r.id}
+                      href={`/reports/weekly-reports/${r.id}`}
+                      className="flex items-center justify-between rounded-lg border border-ink-100 px-4 py-2.5 transition hover:border-brand-200 hover:bg-brand-50/20"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{r.title}</p>
+                        <p className="mt-0.5 text-xs text-ink-400">{formatWeekLabel(weekStart, weekEnd)}</p>
+                      </div>
+                      {r.hasAiSummary ? (
+                        <span className="shrink-0 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-600">
+                          AI 总结
+                        </span>
+                      ) : (
+                        <span className="shrink-0 text-xs text-ink-400">待生成</span>
+                      )}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* 团队成员区块 */}
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-ink-700">
+              团队成员 <span className="font-normal text-ink-400">({members.length} 人)</span>
+            </h2>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {members.map((m) => (
+              <TeamMemberCard key={m.id} member={m} />
+            ))}
+          </div>
+        </section>
       </div>
     </AppShell>
   );

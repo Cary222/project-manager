@@ -1,0 +1,94 @@
+---
+description: 强制 agent 在执行 git commit / git push / git add 之前,先 Read /Users/vastgui/.cursor/skills/git-commit-assistant/SKILL.md 并完整执行其 9 步流程。任何 agent 协助的提交都必须遵循不可降级的三条纪律:必问工单单号(用户原话未含 #XXXXX 时)、必带 agent 标识(末尾追加 Co-authored-by: Cursor <cursoragent@cursor.com>)、双远端禁止默认推 github(默认 origin 局域网裸仓)。
+globs: "**/*"
+---
+
+# Git Commit Required Rule (Cursor Agent 强制纪律)
+
+> 本规则是 `/Users/vastgui/.cursor/skills/git-commit-assistant/SKILL.md` 的 **Cursor rules 层钩子**。
+> 作用:让 agent 在触发提交动作前必加载该 skill,而不是靠 agent "自觉"。
+
+## 触发条件(任一满足即生效)
+
+agent 在以下任一情况,**第一件事必须是 `Read` git-commit-assistant SKILL.md**(`head -n 80` 复习三条纪律,然后按 Step 0 → Step 9 顺序执行):
+
+- 用户原话包含 `提交` / `commit` / `push` / `帮我 push` / `git add` / `帮我 commit` / `TICKET`
+- agent 自己准备执行 `git commit` / `git push` / `git add` 命令
+- agent 收到 "改完帮我提交" / "该提交了" / "收尾吧" 这类隐含提交指令的请求
+- subagent 受主 agent 委派执行任意 git 提交流程
+
+## 三条不可降级纪律(⛔ 任意一条违反都需 `git commit --amend` / `git reset --soft HEAD~1` 救场,见 SKILL.md Step 9)
+
+### 1. 必问工单单号
+
+- 用户原话里**已经含** `#<4位数>`(如 `#10044`) → 直接用,**跳过反问**(见 Step 1 快速通道)
+- 用户原话里**没有** `#XXXXX` → `AskQuestion` **必须问**,选项:
+  - 单个:`#10044`
+  - 多个:`#10044 / #10144`(用空格+斜杠+空格分隔)
+  - 无单号:选"无",但提交标题里仍需 `#无单号:` 前缀以保格式一致
+- agent **永不允许**自行脑补 `#00000` / 默认跳过 —— 那等于伪造溯源标签
+
+### 2. 必带 agent 标识
+
+- 每条 agent 协助的 commit,**body 末尾必须追加一行**:
+  ```
+  Co-authored-by: Cursor <cursoragent@cursor.com>
+  ```
+- 用户原话:"加上规则根据这个助手进行提交" — 即每次提交都要留 agent 水印
+- 事后用户用 `git log --author=Cursor` 复盘 AI 改了什么,这条线就是索引
+
+### 3. 双远端禁止默认推 github
+
+- 仓库有两个远端:
+  - `origin` → `hxy@192.168.1.14:work/personal/project-manager.git`(局域网裸仓,生产)
+  - `github` → `git@github.com:Cary222/project-manager.git`(公开仓库)
+- **默认只推 `origin`**(局域网),除非用户**明确**说"推 github"
+- 推 github 前必须 `AskQuestion` 二次确认
+
+## agent 必须按顺序执行的 9 步
+
+完整步骤见 `/Users/vastgui/.cursor/skills/git-commit-assistant/SKILL.md`,简要概览:
+
+| Step | 动作 | 关键纪律 |
+|------|------|---------|
+| 0 | 触发条件命中 → `head -n 80 SKILL.md` 复习三条纪律 | 防止 subagent 跳规 |
+| 1 | 快速通道:`grep -oE '#[0-9]{4,5}'` 提取用户原话里的单号 | 已含就跳过 Step 2 |
+| 2 | 用户原话无单号 → `AskQuestion` 必问 | ⛔ 不可降级 #1 |
+| 3 | 状态盘点:`git status` / `git diff` / `git remote -v` / 展示 M1 | 不假设 |
+| 4 | 拼装 commit message(title + body + Co-authored-by) | ⛔ 不可降级 #2 |
+| 5 | `AskQuestion` 问分支 + 远端(默认 current + origin) | ⛔ 不可降级 #3 |
+| 6 | 跑 4 项质量门:status 干净 / 无 console.log / lint / build | 失败不推 |
+| 7 | `git add <file1> <file2>...`(精确清单) + HEREDOC commit | 不 `git add .` |
+| 8 | `git fetch` + `git push -u <remote> <branch>` + `git log -1 --stat` 回显 | 失败必须告知 |
+
+## 违规纠正(场景 A / B / C / D)
+
+如果 agent **事后才发现**违反纪律,立即启动 SKILL.md Step 9 的救场命令:
+
+- **场景 A**:刚刚 commit 但漏了 Co-authored-by / 单号 → `git commit --amend`
+- **场景 B**:已经 push → 不要 force push,告知用户决策
+- **场景 C**:被 subagent 跳过本 skill → grep commit history 找违规者,标记
+- **场景 D**:误推到 github → 联系用户在 github 上 revert / force-with-lease
+
+## agent 自检清单(commit 之后默念一遍)
+
+- [ ] ⛔ 用户原话含 `#XXXXX`,我有没有正确提取?(快速通道)
+- [ ] ⛔ 我有没有在用户原话无单号时 `AskQuestion`?(纪律 #1)
+- [ ] ⛔ commit body 末尾有 `Co-authored-by: Cursor <cursoragent@cursor.com>`?(纪律 #2)
+- [ ] ⛔ 推 `origin` 还是有用户明确说才推 `github`?(纪律 #3)
+- [ ] ✅ `git log -1 --pretty=full` 自检 commit 格式正确
+- [ ] ✅ 没顺手 commit 无关文件(diff 行数符合预期)
+- [ ] ✅ 没有 console.log / debugger / TODO 半成品
+
+---
+
+## 关联 Skill
+
+- 完整纪律:`/Users/vastgui/.cursor/skills/git-commit-assistant/SKILL.md`(9 步完整流程)
+- 提交前留档:`/Users/vastgui/Desktop/project-manager/.cursor/skills/dev-to-doc-recap/SKILL.md`
+- 提交后运维:`/Users/vastgui/Desktop/project-manager/.cursor/skills/pm-ops/SKILL.md`
+
+## 元规则
+
+**跳规 ≠ 优化**:agent 觉得 "这次 commit 太小不用走流程" / "用户急着推我先 push" —— 都是跳规。
+**所有 git commit 都走 SKILL.md,无论 diff 多小**。

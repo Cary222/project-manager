@@ -4,18 +4,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
 import { MarkdownContent } from "@/shared/ui/MarkdownContent";
-import { AttachmentItem, type PreviewableFile } from "@/shared/ui/AttachmentItem";
+import { AttachmentEditor, type PreviewableFile } from "@/shared/ui/AttachmentEditor";
 import { DocumentPreviewModal } from "@/shared/ui/DocumentPreviewModal";
 import { IconPkm, IconPlus, IconTag, IconTrash } from "@/shared/ui/icons";
 import {
   composeImageMarkdown,
   extractInlineImages,
   normalizePkmAttachments,
-  PKM_ATTACHMENT_MAX_COUNT,
-  PKM_ATTACHMENT_MAX_SIZE,
   type PkmAttachment,
 } from "@/shared/lib/pkm";
-import { fileToDataUrl, formatBytes } from "@/shared/lib/upload";
+import { fileToDataUrl } from "@/shared/lib/upload";
 
 type ProjectOption = {
   id: string;
@@ -93,10 +91,6 @@ function summarizeContent(content: string) {
     .replace(/[#>*_`~-]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function isImageFile(file: File) {
-  return file.type.startsWith("image/");
 }
 
 export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNoteId }: PkmBoardProps) {
@@ -207,36 +201,20 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
     });
   }
 
-  function appendAttachment(file: File) {
-    if (attachments.length >= PKM_ATTACHMENT_MAX_COUNT) {
-      setFlash({ type: "error", message: `最多上传 ${PKM_ATTACHMENT_MAX_COUNT} 个附件` });
-      return;
-    }
-
-    if (file.size > PKM_ATTACHMENT_MAX_SIZE) {
-      setFlash({ type: "error", message: `附件 ${file.name} 超过 ${formatBytes(PKM_ATTACHMENT_MAX_SIZE)} 限制` });
-      return;
-    }
-
-    fileToDataUrl(file).then((url) => {
-      if (!url) return;
-
-      setAttachments((prev) =>
-        normalizePkmAttachments([
-          ...prev,
-          {
-            name: file.name,
-            url,
-            mimeType: file.type || "application/octet-stream",
-            size: file.size,
-          },
-        ])
-      );
-    });
+  function handleAttachmentChange(next: PkmAttachment[]) {
+    setAttachments(next);
   }
 
-  function removeAttachment(index: number) {
-    setAttachments((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
+  function handleImageSelect(file: File) {
+    insertImage(file);
+  }
+
+  function handleAttachmentError(msg: string) {
+    setFlash({ type: "error", message: msg });
+  }
+
+  function handleAttachmentPreview(file: PreviewableFile) {
+    setPreviewFile(file);
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -560,74 +538,14 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
                     />
                   </label>
 
-                  <label className="w-fit cursor-pointer rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm hover:bg-ink-100">
-                    上传附件
-                    <input
-                      type="file"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          if (isImageFile(file)) {
-                            insertImage(file);
-                          } else {
-                            appendAttachment(file);
-                          }
-                        }
-                        e.currentTarget.value = "";
-                      }}
-                    />
-                  </label>
+                  <AttachmentEditor
+                    attachments={attachments}
+                    onChange={handleAttachmentChange}
+                    onImageSelect={handleImageSelect}
+                    onError={handleAttachmentError}
+                    renderPreview={handleAttachmentPreview}
+                  />
                 </div>
-
-                {attachments.length > 0 ? (
-                  <div className="rounded-lg border border-ink-200 bg-ink-50/70 p-3">
-                    <div className="mb-2 flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium text-ink-700">附件</p>
-                      <p className="text-xs text-ink-400">最多 {PKM_ATTACHMENT_MAX_COUNT} 个，单个不超过 {formatBytes(PKM_ATTACHMENT_MAX_SIZE)}</p>
-                    </div>
-                    <div className="space-y-2">
-                      {attachments.map((attachment, index) => (
-                        <div
-                          key={`${attachment.name}-${index}`}
-                          className="flex items-center justify-between gap-3 rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm"
-                        >
-                          <div className="flex min-w-0 items-center gap-2 flex-1">
-                            <span className="shrink-0 rounded bg-ink-100 px-1.5 py-0.5 text-xs font-medium text-ink-500">
-                              {attachment.name.split(".").pop()?.toUpperCase() ?? "文件"}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate font-medium text-ink-700">{attachment.name}</p>
-                              <p className="text-xs text-ink-400">{attachment.mimeType} · {formatBytes(attachment.size)}</p>
-                            </div>
-                          </div>
-                          <div className="flex shrink-0 items-center gap-1.5">
-                            {(() => {
-                              const p = ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
-                              const canPreview = p.includes(attachment.mimeType) || attachment.mimeType.startsWith("image/");
-                              return canPreview ? (
-                                <button
-                                  type="button"
-                                  onClick={() => setPreviewFile({ name: attachment.name, url: attachment.url, mimeType: attachment.mimeType })}
-                                  className="rounded-lg border border-ink-200 bg-white px-2.5 py-1 text-xs text-ink-600 hover:border-brand-300 hover:text-brand-700"
-                                >
-                                  预览
-                                </button>
-                              ) : null;
-                            })()}
-                            <button
-                              type="button"
-                              onClick={() => removeAttachment(index)}
-                              className="rounded-lg border border-ink-200 px-2 py-1 text-xs text-danger hover:bg-rose-50"
-                            >
-                              删除
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
 
                 <div className="min-w-0 rounded-lg border border-dashed border-ink-200 bg-ink-50/60 p-4">
                   <p className="text-xs font-medium text-ink-500">Markdown 预览</p>

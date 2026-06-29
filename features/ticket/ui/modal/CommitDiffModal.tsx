@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { branchStyle, repoStyle } from "@/shared/ui/repo-style";
+import { toast } from "sonner";
 
 export type CommitSummary = {
   commitSha: string;
@@ -70,6 +71,7 @@ export function CommitDiffModal({ commit, onClose }: CommitDiffModalProps) {
       .catch((err: Error) => {
         if (err.name === "AbortError") return;
         setError(err.message || "加载 diff 失败");
+        toast.error(err.message || "加载 diff 失败");
       })
       .finally(() => setLoading(false));
 

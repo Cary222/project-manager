@@ -27,7 +27,7 @@ interface ChatMessage {
   content: string;
 }
 
-async function callAgnes(messages: ChatMessage[]): Promise<string> {
+export async function callAgnes(messages: ChatMessage[]): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is not set");
@@ -108,7 +108,12 @@ function buildSummaryPrompt(
 }
 
 const PROFILE_INSTRUCTION = [
-  "你是一个用户画像分析助手。请根据用户的多轮对话摘要，提取并更新用户画像。",
+  "你是一个用户画像分析助手。请根据用户提供的内容片段，提取并更新用户画像。",
+  "",
+  "## 数据来源说明",
+  "用户提供的内容可能来自：",
+  "1. AI 对话摘要（type=对话）：多轮对话的摘要，包含主题、要点、行动项等",
+  "2. 周报 AI 摘要（type=weekly_report）：用户提交的周报自动生成的摘要",
   "",
   "## 输出要求",
   "请输出以下 JSON 结构（不要有任何其他文字）：",
@@ -124,6 +129,7 @@ const PROFILE_INSTRUCTION = [
   "注意：",
   "- 必须输出严格合法的 JSON，不要有其他文字",
   "- 如果有 previousProfile，请参考并合并更新，而非完全重写",
+  "- 周报摘要中提到的项目名应合并到 projects 字段",
 ].join("\n");
 
 function buildProfilePrompt(
@@ -131,10 +137,12 @@ function buildProfilePrompt(
   previousProfile: unknown
 ): string {
   const summariesText = summaries
-    .map(
-      (s, i) =>
-        `[对话${i + 1}]\n${JSON.stringify(s.summary, null, 2)}`
-    )
+    .map((s, i) => {
+      const type = typeof s.summary === "object" && s.summary !== null && "type" in s.summary
+        ? (s.summary as { type: string }).type
+        : "对话";
+      return `[${type} ${i + 1}]\n${JSON.stringify(s.summary, null, 2)}`;
+    })
     .join("\n\n");
 
   const prevText = previousProfile
@@ -144,7 +152,7 @@ function buildProfilePrompt(
   return [
     PROFILE_INSTRUCTION,
     "",
-    "## 对话摘要",
+    "## 内容片段",
     summariesText,
     prevText,
   ].join("\n");
@@ -217,10 +225,22 @@ export async function updateUserProfile(
     take: 20,
   });
 
+  // PR5: Also pull in weekly report AI summaries as a second data source
+  const weeklyReports = await prisma.weeklyReport.findMany({
+    where: {
+      userId,
+      aiSummary: { not: null },
+      aiSummaryPartial: false,
+    },
+    select: { id: true, aiSummary: true, aiSummaryAt: true },
+    orderBy: { weekStart: "desc" },
+    take: 10,
+  });
+
   // Only keep conversations whose summary has at least one meaningful field
   // populated. Otherwise we'd feed the LLM a list of empty arrays, which it
   // happily turns into an empty profile {} — corrupting the stored profile.
-  const summaries = conversations
+  const conversationSummaries = conversations
     .filter((c) => {
       if (!c.summary || typeof c.summary !== "object") return false;
       const s = c.summary as Record<string, unknown>;
@@ -230,6 +250,13 @@ export async function updateUserProfile(
       return topics.length > 0 || keyPoints.length > 0 || recentQueries.length > 0;
     })
     .map((c) => ({ id: c.id, summary: c.summary }));
+
+  // Filter out blank/missing aiSummary values from weekly reports
+  const weeklySummaries = weeklyReports
+    .filter((r) => r.aiSummary && r.aiSummary.trim() !== "")
+    .map((r) => ({ id: r.id, summary: { type: "weekly_report", aiSummary: r.aiSummary } }));
+
+  const summaries = [...conversationSummaries, ...weeklySummaries];
 
   if (summaries.length === 0) {
     // No meaningful summaries yet — if a stale/empty profile exists from a

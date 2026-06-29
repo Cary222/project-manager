@@ -1,115 +1,151 @@
 ---
 name: project-hub
 description: >-
-  Develop ProjectHub — the company internal PM platform covering project management,
-  task dispatch, employee PKM, and RAG search. Load when ProjectHub, PKM module,
-  RAG retrieval, or task dispatch system is discussed.
+  ProjectHub 公司项目管理平台开发进度档案。覆盖项目实际完成度、数据模型、Feature 架构、下一步操作、迭代记录。激活场景：用户在 ProjectHub 项目中工作、修改代码、规划新功能、询问项目当前状态、讨论任何已上线模块（工单/PKM/RAG/AI Agent 等）、或与学习导师交互时需要项目上下文。
 ---
 
-# ProjectHub — 公司项目管理平台
+# ProjectHub — 公司项目管理平台进度档案
 
-## 项目定位
+> **项目启动**：2026-06-04（基于 GitHub 代码实际评估）
+> **仓库**：https://github.com/Cary222/project-manager
+> **最后更新**：2026-06-29（#10144 AI Agent 应用上线）
+> **当前阶段**：AI Agent 对话系统完成，学习理解中
 
-做一个内部使用的多功能项目管理平台，功能对齐 GitHub/GitLab 的企业简化版，
-但核心差异在于：**内置员工 PKM（个人知识管理）+ RAG 智能检索**。
+---
 
-## 阶段规划
+## 实际完成度评估
 
 ```
-阶段零 🔄  项目初始化（环境搭建、技术选型确认、项目骨架）
-阶段一 📝  核心 CRUD（项目列表、任务基础操作、笔记基础操作）
-阶段二 📝  Git 集成（代码浏览、提交记录查看）
-阶段三 📝  派单系统完善（状态流转、历史记录）
-阶段四 📝  PKM 模块完善（笔记关联项目、基础搜索）
-阶段五 📝  RAG 一期（pgvector 接入、语义搜索）
-阶段六 📝  RAG 二期（智能派单推荐、能力画像）
-阶段七 📝  权限系统 + 老板看板
+已完成 ✅
+  ├── 用户认证系统（NextAuth v5 + JWT + Credentials）
+  ├── RBAC 权限（ROOT / USER，封禁机制，审核日志）
+  ├── 项目 CRUD（创建、列表、详情、删除）
+  ├── 模块管理（项目 → 职能(PROGRAM/DESIGN) → 模块）
+  ├── 工单系统（Ticket，ticketNo 自增 #10000+）
+  ├── 工单状态流转（DEVELOPING → READY_FOR_TEST → DONE，写状态历史）
+  ├── 工单指派（多指派人，写指派历史）
+  ├── Bug 单闭环（新建→指派→设计单/程序单联动，2026-06-10~17）
+  ├── Git 提交自动关联（增量同步游标、多分支追踪、commit 解析、去重展示）
+  ├── Git diff 查看（CommitDiffModal 组件）
+  ├── PKM 笔记系统（CRUD + 附件上传 + 图片预览 + 公开/私密，2026-06-09）
+  ├── RAG 混合搜索（BGE-M3 + pgvector + FastAPI，87 条向量化，2026-06-09）
+  ├── 搜索代码优化（AbortController + 防抖 + URL 同步，2026-06-18）
+  ├── PKM embedding 清洗优化（#10074，2026-06-22）
+  │     ├── Markdown 净化函数（cleanMarkdownForEmbedding，7 个单元测试）
+  │     ├── 诊断工具（diagnose-pkm-search baseline/measure）
+  │     ├── 批量重建脚本（reindex-pkm-notes，batch + concurrency）
+  │     └── 辅助脚本（clear、debug、inspect）
+  ├── Feature-First Design 架构（9 个 feature 模块拆分，2026-06-12）
+  ├── SWR 数据获取全面接入（ticket 详情页，2026-06-05~11）
+  ├── 管理后台（用户管理、角色管理、审核日志）
+  ├── E2E 测试（Playwright）、单元测试（Vitest）
+  ├── 部署脚本（deploy.sh、环境配置）
+  ├── Claude Code skill（ai-learning、project-hub、feature-first）
+  ├── DOCX 附件文本提取（#10076，python-docx + chunking，2026-06-23）
+  ├── PKM 异步索引化（#10044，Worker + Background Jobs，2026-06-26）
+  ├── 全局访问记录系统（#10082，events/ track+compute+router+types，2026-06-25）
+  ├── AI Agent 对话系统（#10144，2026-06-28）
+  │     ├── 对话 CRUD（AiConversation + AiChatMessage 两张表）
+  │     ├── SSE 流式响应（Agnes API + ReadableStream 转发）
+  │     ├── RAG 自动注入（detector 关键词检测 + retrieveContext）
+  │     ├── 用户画像自动生成（summarizeConversation → updateUserProfile LLM 链）
+  │     ├── 后台任务队列（globalThis + 15min 冷却期 + 失败重试）
+  │     ├── AI 主动问候（根据画像生成个性化开场白）
+  │     └── 7 个 Agent skill（LangGraph、LangChain、RAG 检索、流式响应…）
+  ├── 项目详情文档 Tab（#10081，附件上传 + DocumentPreviewModal，2026-06-24）
+  └── 管理端职能管理增强（#10080，2026-06-23）
+
+当前阶段 🔄  AI Agent 对话系统完成（2026-06-28 上线，#10144）
+            用户处于"学习理解中"阶段——重点不是写代码，是深入理解 AI Agent 在发生什么
 ```
 
-### 当前阶段：阶段零 — 项目初始化
+---
 
-**待完成：**
-- [ ] 确认技术栈（Go vs Python 后端、前端框架）
-- [ ] 搭建项目骨架（目录结构、基础配置）
-- [ ] 初始化数据库（PostgreSQL + pgvector 扩展）
-- [ ] Hello World 跑通（前后端连通）
-- [ ] 连接公司 Git 服务器或本地仓库
+## 数据模型（实际）
 
-**环境信息：**
-- 开发机：公司开发机
-- IDE：Cursor
-- 数据库：待安装/确认
-- Git 仓库地址：待确认
+```
+Project
+  └── Responsibility (PROGRAM | DESIGN)  [unique: projectId + kind]
+        └── Module                        [unique: responsibilityId + name]
+              └── Ticket (#10000 递增)
+                    ├── TicketAssignee         [多对多]
+                    ├── TicketAssigneeHistory  [变更审计]
+                    ├── TicketStatusHistory    [状态审计]
+                    ├── TicketRepoBinding      [关联 Git 仓库]
+                    └── TicketCommit           [提交记录，关联 commit SHA]
 
-## 核心模块
+User
+  ├── Role: ROOT | USER
+  ├── bannedAt: 软封禁
+  └── ModerationLog: 管理操作审计
 
-### 模块一：项目管理（Git 仓库管理）
+SyncCursor (增量 Git 同步游标)
+Counter (ticketNo 自增分配)
+SearchDocument (向量搜索文档，type: TICKET | COMMIT | KNOWLEDGE_DOC)
+```
 
-| 功能 | 说明 |
-|------|------|
-| 项目列表 | 展示公司所有项目，含名称、描述、技术栈、负责人 |
-| 代码浏览 | 在线查看仓库文件，类 GitHub 文件树 |
-| 提交记录 | 查看 commit 历史，谁在什么时间提交了什么 |
-| 进度概览 | 项目整体状态：活跃/维护中/已归档，最近活动时间线 |
+---
 
-### 模块二：派单系统
+## Feature 架构（2026-06-12 重构后）
 
-| 功能 | 说明 |
-|------|------|
-| 任务创建 | 项目经理创建任务，填写标题、描述、优先级、截止日期 |
-| 任务指派 | 指派给一个或多个员工 |
-| 状态流转 | 待处理 → 进行中 → 审查中 → 已完成 |
-| 派单历史 | 每个项目和每个人的任务历史记录 |
-| 智能推荐（三期） | 基于员工 PKM 内容，推荐最合适的执行人 |
+```
+features/
+  ├── admin/       管理后台 UI
+  ├── dashboard/   首页仪表盘
+  ├── dispatch/    派单功能
+  ├── knowledge/   知识搜索 + PKM 笔记
+  │     ├── ui/    KnowledgeSearchPanel, KnowledgeSearchResults
+  │     └── pkm/   PkmBoard
+  ├── project/     项目管理 UI
+  ├── repo/        Git 仓库 UI
+  ├── settings/    设置页面
+  ├── task/        任务 UI
+  └── ticket/      工单系统
+        ├── create/    CreateTicketForm + action
+        └── ui/        TicketsList + ticket-detail/{Bug,Design,Program,Ticket}Detail + TicketPushPanel
+```
 
-### 模块三：员工 PKM（个人知识管理）★ 核心差异化功能
+---
 
-| 功能 | 说明 |
-|------|------|
-| 个人笔记 | 员工记录技术笔记、踩坑记录、学习心得 |
-| 项目日志 | 关联到具体项目的开发日志 |
-| 知识检索 | 搜索自己的笔记，也搜索全公司共享的知识（RAG 驱动） |
-| 能力画像 | 基于 PKM 内容自动生成的技能标签和技术栈分布 |
+## 下一步操作
 
-### 模块四：RAG 智能检索
+### 优先级 1：AI Agent 应用深入理解（当前阶段）
 
-| 阶段 | 内容 |
-|------|------|
-| 一期 | 简单的关键词搜索（项目名、任务标题、笔记标题） |
-| 二期 | Embedding + 向量数据库，语义搜索全平台内容 |
-| 三期 | 智能派单推荐 + 老板视角的团队能力评估 |
+- [x] SSE 流式响应原理理解
+- [x] 用户画像两阶段 LLM 链理解
+- [ ] LangGraph Agent 编排深入学习（skill 已建，10 篇参考文档）
+- [ ] Vercel AI SDK 流式响应框架
+- [ ] 语音输入/语音对话接入
 
-## 权限设计
+### 优先级 2：RAG 调参验证
 
-| 角色 | 权限 |
-|------|------|
-| **员工** | 管理自己的 PKM、查看被指派的任务、浏览项目代码和提交记录 |
-| **主管** | 上述 + 创建/指派任务、查看团队成员 PKM 摘要 |
-| **老板** | 上述 + 全局搜索、查看团队能力画像、绩效参考数据 |
+- [x] Markdown 清洗 + 诊断工具链建成
+- [ ] 跑 diagnose baseline 选测试笔记
+- [ ] 跑 diagnose measure 取改前分数
+- [ ] 调 ranking 权重参数（keyword vs semantic）
 
-## 技术栈方向（待确定）
+---
 
-考虑到 Go 后端背景：
-- 后端：Go（Gin/Echo）或 Python（FastAPI）—— 看你偏好
-- 前端：Vue 或 React + 组件库
-- 数据库：PostgreSQL（主数据 + pgvector 做向量存储，一步到位）
-- Git 操作：go-git 库（Go）或 GitPython（Python）
-- 向量数据库：pgvector（和 PostgreSQL 一体，减少运维成本）
+## 记录
 
-## 开发规则
-
-### 回答问题时
-1. 先读取 `dev-progress.md` 了解当前开发阶段
-2. 基于当前进度给出建议，不要跳阶段
-3. 新功能先讨论方案再写代码
-4. 每天开发结束后，主动询问是否更新进度
-
-### 代码风格
-- 后端：遵循项目已有风格
-- 命名清晰，注释适度（不注释废话，但要注释"为什么这样做"）
-- 每个模块先写接口定义，再写实现
-
-### 架构原则
-- 模块解耦：项目管理、派单、PKM 是三个独立模块
-- 渐进式：一期不需要 RAG 也能用，二期再加
-- 先跑通核心流程，再优化体验
+| 日期       | 完成事项                       | 备注                                           |
+| ---------- | ------------------------------ | ---------------------------------------------- |
+| 2026-06-04 | 评估实际代码                   | 通过 GitHub 仓库确认项目真实完成度             |
+| 2026-06-04 | 建立学习路线                   | 三条路线：RAG 落地 + 排错基本功 + 进阶功能     |
+| 2026-06-05 | SWR + 通知 + 管理端            | #10045 #10046 #10049                           |
+| 2026-06-08 | RAG ③④ 实操                   | BGE-M3 模型部署 + pgvector 安装 + 语义搜索验证 |
+| 2026-06-09 | RAG ⑤ 上线 + PKM 上线          | 混合搜索 + 笔记 CRUD，87 条向量化              |
+| 2026-06-10 | Bug 单闭环                     | #10039 三单状态逻辑打通                        |
+| 2026-06-11 | SWR 全面接入 + 错误处理        | #10049 #10062                                  |
+| 2026-06-12 | FSD 架构重构                   | #10069 拆分为 9 个 feature 模块                |
+| 2026-06-17 | Bug 单详情页                   | #10068 commit 去重展示 + 推送面板搜索          |
+| 2026-06-18 | 搜索优化 + 图片压缩 + 状态同步 | #10043 #10067 #10066                           |
+| 2026-06-22 | embedding 清洗 + Bug 单重构    | #10074 #10075                                  |
+| 2026-06-23 | DOCX 附件提取 + 管理端职能     | #10076 #10080                                  |
+| 2026-06-24 | 访问记录 + 项目文档Tab         | #10082 #10081                                  |
+| 2026-06-25 | 访问记录全局整合 + 构建修复    | #10082 #10037                                  |
+| 2026-06-26 | PKM 异步索引化 + 访问记录 UI   | #10044 #10082                                  |
+| 2026-06-28 | AI Agent 对话系统上线          | #10144                                         |
+| 2026-06-29 | PR1 周报系统 + PR2 报表真实化  | 详见 [PR1 周报复现](docs/reports/PR1-weekly-reports.md) / [PR2 报表真实化复现](docs/reports/PR2-stats-and-reports.md) |
+| 2026-06-29 | PR3 AI 画像面板（只读）         | 详见 [PR3 AI 画像复现](docs/reports/PR3-ai-profile.md) |
+| 2026-06-29 | PR4 周报→画像入队 + 手动触发   | 详见 [PR4 周报 AI 入队复现](docs/reports/PR4-weekly-report-ai-enqueue.md) |

@@ -15,6 +15,7 @@ import { getMyResponsibilitiesAction } from "@/features/admin/admin";
 import { ResponsibilityKind } from "@prisma/client";
 import { TaskStatsCards } from "@/shared/ui/TaskStatsCards";
 import { useRecentVisits } from "@/shared/lib/visits-context";
+import { useToast } from "@/shared/lib/use-toast";
 import {
   type Ticket,
   type MyTicket,
@@ -106,6 +107,7 @@ export function DispatchProjectDetailLoading() {
 export function DispatchProjectDetail({ projectId }: { projectId: string }) {
   const { data: session } = useSession();
   const isRoot = session?.user?.role === "ROOT";
+  const { toast } = useToast();
 
   const { data: projectData, error: projectError, isLoading, mutate: refreshProject } = useSWR<{ project: Project }>(
     `/api/projects/${projectId}`,
@@ -203,7 +205,7 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
           targetTicketCount: err.sourceModule?.ticketCount ?? 0,
         });
       } else {
-        setMessage(`保存模块失败: ${err.error ?? res.status}`);
+        toast.error(`保存模块失败: ${err.error ?? res.status}`);
       }
     }
   }
@@ -226,7 +228,7 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
       await loadProject();
     } else {
       const err = await res.json().catch(() => ({}));
-      setMessage(`合并失败: ${err.error ?? res.status}`);
+      toast.error(`合并失败: ${err.error ?? res.status}`);
     }
   }
 
@@ -237,10 +239,10 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
     setMessage("");
     const res = await fetch(`/api/modules/${module.id}`, { method: "DELETE" });
     if (!res.ok) {
-      setMessage("删除模块失败");
+      toast.error("删除模块失败");
       return;
     }
-    setMessage("模块已删除");
+    toast.success("模块已删除");
     await loadProject();
   }
 
@@ -299,10 +301,10 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
     setMessage("");
     const res = await fetch(`/api/tickets/${ticket.id}`, { method: "DELETE" });
     if (!res.ok) {
-      setMessage("删除单子失败");
+      toast.error("删除单子失败");
       return;
     }
-    setMessage("单子已删除");
+    toast.success("单子已删除");
     await loadProject();
   }
 
@@ -463,7 +465,7 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
                     await loadProject();
                   } else {
                     const err = await res.json().catch(() => ({}));
-                    setMessage(`创建Bug职能失败: ${err.error}`);
+                    toast.error(`创建Bug职能失败: ${err.error}`);
                   }
                 }}
                 className="w-full rounded-xl border border-dashed border-rose-300 bg-rose-50/50 p-4 text-left text-sm text-rose-600 transition hover:border-rose-400 hover:bg-rose-50"

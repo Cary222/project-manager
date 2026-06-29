@@ -74,6 +74,7 @@ model User {
   passwordHash  String?
   role          UserRole  @default(USER)
   bannedAt      DateTime?
+  bio           String?   @db.Text
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   accounts      Account[]
@@ -95,6 +96,7 @@ model User {
 
   aiConversations   AiConversation[]
   aiProfile         AiUserProfile?
+  weeklyReports     WeeklyReport[]
 
   @@schema("pm")
 }
@@ -274,6 +276,7 @@ model Project {
   tickets          Ticket[]
   searchDocuments  SearchDocument[]
   pkmNotes         PkmNote[]
+  weeklyReports    WeeklyReportProject[]
 
   @@schema("pm")
 }
@@ -576,5 +579,40 @@ model AiUserProfile {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@schema("pm")
+}
+
+model WeeklyReport {
+  id              String                 @id @default(cuid())
+  userId          String
+  weekStart       DateTime
+  weekEnd         DateTime
+  title           String
+  content         String                 @db.Text
+  attachments     Json?
+  aiSummary       String?                @db.Text
+  aiSummaryAt     DateTime?
+  aiSummaryPartial Boolean               @default(false)
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  user     User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projects WeeklyReportProject[]
+
+  @@unique([userId, weekStart])
+  @@index([userId, weekStart(sort: Desc)])
+  @@schema("pm")
+}
+
+model WeeklyReportProject {
+  id              String   @id @default(cuid())
+  reportId        String
+  projectId        String
+
+  report  WeeklyReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, projectId])
+  @@index([projectId])
   @@schema("pm")
 }
