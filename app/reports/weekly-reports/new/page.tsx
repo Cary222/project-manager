@@ -1,5 +1,7 @@
+import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
 import { AppShell } from "@/shared/ui/AppShell";
-import Link from "next/link";
+import { BackPageHeader } from "@/shared/ui/headers";
 import { WeeklyReportForm } from "@/features/reports/weekly-reports/ui/WeeklyReportForm";
 import { getWeekRange } from "@/shared/lib/week";
 
@@ -8,34 +10,28 @@ function formatDateInput(d: Date): string {
 }
 
 export default async function NewWeeklyReportPage() {
+  const session = await auth();
+  if (!session?.user?.id) {
+    redirect("/login");
+  }
   const { weekStart, weekEnd } = getWeekRange(new Date());
 
   return (
     <AppShell
       header={
-        <div>
-          <h1 className="text-lg font-semibold leading-tight">新建周报</h1>
-          <p className="text-xs text-ink-400">Weekly Report · New</p>
-        </div>
+        <BackPageHeader
+          backHref="/reports/weekly-reports"
+          backLabel="返回周报列表"
+          title="新建周报"
+          subtitle="Weekly Report · New"
+        />
       }
     >
-      <main className="mx-auto max-w-3xl px-6 py-10">
-        <div className="mb-6 flex items-center gap-2 text-sm text-ink-500">
-          <Link
-            href="/reports/weekly-reports"
-            className="inline-flex items-center gap-1 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-sm text-ink-600 shadow-sm transition hover:bg-ink-50"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-            </svg>
-            返回列表
-          </Link>
-        </div>
-
-        <div className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">
+      <div className="mx-auto max-w-4xl px-0 sm:px-6">
+        <div className="pm-fade-in">
           <div className="mb-6">
-            <h2 className="text-xl font-semibold text-ink-900">填写周报</h2>
-            <p className="mt-1 text-sm text-ink-400">
+            <h2 className="text-2xl font-semibold text-ink-900">填写周报</h2>
+            <p className="mt-1 text-sm text-ink-500">
               提交后 AI 将自动生成结构化总结，可在详情页查看。
             </p>
           </div>
@@ -45,7 +41,7 @@ export default async function NewWeeklyReportPage() {
             initialWeekEnd={formatDateInput(weekEnd)}
           />
         </div>
-      </main>
+      </div>
     </AppShell>
   );
 }

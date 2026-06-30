@@ -375,7 +375,7 @@ export function ReportsDashboard({
       <div className="mt-6 border-t border-ink-100 pt-4">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-xs text-ink-400">{weekLabel}</p>
+            <p className="text-xs text-ink-400">周报摘要：{weekLabel}</p>
             <div className="flex items-baseline gap-1">
               <span className="text-2xl font-semibold">{submitted.length}</span>
               <span className="text-sm text-ink-400">/ {total}</span>
@@ -386,7 +386,7 @@ export function ReportsDashboard({
             href="/reports/weekly-reports"
             className="rounded-full bg-brand-100 px-3 py-1.5 text-xs font-medium text-brand-600 transition-colors hover:bg-brand-200"
           >
-            查看全部
+            去提交
           </Link>
         </div>
 

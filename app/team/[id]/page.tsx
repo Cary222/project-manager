@@ -1,4 +1,5 @@
 import { AppShell } from "@/shared/ui/AppShell";
+import { BackPageHeader } from "@/shared/ui/headers";
 import { redirect, notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getUserProfileAction, getTeamMembersAction } from "@/features/profile/lib/profile-actions";
@@ -6,7 +7,7 @@ import { ProfileHeader } from "@/features/team/ui/ProfileHeader";
 import { ProfileTicketList } from "@/features/team/ui/ProfileTicketList";
 import { ProfileProjectList } from "@/features/team/ui/ProfileProjectList";
 import { ProfileAiSummary } from "@/features/team/ui/ProfileAiSummary";
-import Link from "next/link";
+import { IconSparkles } from "@/shared/ui/icons";
 
 type Props = { params: Promise<{ id: string }> };
 
@@ -32,16 +33,12 @@ export default async function TeamMemberPage({ params }: Props) {
   return (
     <AppShell
       header={
-        <div className="flex items-center gap-2">
-          <Link href="/team" className="text-xs text-ink-400 hover:text-ink-600 transition">
-            ← 个人与团队
-          </Link>
-          <span className="text-ink-300">/</span>
-          <h1 className="text-lg font-semibold leading-tight">
-            {profile.name || profile.email}
-            {isOwnProfile && <span className="ml-2 text-xs font-normal text-ink-400">（我）</span>}
-          </h1>
-        </div>
+        <BackPageHeader
+          backHref="/team"
+          backLabel="返回团队列表"
+          title={profile.name || profile.email}
+          subtitle={isOwnProfile ? "我的主页" : "个人主页"}
+        />
       }
     >
       <div className="space-y-6 pm-fade-in">
@@ -51,35 +48,34 @@ export default async function TeamMemberPage({ params }: Props) {
         <ProfileAiSummary
           aiProfile={profile.aiProfile}
           isOwnProfile={isOwnProfile}
-          userId={id}
           userName={profile.name || profile.email}
         />
 
         <div className="grid gap-5 lg:grid-cols-2">
           {/* 最近任务 */}
-          <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+          <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-sm">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-medium text-ink-700">最近任务</h3>
               <span className="text-xs text-ink-400">最近 {profile.recentTickets.length} 条</span>
             </div>
             <ProfileTicketList tickets={profile.recentTickets} />
-          </div>
+          </section>
 
           {/* 参与项目 */}
-          <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+          <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-sm">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-medium text-ink-700">参与项目</h3>
               <span className="text-xs text-ink-400">{profile.stats.activeProjects} 个</span>
             </div>
             <ProfileProjectList projects={profile.projects} />
-          </div>
+          </section>
         </div>
 
-        {/* AI 助手快捷入口（与画像区分） */}
-        <div className="rounded-xl border border-dashed border-brand-200 bg-brand-50/30 p-5">
+        {/* AI 助手快捷入口 */}
+        <div className="rounded-xl border border-dashed border-brand-200 bg-brand-50/40 p-5">
           <div className="flex items-start gap-4">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-100">
-              <span className="text-lg">🤖</span>
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-100 text-brand-600">
+              <IconSparkles className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
               <h3 className="text-sm font-medium text-brand-700">AI 对话助手</h3>
@@ -90,7 +86,7 @@ export default async function TeamMemberPage({ params }: Props) {
               </p>
               <a
                 href={`/ai?profile=${id}`}
-                className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-brand-700"
+                className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700 focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:outline-none"
               >
                 与 AI 聊聊 {isOwnProfile ? "我的" : "他的"} 工作
               </a>

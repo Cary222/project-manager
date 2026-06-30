@@ -66,10 +66,9 @@ export default async function ReportsPage() {
         <div className="grid gap-5 lg:grid-cols-2">
           {/* 项目健康度 */}
           <ReportsProjectHealth projects={stats.projectHealth} />
+          {/* AI 健康度（ROOT only — component handles its own auth display） */}
+          <ReportsHealthAi />
         </div>
-
-        {/* AI 健康度（ROOT only — component handles its own auth display） */}
-        <ReportsHealthAi />
       </div>
     </AppShell>
   );

@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { UserProfile } from "@/features/profile/lib/profile-actions";
 
 type Props = {
@@ -15,7 +14,7 @@ export function ProfileHeader({ profile }: Props) {
   const initial = (profile.name || profile.email || "U").charAt(0).toUpperCase();
 
   return (
-    <div className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">
+    <div className="rounded-xl border border-ink-200 bg-white p-6 shadow-sm">
       <div className="flex items-start gap-4">
         <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-brand-600 text-2xl font-bold text-white">
           {initial}
@@ -25,7 +24,7 @@ export function ProfileHeader({ profile }: Props) {
             <h2 className="text-xl font-semibold text-ink-900">
               {profile.name || "未命名成员"}
             </h2>
-            <span className="rounded-full bg-ink-100 px-2.5 py-0.5 text-xs font-medium text-ink-500">
+            <span className="rounded bg-ink-100 px-2.5 py-0.5 text-xs font-medium text-ink-700">
               {ROLE_LABELS[profile.role] ?? profile.role}
             </span>
           </div>
@@ -40,10 +39,7 @@ export function ProfileHeader({ profile }: Props) {
       {profile.skills.length > 0 && (
         <div className="mt-4 flex flex-wrap gap-2">
           {profile.skills.map((s) => (
-            <span
-              key={s.kind}
-              className="rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700"
-            >
+            <span className="rounded-lg bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700">
               {s.kind}
             </span>
           ))}

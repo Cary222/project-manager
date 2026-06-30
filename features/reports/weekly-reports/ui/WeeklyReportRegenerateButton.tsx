@@ -49,7 +49,8 @@ export function WeeklyReportRegenerateButton({ reportId }: Props) {
       type="button"
       onClick={handleRegenerate}
       disabled={loading}
-      className="inline-flex items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-sm font-medium text-ink-600 transition hover:bg-ink-50 hover:border-ink-300 disabled:cursor-not-allowed disabled:opacity-50"
+      aria-label="刷新画像"
+      className="inline-flex items-center gap-1.5 rounded-lg border border-ink-300 bg-white px-4 py-2 text-sm font-medium text-ink-700 transition-colors duration-200 hover:bg-ink-100 focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
     >
       <svg
         className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}

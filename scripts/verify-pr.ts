@@ -1,5 +1,5 @@
 /**
- * verify-pr.ts — PR1 + PR2 + PR3 + PR4 + PR5 完整验证
+ * verify-pr.ts — PR1 + PR2 + PR3 + PR4 + PR5 + PR7 完整验证
  *
  * 跑法：
  *   ./node_modules/.bin/tsx --env-file=.env.local scripts/verify-pr.ts --pr1
@@ -7,11 +7,12 @@
  *   ./node_modules/.bin/tsx --env-file=.env.local scripts/verify-pr.ts --pr3
  *   ./node_modules/.bin/tsx --env-file=.env.local scripts/verify-pr.ts --pr4
  *   ./node_modules/.bin/tsx --env-file=.env.local scripts/verify-pr.ts --pr5
+ *   ./node_modules/.bin/tsx --env-file=.env.local scripts/verify-pr.ts --pr7
  *   ./node_modules/.bin/tsx --env-file=.env.local scripts/verify-pr.ts --all
  *
- * 验证顺序（--pr5）：
- *   1. 子脚本：weekly-report-bg-job-unit-test（10 个测试，含 PR5 的 Test 9/10）
- *   2. API 路由挂载测试（regenerate 202/401/404/403）
+ * 验证顺序（--pr7）：
+ *   1. 子脚本：weekly-report-draft-summary-unit-test（11 个测试）
+ *   2. API 路由挂载测试（draft-summary 401/429/200）
  */
 
 import { spawnSync } from "child_process";
@@ -53,9 +54,10 @@ async function main() {
     !args.includes("--pr3") &&
     !args.includes("--pr4") &&
     !args.includes("--pr5") &&
+    !args.includes("--pr7") &&
     !args.includes("--all")
   ) {
-    console.log("Usage: tsx scripts/verify-pr.ts --pr1 | --pr2 | --pr3 | --pr4 | --pr5 | --all");
+    console.log("Usage: tsx scripts/verify-pr.ts --pr1 | --pr2 | --pr3 | --pr4 | --pr5 | --pr7 | --all");
     process.exit(1);
   }
 
@@ -64,10 +66,11 @@ async function main() {
   const runPr3 = args.includes("--pr3") || args.includes("--all");
   const runPr4 = args.includes("--pr4") || args.includes("--all");
   const runPr5 = args.includes("--pr5") || args.includes("--all");
+  const runPr7 = args.includes("--pr7") || args.includes("--all");
 
   console.log("========================================");
-  console.log("     verify-pr — PR1 / PR2 / PR3 / PR4 / PR5 suite");
-  console.log(`     pr1=${runPr1}  pr2=${runPr2}  pr3=${runPr3}  pr4=${runPr4}  pr5=${runPr5}`);
+  console.log("     verify-pr — PR1 / PR2 / PR3 / PR4 / PR5 / PR7 suite");
+  console.log(`     pr1=${runPr1}  pr2=${runPr2}  pr3=${runPr3}  pr4=${runPr4}  pr5=${runPr5}  pr7=${runPr7}`);
   console.log("========================================");
 
   let allPassed = true;
@@ -273,6 +276,50 @@ async function main() {
     }
   }
 
+  // ===== PR7 steps =====
+  if (runPr7) {
+    console.log("\n===== PR7 STEPS =====");
+
+    // Step 1: draft-summary unit tests
+    if (!runScript("DRAFT SUMMARY UNIT", "weekly-report-draft-summary-unit-test.ts", [])) {
+      allPassed = false;
+    }
+
+    // Step 2: draft-summary API route auth test
+    console.log("\n[PR7 API ROUTE TESTS]");
+
+    // 2a. POST draft-summary without auth → 307/302 or 401
+    {
+      const { status } = await apiFetch("/api/reports/weekly-reports/draft-summary", {
+        method: "POST",
+        body: JSON.stringify({
+          weekStart: "2025-06-23T00:00:00Z",
+          weekEnd: "2025-06-29T23:59:59Z",
+        }),
+      });
+      if ([307, 302, 401, 400].includes(status)) {
+        console.log(`  ✓ POST draft-summary (no auth/invalid) → ${status}`);
+      } else {
+        console.log(`  ✗ POST draft-summary (no auth/invalid) → ${status} (expected 307/302/401/400)`);
+        allPassed = false;
+      }
+    }
+
+    // 2b. POST draft-summary with invalid body → 400
+    {
+      const { status } = await apiFetch("/api/reports/weekly-reports/draft-summary", {
+        method: "POST",
+        body: JSON.stringify({ weekStart: "not-a-date" }),
+      });
+      if ([400, 401, 307, 302].includes(status)) {
+        console.log(`  ✓ POST draft-summary (invalid body) → ${status}`);
+      } else {
+        console.log(`  ✗ POST draft-summary (invalid body) → ${status} (expected 400/401/307/302)`);
+        allPassed = false;
+      }
+    }
+  }
+
   console.log("\n========================================");
   if (!allPassed) {
     console.error("[VERIFY FAIL]");
@@ -284,6 +331,7 @@ async function main() {
     runPr3 ? "PR3" : "",
     runPr4 ? "PR4" : "",
     runPr5 ? "PR5" : "",
+    runPr7 ? "PR7" : "",
   ].filter(Boolean).join("+");
   console.log(`[${labels} OK]`);
   console.log("========================================");

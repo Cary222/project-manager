@@ -1,24 +1,50 @@
 export const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-function toUtcStartOfDay(date: Date): Date {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0));
+/** 项目统一使用北京时间（UTC+8）作为周范围基准。 */
+const SHANGHAI = "en-CA"; // 使用 en-CA 拿到 YYYY-MM-DD 格式，规避各 OS locale 默认值差异
+
+function getBeijingDateParts(reference: Date): { year: number; month: number; day: number; weekday: number } {
+  // 取北京日历下的年/月/日/星期几。en-CA 总是输出 YYYY-MM-DD，避免不同 locale 顺序问题。
+  const dateStr = new Intl.DateTimeFormat(SHANGHAI, {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  }).formatToParts(reference);
+
+  const lookup = Object.fromEntries(dateStr.map((p) => [p.type, p.value]));
+  const year = Number(lookup.year);
+  const month = Number(lookup.month);
+  const day = Number(lookup.day);
+
+  // weekday 短码 → 数字（Sun=0, Mon=1, ... Sat=6）
+  const WEEKDAY_MAP: Record<string, number> = {
+    Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+  };
+  const weekday = WEEKDAY_MAP[lookup.weekday] ?? reference.getUTCDay();
+
+  return { year, month, day, weekday };
 }
 
-function toUtcEndOfDay(date: Date): Date {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999));
+function beijingMidnightToUtc(year: number, month: number, day: number, hour = 0): Date {
+  // 北京时间 YYYY-MM-DD HH:mm:ss 对应的 UTC Date（UTC+8 → UTC = 减去 8h）
+  return new Date(Date.UTC(year, month - 1, day, hour - 8, 0, 0, 0));
 }
 
-/** 返回给定日期所在自然周（周一 00:00 UTC → 周日 23:59:59 UTC）。 */
+/** 返回给定日期所在自然周（周一 00:00 北京 → 周日 23:59:59 北京）。 */
 export function getWeekRange(reference: Date = new Date()): { weekStart: Date; weekEnd: Date } {
-  const utc = toUtcStartOfDay(reference);
-  const day = utc.getUTCDay();
-  //周日(0)时: weekStart = 当天(不是-6天), weekEnd = 当天23:59:59
-  //其他: weekStart = 本周一, weekEnd = 本周日23:59:59
-  const offset = day === 0 ? 0 : 1 - day;
-  const monday = new Date(utc.getTime() + offset * 24 * 60 * 60 * 1000);
+  const { year, month, day, weekday } = getBeijingDateParts(reference);
+  // 周日(0)时: weekStart = 当天(不是-6天)
+  // 其他: weekStart = 本周一
+  const offset = weekday === 0 ? 0 : 1 - weekday;
+  // 用 Date 算偏移（自动跨月/跨年），然后取北京日历日
+  const mondayLocal = new Date(year, month - 1, day + offset);
+  const sundayLocal = new Date(year, month - 1, day + offset + 6);
+
   return {
-    weekStart: toUtcStartOfDay(monday),
-    weekEnd: toUtcEndOfDay(new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000)),
+    weekStart: beijingMidnightToUtc(mondayLocal.getFullYear(), mondayLocal.getMonth() + 1, mondayLocal.getDate()),
+    weekEnd: new Date(beijingMidnightToUtc(sundayLocal.getFullYear(), sundayLocal.getMonth() + 1, sundayLocal.getDate(), 23).getTime() + 999),
   };
 }
 
