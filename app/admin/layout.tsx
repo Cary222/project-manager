@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ReactNode } from "react";
 import { auth } from "@/lib/auth";
-import { isRoot } from "@/shared/lib/permissions";
+import { isRoot } from "@/shared/lib/permissions-client";
 import { AppShell } from "@/shared/ui/AppShell";
 import { IconChevronRight, IconSettings } from "@/shared/ui/icons";
 import { AdminRoleProvider } from "./AdminRoleProvider";

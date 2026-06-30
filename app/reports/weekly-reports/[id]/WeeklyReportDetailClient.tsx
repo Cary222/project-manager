@@ -6,6 +6,8 @@ import { WeeklyReportForm } from "@/features/reports/weekly-reports/ui/WeeklyRep
 import { WeeklyReportRegenerateButton } from "@/features/reports/weekly-reports/ui/WeeklyReportRegenerateButton";
 import { escapeAiSummary } from "@/shared/lib/xss";
 import type { WeeklyReportWithProjects } from "@/features/weekly-reports/lib/weekly-report-store";
+import { AttachmentItem, type PreviewableFile } from "@/shared/ui/AttachmentItem";
+import { DocumentPreviewModal } from "@/shared/ui/DocumentPreviewModal";
 
 type Props = { initialReport: WeeklyReportWithProjects; reportId: string };
 
@@ -90,6 +92,7 @@ export function WeeklyReportDetailClient({ initialReport, reportId }: Props) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("view");
   const [report, setReport] = useState(initialReport);
+  const [previewFile, setPreviewFile] = useState<PreviewableFile | null>(null);
 
   useEffect(() => {
     if (mode === "view") {
@@ -98,11 +101,14 @@ export function WeeklyReportDetailClient({ initialReport, reportId }: Props) {
   }, [mode, initialReport]);
 
   const attachments = Array.isArray(report.attachments)
-    ? (report.attachments as Array<{ name?: string; url?: string }>)
+    ? (report.attachments as Array<{ name?: string; url?: string; mimeType?: string; size?: number }>)
     : [];
 
   return (
     <>
+      {previewFile && (
+        <DocumentPreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+      )}
       {/* Header — 右侧模式相关按钮，返回由 BackPageHeader 承担 */}
       <div className="mb-6 flex items-start justify-end gap-2">
         {mode === "view" ? (
@@ -184,25 +190,22 @@ export function WeeklyReportDetailClient({ initialReport, reportId }: Props) {
 
           {/* Attachments */}
           {attachments.length > 0 && (
-            <div className="mb-6">
+            <div className="mb-6 rounded-xl border border-ink-200 bg-ink-50/50 p-4">
               <h3 className="mb-3 text-sm font-semibold text-ink-700">附件</h3>
-              <ul className="space-y-2">
+              <div className="space-y-2">
                 {attachments.map((att, i) => (
-                  <li key={i}>
-                    <a
-                      href={att.url ?? "#"}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 text-sm text-brand-600 transition hover:text-brand-700 hover:underline"
-                    >
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                      </svg>
-                      {att.name ?? `附件 ${i + 1}`}
-                    </a>
-                  </li>
+                  <AttachmentItem
+                    key={i}
+                    attachment={{
+                      name: att.name ?? `附件 ${i + 1}`,
+                      url: att.url ?? "#",
+                      mimeType: att.mimeType ?? "application/octet-stream",
+                      size: att.size ?? 0,
+                    }}
+                    onPreview={setPreviewFile}
+                  />
                 ))}
-              </ul>
+              </div>
             </div>
           )}
 

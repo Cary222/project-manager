@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { isRoot } from "@/shared/lib/permissions";
+import { isRoot } from "@/shared/lib/permissions-client";
 import { getModerationLogs } from "@/features/admin/moderation";
 
 export async function GET() {

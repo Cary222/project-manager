@@ -79,6 +79,13 @@ export type TeamMember = {
   };
 };
 
+/**
+ * TeamMemberWithProjects — 用于「全部成员」视角。
+ * 与 TeamMember 的区别：带 projects 列表（含 projectId/name/role/status），
+ * 用于 ProfileAllMembers 组件渲染每人一张卡、卡内列参与项目。
+ * 已迁移至 @/features/team/lib/team-actions
+ */
+
 export async function getUserProfileAction(userId: string): Promise<UserProfile> {
   const user = await prisma.user.findUnique({
     where: { id: userId },

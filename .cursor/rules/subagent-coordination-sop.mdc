@@ -6,6 +6,10 @@ alwaysApply: true
 
 # 子代理协作 SOP（主代理调度模式）
 
+## 核心理念
+
+> **Main 拆分任务、控制边界、协调流程、做最终决策；Subagent 仅在明确的 Scope 内执行和建议，不负责调度、协调或流程控制。**
+
 ## 核心原则
 
 > **主代理是唯一协调者。子代理间禁止直接通信。**
@@ -17,140 +21,254 @@ Cursor 的 `Task` 子代理机制特点：
 - 子代理**没有自动触发 / 跨代理事件订阅 / 跨代理状态查询**能力
 - 子代理 prompt 中的"等 X 完成后再做 Y"等时序语言**无法生效**
 
+---
+
+## Mode C — 小任务默认路径（降级）
+
+**触发条件**：任务不可拆分 或 预计修改不超过 3 个文件（修 Bug / 改按钮 / 改 Prisma 字段 / 改 README / 改注释）
+
+> 这是 Cursor 最稳定、Token 最少的模式。避免所有事情都走 6 阶段。
+
+```text
+Main 收到需求
+  ↓
+判断：≤3 文件 且 无跨 feature 依赖？
+  ↓ Yes → Mode C
+  ↓ No  → 进入主流程（Stage0）
+```
+
+Mode C 流程：
+
+```text
+Main
+  ↓
+fullstack-developer（Foreground）
+  ↓
+实现 → 自测 → npx tsc --noEmit
+  ↓
+Final Response
+  ↓
+Main 验收 → User Decide Commit
+```
+
+---
+
+## 主流程 — 6 阶段（仅在 Mode C 不适用时启用）
+
+```text
+Stage0  Task Analysis（Main 自己，文件边界互斥）
+Stage1  Advisor Review（ai-learning-mentor，输出 APPROVED/CHANGES_REQUIRED/BLOCKED）
+Stage2  Feature Fan-out（每个 feature：Dev → Main 判断 → Review?）
+Stage3  Merge + Smoke Review（Main 决策，fullstack-developer 执行 Git）
+Stage4  Document（dev-to-doc-recap skill）
+Stage5  User Decide → Commit（Agent 执行 Git）
+```
+
+### Stage0 — Task Analysis（Main 自己）
+
+主代理收到需求后，**自己**完成：
+
+1. 读 `pm-dev/PROJECT-HUB.md` / `feature-first` skill 摸项目现状
+2. **判断是否走 Mode C**：≤3 文件 且 无跨 feature 依赖 → Mode C，退出主流程
+3. 识别独立 feature 边界（哪些可并行 / 哪些有强依赖必须串行）
+4. 写出 feature 列表 + 每个 feature 的输入输出 + **依赖图**
+5. **列出共享文件**（共用类型 / 共用 Prisma schema / 共用 lib）
+6. **文件边界互斥**：每个文件同时只属于一个 Feature
+
+**关键约束：**
+- 一个文件同时只属于一个 Feature
+- 共享文件由 Main 在 Stage3 合并，不派给子代理
+
+输出 `## 任务拆分摘要`，作为 Stage1 的输入。
+
+### Stage1 — Advisor Review（ai-learning-mentor，Foreground）
+
+- `run_in_background: false`
+- prompt 必含：
+  - `## 任务背景`：Stage0 的 `## 任务拆分摘要`
+  - `## 必读产物路径`：pm-dev/PROJECT-HUB.md、待改文件
+  - `## 方案请求`：review feature 拆分是否合理 / 跨 feature 边界是否漏 / 风险点
+
+**Advisor 输出固定三档（Main 直接 if 判断）：**
+- `APPROVED`：直接进入 Stage2
+- `CHANGES_REQUIRED`：补 X 后再执行（Main 调整方案，最多 2 次）
+- `BLOCKED`：方案有根本问题，重新设计
+
+### Stage2 — Feature Fan-out
+
+每个 feature 独立走：
+
+```text
+Feature1: fullstack-developer → Main 判断 → （需要 Review?）→ code-reviewer + ai-learning-mentor
+Feature2: fullstack-developer → Main 判断 → （需要 Review?）→ code-reviewer + ai-learning-mentor
+Feature3: fullstack-developer → Main 判断 → （需要 Review?）→ code-reviewer + ai-learning-mentor
+```
+
+**Review 触发条件（Main 判断，保守原则）：**
+- ✅ 涉及业务逻辑 / 数据库 / 架构 / 权限 / API → **必须 Review**
+- ❌ 改 README / 改注释 / 改样式细节 / 纯文案修改 → **跳过 Review**
+- 不确定 → 走 Review
+
+每个 fullstack-developer prompt 必含：
+- `## 任务背景`：此 feature 的具体范围 + Stage0 摘要
+- `## 必读产物路径`：此 feature 涉及的所有文件
+- `## 范围限定`：明确"只动这个 feature，不要越界改其它 feature"
+- `## 文件边界互斥`：此 feature 修改的文件列表（Stage0 已保证无重叠）
+- `## 必跑命令`：`npx tsc --noEmit` 必须绿
+- `## 汇报格式`：文件清单 + tsc 结果 + 踩坑记录
+
+每个审查 prompt 必含：
+- `## 必读产物路径`：对应 feature 的产物文件
+- `## 范围限定`：硬层 vs 软层（code-reviewer / ai-learning-mentor）
+- `## 报告输出文件`
+
+主代理在每个 feature 收到：
+- Dev Final Response
+- 审查报告（如需 Review）
+- Critical (Must Fix) → 派 fullstack-developer 修复（Foreground，单 agent）
+- 修复完重跑 `npx tsc --noEmit` 必须绿
+
+### Stage3 — Merge + Smoke Review
+
+**Main 决策合并策略 → 派 fullstack-developer 执行 Git 操作**：
+
+> ⚠️ **Git 操作必须遵循 `git-commit-required.mdc` 纪律**，包括：问单号 / 加 Co-authored-by / 默认推 origin。详见该规则文件。
+
+```text
+Main
+  ↓
+决策合并策略（rebase / merge / squash）
+  ↓
+派 fullstack-developer 执行：
+  - 按 git-commit-required.mdc Step 7 精确 add feature 产物
+  - git diff --check（检查冲突）
+  - git merge / rebase（解决冲突）
+  ↓
+Smoke Review（code-reviewer）：
+  - 只检查整体一致性
+  - 检查 Stage2 是否漏 Review 关键改动
+  - 不重做完整 review（Stage2 已覆盖）
+  ↓
+如有问题 → 回 Stage2 对应 feature 修复
+```
+
+**关键约束**：
+- Main 不直接操作 Git，**所有 Git 命令由 fullstack-developer 执行**，且必须遵循 `git-commit-required.mdc`
+- Main 只做**决策**（用什么策略合并），Agent 执行
+
+### Stage4 — Document
+
+- 主代理用 `dev-to-doc-recap` skill 生成 8 段式复现文档
+- 输出：`docs/reports/PR<N>-<name>.md`
+- 必含 8 段：背景 / 目标 / 设计 / 实现 / 测试 / 上线 / 踩坑 / 后续
+
+### Stage5 — User Decide → Commit
+
+- 主代理把 PR 摘要 + 审查报告 + 复现文档路径给用户
+- **Subagent 不建议跳过此步骤**（Authority Boundary）
+- 用户决定后：
+  - commit → 派 fullstack-developer 执行 git commit（**按 `git-commit-required.mdc` 纪律**：问单号 / 加 Co-authored-by / 默认推 origin）
+  - 不 commit → 保留工作树
+
+---
+
+## Rules
+
+### Rule 7 — Task 调用策略
+
+> **默认 Foreground，无依赖任务才用 Background。**
+>
+> - 所有子代理调用默认 `run_in_background: false`
+> - 多 agent 在同轮调用（同一 message 内多次 Task 调用），Cursor Runtime 自行决定执行策略（串行或并发），SOP **不依赖** 具体调度方式
+> - 仅当任务结果不是后续步骤前置条件时，才使用 Background
+> - 理由：Cursor 不保证 Background Final Response 回流（已踩坑）
+
+### Rule 8 — 子代理汇报路径与时序约束
+
+> Subagent Final Response **只发给主代理**，绝不写"等 X 子代理完成后做 Y"。
+>
+> 跨子代理时序由主代理在 prompt 里写明产物路径，不让子代理自己协调。
+
+### Rule 9 — 异常恢复（仅作异常手段）
+
+> Foreground 调用正常流程一定会拿到 Final Response。仅当 Task 返回内容异常 / 不完整时：
+>
+> 1. **Read transcript 一次**：`/Users/vastgui/.cursor/projects/<workspace>/agent-transcripts/<shell_id>.jsonl` 最后一条 assistant 消息
+> 2. **如果仍异常**：重新派发（仍然 Foreground），prompt 加"上轮产物路径 + 已知问题"
+> 3. **禁止**：多次 Read（轮询）/ Resume 已完工 Task / 按文件大小或关键字判断完工
+
+### Rule X — Authority Boundary
+
+> **Main 决策，Subagent 建议。**
+>
+> Subagent 只能**建议**，不能**执行流程**：
+>
+> - 禁止跳过任何 Stage（如"建议跳过 Review 直接 Commit"）
+> - 禁止替 Main 决定是否修复 / 是否继续 / 是否合并
+> - 禁止操作 Git（`git add/commit/merge` 由 Main 决策 + fullstack-developer 执行，**必须遵循 `git-commit-required.mdc`**）
+>
+> Subagent 的输出是**建议**，最终决策权归主代理。
+
+### Rule Y — Immutable Input
+
+> **派发后的 Feature Scope 不可修改。**
+>
+> 派发 Feature 后，Feature 的 Scope（涉及文件 / 任务范围 / 验收标准）冻结：
+>
+> - 新增需求必须新建 Feature，由 Main 重新派发
+> - 修改需求必须新建 Feature，不允许改原 Feature 的 Prompt
+> - 不同 Agent 拿到不同 Prompt 是混乱的根源
+
+---
+
 ## 错误模式（禁止）
 
 ❌ **跨子代理时序**
 
-```ts
-// ❌ 错：两个子代理被同时启动，子代理 B 指望"PR2 完成后做审计"
+```text
+// ❌ 错：子代理 B 指望"PR2 完成后做审计"
 Task(fullstack-developer) — 实施 PR2
 Task(ai-learning-mentor) — 等 PR2 完成后做审计
-// ↑ 子代理 B 拿到 prompt 时只能 idle 等指令，永远不会主动去 audit
+// ↑ 子代理 B 拿到 prompt 时只能 idle 等指令
 ```
 
 ❌ **子代理里写"监控其他子代理"**
 
 ```text
-// ❌ 在子代理 prompt 里写
 "PR2 子代理完成后 10 分钟内开始审计"
 "轮询 transcript 大小，等待完成信号"
-"看到完成响应后立即开始"
 ```
 
-子代理没有 listener 机制，它拿不到"完成信号"。这种 prompt 只会让子代理空转直到超时。
-
-## 正确模式（必须）
-
-### 模式 A：主代理轮询 + 主代理委派
+❌ **Subagent 越权**
 
 ```text
-主代理启动 fullstack-developer（实施 X）
-  ↓
-主代理 sleep + 查 transcript 文件大小
-  ↓
-看到"## X 完工报告" 字符串
-  ↓
-主代理启动 ai-learning-mentor（基于 X 的产物做审计）
-  ↓
-ai-learning-mentor 完成 → 主代理汇总 → 给用户
+"我觉得不用 Review"
+"我建议直接 Commit"
+"跳过 Stage3，直接合并"
+// → Subagent 只能建议，Main 决策
 ```
 
-实现细节：
-- 轮询间隔：`block_until_ms: 300000`（5 分钟起），最长等 2-3 次
-- 判断完成的信号：transcript 最后一行 assistant 文本包含"## X 完工报告"关键字
-- 委派下一个子代理时，主代理在 prompt 里写**实际产物路径**，让子代理 Read 那些文件（不要指望子代理自己找）
-
-### 模式 B：链式 `resume`
+❌ **派发后修改 Scope**
 
 ```text
-主代理启动 subagent A
-  ↓
-subagent A 完成后 → 主代理拿到 final response
-  ↓
-主代理对 subagent A 用 resume(id, "继续做 Y")  ← 把 A 当作持续执行者
+// ❌ Feature A 做到一半，再加一个 XX 功能
+// → 新需求必须新建 Feature
 ```
 
-适用场景：A 的工作需要基于 A 自己前面的产出（如开发 + 修复）。
-
-### 模式 C：单一子代理完成多阶段
-
-如果任务本质上是串行的（实施 → 自我审计），用**一个子代理**完成。
-
-```text
-Task(fullstack-developer, prompt="
-1. 实施 X
-2. 自我审计 X 的产出，给出 must-fix 列表
-3. 实施修复
-4. 重新跑测试
-")
-```
-
-适用：阶段间有强数据依赖 + 整体规模不大。
-
-### 模式 D：并行审计（code-reviewer + ai-learning-mentor 双线）
-
-适用场景：
-- PR 主实施已完工，主代理需要同时获得**硬技术审查**（类型 / 安全 / N+1 / FSD）+ **软架构审查**（取舍 / 边界 / 可观测性）
-- PR 范围适中（单 PR 内 4-8 个文件改动），双线串行成本太高
-- 想在 PR 早期发现技术债（类型错误、N+1、XSS）
-
-```text
-主代理启动 fullstack-developer（实施 PR N）
-  ↓
-主代理 sleep + poll transcript（等 "## PR N 完工报告" 关键字）
-  ↓
-主代理**同一 message 内并行启动**（都用 run_in_background: false）：
-  ├─ code-reviewer     → prompt 含产物路径 + 必读规则 + 范围限定
-  └─ ai-learning-mentor → prompt 含产物路径 + 必读规则 + 范围限定
-  ↓
-两个子代理各自独立 Read 文件（互不可见，各自报告给主代理）
-  ↓
-主代理 sleep + poll，等两份报告
-  ↓
-主代理合并：
-  - 把双方 cross- 标记的项正确归位（避免双方都漏 / 都重复）
-  - 取出所有 Critical (Must Fix)，一起丢给 fullstack-developer 修复（主代理可修小项）
-  ↓
-修复 → 跑 npx tsc --noEmit + 单元测试 → 全绿
-  ↓
-主代理（或 fullstack-developer 配合）用 dev-to-doc-recap skill 写复现文档
-  ↓
-等用户决策 commit
-```
-
-**关键 SOP 约束**：
-
-1. **并行 ≠ 独立 prompt** — 两个子代理 prompt 必须**独立写明产物路径**，不能"一个说另一个会给你"。都从主代理出发，互不可见。
-
-2. **报告位置固定**：
-   - `code-reviewer` → `docs/reports/PR<N>-<name>-code-review.md`（按本次功能命名）
-   - `ai-learning-mentor` → 沿用现有 ai-audit 报告位置
-
-3. **cross- 转交标记**：
-   - 任何越界的发现（硬技术 agent 写了软架构结论 / 反之）必须标 `cross-mentor:` 或 `cross-reviewer:`
-   - 主代理负责归位，**不**让双子代理互相依赖
-
-4. **不能用 background 模式** — 双子代理都设 `run_in_background: false`，主代理才能并行 sleep + 等
-
-5. **不破坏既有 A/B/C** — D 是补充，不是替代
-
-6. **报告产出物检查**：
-   - 主代理等两份报告时，确认 `docs/reports/PR<N>-<name>-code-review.md` 真实落盘（空文件 = 子代理没真跑，应重新派）
-   - 同样检查 mentor 的 ai-audit 报告（若有要求）
+---
 
 ## 主代理编排 checklist
 
-启动多子代理前，确认：
+- [ ] 任务走 Mode C（≤3 文件）还是主流程（>3 文件 / 多 feature）
+- [ ] 每个 feature 的文件边界互斥（Stage0 已确认）
+- [ ] 每个子代理 prompt 都包含 `## 必读产物路径` 和 `## 范围限定`
+- [ ] Stage2 Review 触发条件已判断（业务/DB/架构/权限/API 才 Review）
+- [ ] Stage3 Merge 策略已定（Main 决策），Git 命令派给 fullstack-developer（**遵循 `git-commit-required.mdc`**）
+- [ ] Main 负责决策，不越权执行 Git / 不跳过 Stage / 不改派发后的 Scope
 
-- [ ] 每个子代理的 prompt 都明确"向主代理报告"而不是"等 X 完成"
-- [ ] 子代理 prompt 中没有"等另一个子代理完成"这类时序语言
-- [ ] 子代理需要的输入数据（文件路径、背景信息）写在 prompt 里
-- [ ] 主代理编排轮询 / resume 逻辑
-- [ ] **（模式 D 专用）** 并行启动时，两个子代理的 prompt 都包含 `## 必读产物路径` 段和 `## 范围限定` 段
+---
 
 ## 子代理 prompt 模板
-
-**正确的子代理 prompt 结构**：
 
 ```text
 你是 <role> 子代理。
@@ -173,22 +291,11 @@ Task(fullstack-developer, prompt="
 - 你的最终响应只发给主代理
 - 不要写"等 X 子代理完成后做 Y"——你不知道 X 的状态
 - 如果收到 prompt 时需要等前置产出，请向主代理汇报"缺少前置产物"而不是 idle 等
+- 你只能建议，不能执行流程（Authority Boundary）
 ```
 
-## 反例
-
-```text
-// ❌ 反例 1：让子代理监控另一个子代理
-"PR2 子代理完成后 10 分钟内开始审计"
-
-// ❌ 反例 2：让子代理查询子代理状态
-"用 Bash 工具 check transcript 大小变化"
-
-// ❌ 反例 3：跨子代理传递数据
-"PR2 子代理的最终报告里包含 X 文件的代码摘要，请审计"
-// ↑ 子代理不会自动拿到 PR2 的报告，必须主代理在 prompt 里复述
-```
+---
 
 ## 一句话总结
 
-> **主代理是交通指挥，子代理是各干各的。子代理间通信 = 通过主代理中转。**
+> **Main 拆分任务、控制边界、协调流程、做最终决策； Subagent 仅在明确的 Scope 内执行和建议，不负责调度、协调或流程控制。**

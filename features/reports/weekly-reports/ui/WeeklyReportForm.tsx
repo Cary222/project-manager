@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import { WeeklyDraftPanel } from "./WeeklyDraftPanel";
 import type { WeeklyDraftSummary } from "@/features/reports/weekly-reports/lib/draft-summary";
 import type { WeeklyReportWithProjects } from "@/features/weekly-reports/lib/weekly-report-store";
+import { AttachmentEditor } from "@/shared/ui/AttachmentEditor";
+import { normalizePkmAttachments, type PkmAttachment } from "@/shared/lib/pkm";
 
 type ProjectOption = { id: string; name: string };
 
@@ -49,6 +51,9 @@ export function WeeklyReportForm({
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(
     new Set(initialProjectIds ?? [])
+  );
+  const [attachments, setAttachments] = useState<PkmAttachment[]>(() =>
+    normalizePkmAttachments(initialReport?.attachments)
   );
   const [loading, setLoading] = useState(false);
   const [projectsLoading, setProjectsLoading] = useState(true);
@@ -191,6 +196,7 @@ export function WeeklyReportForm({
             title: title.trim(),
             content: content.trim(),
             projectIds: Array.from(selectedProjectIds),
+            attachments,
           }),
         });
 
@@ -224,6 +230,7 @@ export function WeeklyReportForm({
             weekEnd: end.toISOString(),
             content: content.trim(),
             projectIds: Array.from(selectedProjectIds),
+            attachments,
           }),
         });
 
@@ -353,6 +360,19 @@ export function WeeklyReportForm({
           <p className="mt-1.5 text-xs text-ink-400">
             支持多行文本，可粘贴代码块或任务列表。AI 将自动生成结构化总结。
           </p>
+        </div>
+
+        {/* 附件 */}
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-ink-700">
+            附件
+            <span className="ml-1.5 text-xs font-normal text-ink-400">（可选，最多 8 个，单个不超过 10 MB）</span>
+          </label>
+          <AttachmentEditor
+            attachments={attachments}
+            onChange={setAttachments}
+            onError={(msg) => toast.error(msg)}
+          />
         </div>
 
         {/* 操作 */}

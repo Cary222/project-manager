@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { IconSearch, IconSettings, IconTask, IconTeam, IconEdit, IconMenu, IconRepo, IconBook } from "@/shared/ui/icons";
 import { BackLink, SimplePageHeader, HeaderSkeleton } from "@/shared/ui/headers";
 import { normalizePkmAttachments, type PkmAttachment } from "@/shared/lib/pkm";
@@ -15,11 +15,13 @@ import { DispatchProjectDetail } from "@/features/dispatch/ui/DispatchProjectDet
 import { TaskStatsCards, type TaskStats } from "@/shared/ui/TaskStatsCards";
 import { useToast } from "@/shared/lib/use-toast";
 import { useRecentVisits } from "@/shared/lib/visits-context";
+import { ProjectMemberTab } from "@/features/project/ui/ProjectMemberTab";
 import {
   KIND_LABEL,
   type TicketStatus,
   type MyTicket,
 } from "@/entities/ticket/model/types";
+import { isRoot } from "@/shared/lib/permissions-client";
 
 // ---- Types ----
 
@@ -260,7 +262,7 @@ function TaskTab({ tickets, taskCounts }: TaskTabProps) {
   );
 }
 
-// ---- Overview tab ----
+// ---- InfoRow ----
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
@@ -271,24 +273,192 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function OverviewTab({ project }: { project: ProjectWithStatus }) {
+// ---- Overview tab ----
+
+type OwnerOption = { id: string; name: string | null; email: string };
+
+function OverviewTab({
+  project,
+  editing,
+  onEdit,
+  onCancel,
+  onSaved,
+  canEdit,
+}: {
+  project: ProjectWithStatus;
+  editing: boolean;
+  onEdit: () => void;
+  onCancel: () => void;
+  onSaved: () => void;
+  canEdit: boolean;
+}) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+
+  const [name, setName] = useState(project.name);
+  const [description, setDescription] = useState(project.description ?? "");
+  const [status, setStatus] = useState(project.status ?? "ACTIVE");
+  const [ownerId, setOwnerId] = useState(project.ownerId ?? "");
+  const [owners, setOwners] = useState<OwnerOption[]>([]);
+
+  // 当进入编辑模式时同步表单值，并拉负责人候选
+  useEffect(() => {
+    if (!editing) return;
+    setName(project.name);
+    setDescription(project.description ?? "");
+    setStatus(project.status ?? "ACTIVE");
+    setOwnerId(project.ownerId ?? "");
+    let cancelled = false;
+    fetch("/api/users")
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        if (!cancelled && data.users) setOwners(data.users);
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("负责人列表加载失败");
+      });
+    return () => { cancelled = true; };
+  }, [editing, project, toast]);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          description,
+          status,
+          ownerId: ownerId || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(`保存失败: ${data.error}`);
+        return;
+      }
+      toast.success("保存成功");
+      onSaved();
+    } catch {
+      toast.error("网络错误，请重试");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const createdAt = project.createdAt
     ? new Date(project.createdAt).toLocaleDateString("zh-CN")
     : "—";
-  const ownerName = project.owner?.name || "—";
   const memberCount = project.members?.length ?? 0;
 
   return (
     <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
-      <h2 className="mb-4 text-base font-semibold text-ink-900">项目基本信息</h2>
-      <div className="space-y-4">
-        <InfoRow label="项目名称" value={project.name} />
-        <InfoRow label="描述" value={project.description || "暂无描述"} />
-        <InfoRow label="负责人" value={ownerName} />
-        <InfoRow label="成员数量" value={`${memberCount} 人`} />
-        <InfoRow label="创建时间" value={createdAt} />
-        <InfoRow label="状态" value={STATUS_LABEL[project.status ?? "ACTIVE"]} />
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-base font-semibold text-ink-900">项目基本信息</h2>
+        {canEdit && !editing && (
+          <button
+            type="button"
+            onClick={onEdit}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-sm text-ink-700 transition hover:border-brand-300 hover:bg-brand-50"
+          >
+            <IconEdit className="h-4 w-4" />
+            编辑
+          </button>
+        )}
+        {canEdit && editing && (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={saving}
+              className="rounded-lg border border-ink-300 bg-white px-3 py-1.5 text-sm font-medium text-ink-700 transition hover:bg-ink-100 disabled:opacity-50"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? "保存中…" : "保存"}
+            </button>
+          </div>
+        )}
       </div>
+
+      {editing ? (
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-ink-500">项目名称</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-ink-500">描述</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              className="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-ink-500">状态</label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                className="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none"
+              >
+                <option value="ACTIVE">进行中</option>
+                <option value="MAINTENANCE">维护中</option>
+                <option value="ARCHIVED">已归档</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-ink-500">负责人</label>
+              <select
+                value={ownerId}
+                onChange={(e) => setOwnerId(e.target.value)}
+                className="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none"
+              >
+                <option value="">无负责人</option>
+                {owners.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name || o.email}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-ink-500">成员数量</label>
+            <p className="py-2 text-sm text-ink-700">{memberCount} 人</p>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-ink-500">创建时间</label>
+            <p className="py-2 text-sm text-ink-700">{createdAt}</p>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <InfoRow label="项目名称" value={project.name} />
+          <InfoRow label="描述" value={project.description || "暂无描述"} />
+          <InfoRow label="负责人" value={project.owner?.name || "—"} />
+          <InfoRow label="成员数量" value={`${memberCount} 人`} />
+          <InfoRow label="创建时间" value={createdAt} />
+          <InfoRow label="状态" value={STATUS_LABEL[project.status ?? "ACTIVE"]} />
+        </div>
+      )}
     </div>
   );
 }
@@ -347,8 +517,8 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
           <FileUploader
             onUpload={(file) => uploadAttachmentAsNote(file, project.id, router)}
             label="上传项目文件"
-            hint="支持 PDF、Word、PPT、TXT、Markdown（单个文件不超过 10 MB）"
-            accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.md,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/plain"
+            hint="支持 PDF、Word、PPT、Excel、TXT、Markdown（单个文件不超过 10 MB）"
+            accept=".pdf,.doc,.docx,.ppt,.pptx,.xlsx,.xls,.txt,.md,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/markdown,text/plain"
           />
         </div>
 
@@ -396,43 +566,7 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
   );
 }
 
-// ---- Member tab ----
-
-function MemberTab({ project }: { project: ProjectWithStatus }) {
-  const members = project.members ?? [];
-
-  return (
-    <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
-      <h2 className="mb-4 text-base font-semibold text-ink-900">项目成员</h2>
-      {members.length === 0 ? (
-        <p className="py-8 text-center text-sm text-ink-400">暂无成员</p>
-      ) : (
-        <ul className="space-y-3">
-          {members.map((m) => (
-            <li key={m.id} className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-50 text-brand-600 text-sm font-medium">
-                {m.user.name?.charAt(0) ?? "?"}
-              </div>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-ink-900">{m.user.name || "—"}</p>
-                <p className="truncate text-xs text-ink-400">{m.user.email}</p>
-              </div>
-              <span
-                className={`ml-auto rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                  m.role === "OWNER"
-                    ? "bg-brand-50 text-brand-700"
-                    : "bg-ink-100 text-ink-500"
-                }`}
-              >
-                {m.role === "OWNER" ? "负责人" : "成员"}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
+// ---- Member tab placeholder (replaced by ProjectMemberTab) ----
 
 // ---- Dispatch tab ----
 
@@ -544,14 +678,24 @@ export function PageHeaderSkeleton() {
 
 export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
   const { scheduleRecord } = useRecentVisits();
+  const { data: session } = useSession();
   const searchParams = useSearchParams();
-  const tabParam = searchParams.get("tab") as TabKey | null;
+  const router = useRouter();
   const { toast } = useToast();
 
+  const tabParam = searchParams.get("tab") as TabKey | null;
   const validTabs: TabKey[] = ["overview", "tasks", "dispatch", "code", "docs", "members", "settings"];
   const [activeTab, setActiveTab] = useState<TabKey>(
     tabParam && validTabs.includes(tabParam) ? tabParam : "overview"
   );
+  const [overviewEditing, setOverviewEditing] = useState(false);
+
+  const currentUserId = session?.user?.id ?? "";
+  const userIsRoot = isRoot(session?.user?.role);
+  const isOwner = project.members?.some(
+    (m) => m.user.id === currentUserId && m.role === "OWNER"
+  ) ?? false;
+  const canEditProject = userIsRoot || isOwner;
 
   const taskCounts = useMemo(() => computeTaskCounts({ project }), [project]);
 
@@ -618,14 +762,21 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
                 {STATUS_LABEL[status]}
               </span>
               <div className="ml-auto flex items-center gap-2">
+              {canEditProject && (
                 <button
                   type="button"
                   className="inline-flex items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-sm text-ink-700 transition hover:border-brand-300 hover:bg-brand-50"
-                  onClick={() => toast.info("编辑功能即将上线")}
+                  onClick={() => {
+                    if (activeTab !== "overview") {
+                      setActiveTab("overview");
+                    }
+                    setOverviewEditing(true);
+                  }}
                 >
                   <IconEdit className="h-4 w-4" />
                   编辑项目
                 </button>
+              )}
                 <button
                   type="button"
                   className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-ink-200 bg-white text-ink-700 transition hover:border-brand-300 hover:bg-brand-50"
@@ -669,12 +820,32 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
       </div>
 
       {/* Tab content */}
-      {activeTab === "overview"  && <OverviewTab project={project} />}
+      {activeTab === "overview"  && (
+        <OverviewTab
+          project={project}
+          editing={overviewEditing}
+          onEdit={() => setOverviewEditing(true)}
+          onCancel={() => setOverviewEditing(false)}
+          onSaved={() => {
+            setOverviewEditing(false);
+            router.refresh();
+          }}
+          canEdit={canEditProject}
+        />
+      )}
       {activeTab === "tasks"     && <TaskTab tickets={tickets} taskCounts={taskCounts} />}
       {activeTab === "dispatch"  && <DispatchTab projectId={project.id} />}
       {activeTab === "code"      && <CodeTab />}
       {activeTab === "docs"      && <DocsTab project={project} />}
-      {activeTab === "members"   && <MemberTab project={project} />}
+      {activeTab === "members"   && (
+        <ProjectMemberTab
+          projectId={project.id}
+          members={project.members ?? []}
+          currentUserId={currentUserId}
+          isRoot={userIsRoot}
+          isOwner={isOwner}
+        />
+      )}
       {activeTab === "settings"   && <SettingsTab />}
     </div>
   );

@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { isRoot } from "@/shared/lib/permissions";
+import { isRoot } from "@/shared/lib/permissions-client";
 import { NextResponse } from "next/server";
 
 export default auth((req) => {

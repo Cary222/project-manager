@@ -1,3 +1,5 @@
+import "server-only";
+
 import { UserRole, ResponsibilityKind } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
 
@@ -51,18 +53,18 @@ export async function requireRoot() {
   return session;
 }
 
-export function isRoot(role?: UserRole | string | null): boolean {
-  return role === UserRole.ROOT || role === "ROOT";
-}
+/**
+ * 检查用户是否有权编辑项目（ROOT 或项目 OWNER/MEMBER）。
+ * 用于项目详情页的 PATCH、成员增删改操作。
+ */
+export async function requireProjectEditor(projectId: string) {
+  const session = await requireSession();
+  if (session.user.role === UserRole.ROOT) return session;
 
-export function isBanned(bannedAt: Date | null | undefined): boolean {
-  return bannedAt !== null && bannedAt !== undefined;
-}
+  const membership = await prisma.userOnProject.findUnique({
+    where: { userId_projectId: { userId: session.user.id, projectId } },
+  });
+  if (membership) return session;
 
-export function canManageUser(
-  actorRole?: UserRole | string | null,
-  targetRole?: UserRole | string | null
-): boolean {
-  if (!isRoot(actorRole)) return false;
-  return !isRoot(targetRole);
+  throw new Error("FORBIDDEN");
 }

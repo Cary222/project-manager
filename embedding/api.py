@@ -32,6 +32,8 @@ PPTX_MIME = (
     "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 )
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+XLS_MIME = "application/vnd.ms-excel"
 PDF_MIME = "application/pdf"
 TEXT_MIME_PREFIXES = (
     "text/plain",
@@ -170,6 +172,32 @@ def _extract_text_from_bytes(
                 if row_texts:
                     parts.append(" | ".join(row_texts))
         return "\n".join(parts)
+
+    if normalized == XLSX_MIME:
+        try:
+            import openpyxl
+
+            wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=True, read_only=True)
+            sheet_parts = []
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                row_lines = []
+                for row in ws.iter_rows(values_only=True):
+                    cell_values = []
+                    for cell in row:
+                        if cell is not None and cell != "":
+                            cell_values.append(str(cell))
+                    if cell_values:
+                        row_lines.append("\t".join(cell_values))
+                if row_lines:
+                    sheet_parts.append(f"[{sheet_name}]\n" + "\n".join(row_lines))
+            wb.close()
+            return "\n\n".join(sheet_parts)
+        except Exception as exc:
+            raise ValueError(f"xlsx_parse_error:{exc}") from exc
+
+    if normalized == XLS_MIME:
+        raise ValueError("xls_not_supported")
 
     raise ValueError(f"unsupported_mime:{normalized}")
 
