@@ -104,6 +104,24 @@ export function DispatchProjectDetailLoading() {
   return <DispatchProjectDetailContentSkeleton />;
 }
 
+function PriorityBadge({ priority }: { priority: number }) {
+  return (
+    <span
+      className={`inline-block rounded border px-1 py-0.5 text-[10px] font-semibold ${
+        priority === 0
+          ? "bg-red-100 text-red-700 border-red-300"
+          : priority === 1
+            ? "bg-amber-100 text-amber-700 border-amber-300"
+            : priority === 2
+              ? "bg-brand-50 text-brand-700 border-brand-200"
+              : "bg-ink-100 text-ink-500 border-ink-200"
+      }`}
+    >
+      {priority === 0 ? "P0" : priority === 1 ? "P1" : priority === 2 ? "P2" : "P3"}
+    </span>
+  );
+}
+
 export function DispatchProjectDetail({ projectId }: { projectId: string }) {
   const { data: session } = useSession();
   const isRoot = session?.user?.role === "ROOT";
@@ -132,6 +150,7 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
   const [selectedResponsibilityId, setSelectedResponsibilityId] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [userResps, setUserResps] = useState<ResponsibilityKind[]>([]);
+  const [sortByPriority, setSortByPriority] = useState(false);
 
   // Load current user's responsibilities
   useEffect(() => {
@@ -500,15 +519,41 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
                     : "请选择职能"}
                 </p>
               </div>
-              {!!selectedResponsibility ? (
-                <button
-                  type="button"
-                  onClick={() => setShowCreate((v) => !v)}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"
-                >
-                  <IconPlus className="h-4 w-4" /> 新建单子
-                </button>
-              ) : null}
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1 rounded-lg border border-ink-200 bg-white p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setSortByPriority(false)}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                      !sortByPriority
+                        ? "bg-brand-50 text-brand-700"
+                        : "text-ink-500 hover:bg-ink-50"
+                    }`}
+                  >
+                    按模块
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSortByPriority(true)}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                      sortByPriority
+                        ? "bg-brand-50 text-brand-700"
+                        : "text-ink-500 hover:bg-ink-50"
+                    }`}
+                  >
+                    按优先级
+                  </button>
+                </div>
+                {!!selectedResponsibility ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowCreate((v) => !v)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700"
+                  >
+                    <IconPlus className="h-4 w-4" /> 新建单子
+                  </button>
+                ) : null}
+              </div>
             </div>
 
             <div className="p-5">
@@ -532,6 +577,91 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
                 <p className="rounded-lg border border-dashed border-ink-200 p-8 text-center text-sm text-ink-400">
                   暂无单子
                 </p>
+              ) : sortByPriority ? (
+                (() => {
+                  const moduleMap = new Map(
+                    selectedResponsibility.modules.flatMap((m) =>
+                      (m.tickets ?? []).map((t) => [t.id, m.name])
+                    )
+                  );
+                  const prioritySorted = [...tickets].sort((a, b) => a.priority - b.priority);
+                  return (
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {prioritySorted.map((ticket) => {
+                        const isDelivered = ticket.status === "DELIVERED";
+                        const isDone = ticket.status === "DONE";
+                        const isClosed = ticket.status === "CLOSED";
+                        const isTerminal = isDelivered || isDone || isClosed;
+                        return (
+                          <div
+                            key={ticket.id}
+                            className={`rounded-lg border p-3 transition ${
+                              isTerminal
+                                ? "border-ink-100 bg-ink-100/40"
+                                : "border-ink-200 hover:border-brand-200 hover:shadow-soft"
+                            }`}
+                          >
+                            <Link href={`/dispatchTicket/tickets/${ticket.id}`} className="block">
+                              <div className="flex items-center justify-between gap-3 text-xs">
+                                <div className="flex items-center gap-2 text-ink-400">
+                                  <PriorityBadge priority={ticket.priority ?? 2} />
+                                  <span className="font-mono">#{ticket.ticketNo}</span>
+                                  <span className="text-ink-300">·</span>
+                                  <span className="text-ink-500">{moduleMap.get(ticket.id)}</span>
+                                </div>
+                                <span
+                                  className={`rounded-full px-2 py-0.5 font-medium ${STATUS_STYLE[ticket.status]}`}
+                                >
+                                  {STATUS_LABEL[ticket.status]}
+                                </span>
+                              </div>
+                              <p
+                                className={`mt-1.5 text-sm font-medium ${
+                                  isClosed ? "text-ink-400" : ""
+                                } ${isDone ? "line-through" : ""}${
+                                  ticket.status === "OVERDUE" && !isClosed ? " text-red-600" : ""
+                                }`}
+                              >
+                                {ticket.title}
+                              </p>
+                              <p className="mt-1 text-xs text-ink-400">
+                                指派：{formatAssigneeNames(ticket.assignees)}
+                              </p>
+                              {ticket.deadline && ticket.status !== "CLOSED" && (
+                                <p className={`mt-0.5 text-xs ${
+                                  ticket.status === "OVERDUE"
+                                    ? "text-red-600 font-medium"
+                                    : "text-ink-400"
+                                }`}>
+                                  截止：{new Date(ticket.deadline).toLocaleDateString("zh-CN")}
+                                  {ticket.status === "OVERDUE" ? " (已逾期)" : ""}
+                                </p>
+                              )}
+                            </Link>
+                            {isRoot ? (
+                              <div className="mt-2 flex items-center gap-3">
+                                <button
+                                  type="button"
+                                  onClick={() => closeTicket(ticket)}
+                                  className="inline-flex items-center gap-1 text-xs text-ink-400 hover:text-emerald-600"
+                                >
+                                  <IconX className="h-3.5 w-3.5" /> 关闭单子
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => deleteTicket(ticket)}
+                                  className="inline-flex items-center gap-1 text-xs text-ink-400 hover:text-danger"
+                                >
+                                  <IconTrash className="h-3.5 w-3.5" /> 删除单子
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()
               ) : (
                 <div className="space-y-6">
                   {selectedResponsibility.modules.map((module) => {
@@ -593,9 +723,12 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
                               >
                                 <Link href={`/dispatchTicket/tickets/${ticket.id}`} className="block">
                                   <div className="flex items-center justify-between gap-3">
-                                    <span className="font-mono text-xs text-ink-400">
-                                      #{ticket.ticketNo}
-                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                      <PriorityBadge priority={ticket.priority ?? 2} />
+                                      <span className="font-mono text-xs text-ink-400">
+                                        #{ticket.ticketNo}
+                                      </span>
+                                    </div>
                                     <span
                                       className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[ticket.status]}`}
                                     >

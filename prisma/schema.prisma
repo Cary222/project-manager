@@ -8,65 +8,6 @@ datasource db {
   schemas  = ["pm"]
 }
 
-enum UserRole {
-  ROOT
-  USER
-
-  @@schema("pm")
-}
-
-enum ModerationAction {
-  BAN_USER
-  UNBAN_USER
-  UPDATE_ROLE
-  UPDATE_PROFILE
-  UPDATE_PASSWORD
-  UPDATE_SYSTEM_SETTINGS
-  DELETE_TICKET
-  CREATE_TICKET
-  CREATE_MODULE
-  UPDATE_MODULE
-  DELETE_MODULE
-  MERGE_MODULE
-  CREATE_PROJECT
-  DELETE_PROJECT
-  UPDATE_TICKET_STATUS
-  UPDATE_TICKET_ASSIGNEE
-  UPDATE_TICKET_PROGRESS
-  EDIT_TICKET
-  CHANGE_TICKET_MODULE
-
-  @@schema("pm")
-}
-
-enum ResponsibilityKind {
-  PROGRAM
-  DESIGN
-  BUG
-
-  @@schema("pm")
-}
-
-enum TicketStatus {
-  DEVELOPING
-  READY_FOR_TEST
-  DELIVERED
-  DONE
-  OVERDUE
-  CLOSED
-
-  @@schema("pm")
-}
-
-enum NotificationType {
-  TICKET_ASSIGNED
-  TICKET_DELIVERED
-  TICKET_COMPLETED
-  TICKET_STATUS_CHANGED
-
-  @@schema("pm")
-}
-
 model User {
   id                     String                  @id @default(cuid())
   name                   String?
@@ -75,30 +16,29 @@ model User {
   image                  String?
   passwordHash           String?
   role                   UserRole                @default(USER)
-  bannedAt               DateTime?
-  bio                    String?                 @db.Text
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
+  bannedAt               DateTime?
+  bio                    String?
   accounts               Account[]
+  aiConversations        AiConversation[]
+  aiProfile              AiUserProfile?
+  bugBindings            BugProgramBinding[]
+  pushRecords            DesignProgramBinding[]
+  moderationLogs         ModerationLog[]         @relation("ModerationActor")
+  actorNotifications     Notification[]          @relation("NotificationActor")
+  notifications          Notification[]          @relation("NotificationRecipient")
+  pkmNotes               PkmNote[]
+  ownedProjects          Project[]
   sessions               Session[]
+  updatedSystemSettings  SystemSetting[]         @relation("SystemSettingUpdater")
   createdTickets         Ticket[]                @relation("TicketCreator")
   ticketAssignments      TicketAssignee[]
   assigneeHistoryChanges TicketAssigneeHistory[] @relation("AssigneeHistoryActor")
   statusHistoryChanges   TicketStatusHistory[]   @relation("StatusHistoryActor")
-  moderationLogs         ModerationLog[]         @relation("ModerationActor")
-  updatedSystemSettings  SystemSetting[]         @relation("SystemSettingUpdater")
-  notifications          Notification[]          @relation("NotificationRecipient")
-  actorNotifications     Notification[]          @relation("NotificationActor")
-  pushRecords            DesignProgramBinding[]
-  bugBindings            BugProgramBinding[]
-  pkmNotes               PkmNote[]
-  responsibilities       UserResponsibility[]
   userOnProjects         UserOnProject[]
-  ownedProjects          Project[]
-
-  aiConversations AiConversation[]
-  aiProfile       AiUserProfile?
-  weeklyReports   WeeklyReport[]
+  responsibilities       UserResponsibility[]
+  weeklyReports          WeeklyReport[]
 
   @@schema("pm")
 }
@@ -109,9 +49,8 @@ model UserOnProject {
   projectId String
   role      String   @default("MEMBER")
   joinedAt  DateTime @default(now())
-
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, projectId])
   @@index([projectId])
@@ -123,8 +62,7 @@ model UserResponsibility {
   userId    String
   kind      ResponsibilityKind
   createdAt DateTime           @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, kind])
   @@schema("pm")
@@ -138,7 +76,7 @@ model ModerationLog {
   reason     String?
   actorId    String
   createdAt  DateTime         @default(now())
-  actor      User             @relation("ModerationActor", fields: [actorId], references: [id], onDelete: Restrict)
+  actor      User             @relation("ModerationActor", fields: [actorId], references: [id])
 
   @@index([targetId])
   @@index([actorId, createdAt(sort: Desc)])
@@ -151,15 +89,14 @@ model Account {
   type              String
   provider          String
   providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
+  refresh_token     String?
+  access_token      String?
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String? @db.Text
+  id_token          String?
   session_state     String?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
   @@schema("pm")
@@ -184,42 +121,24 @@ model VerificationToken {
   @@schema("pm")
 }
 
-enum SearchDocumentSourceType {
-  TICKET
-  COMMIT
-  KNOWLEDGE_DOC
-  PKM_NOTE
-
-  @@schema("pm")
-}
-
 model SearchDocument {
-  id         String                        @id @default(cuid())
+  id         String                   @id @default(cuid())
   sourceType SearchDocumentSourceType
   sourceId   String
-  chunkIndex Int                           @default(0)
   projectId  String?
   title      String
   content    String
   url        String
   metadata   Json?
-  embedding  Unsupported("public.vector")?
-  createdAt  DateTime                      @default(now())
-  updatedAt  DateTime                      @updatedAt
-  project    Project?                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt  DateTime                 @default(now())
+  updatedAt  DateTime                 @updatedAt
+  embedding  Unsupported("vector")?
+  chunkIndex Int                      @default(0)
+  project    Project?                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@unique([sourceType, sourceId, chunkIndex])
   @@index([sourceType, updatedAt(sort: Desc)])
   @@index([projectId, updatedAt(sort: Desc)])
-  @@schema("pm")
-}
-
-enum IndexJobStatus {
-  PENDING
-  PROCESSING
-  COMPLETED
-  FAILED
-
   @@schema("pm")
 }
 
@@ -234,10 +153,9 @@ model IndexJob {
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
   startedAt    DateTime?
+  note         PkmNote        @relation(fields: [noteId], references: [id], onDelete: Cascade)
 
-  note PkmNote? @relation(fields: [noteId], references: [id], onDelete: Cascade)
-
-  @@index([status, createdAt(sort: Asc)])
+  @@index([status, createdAt])
   @@index([noteId, status])
   @@schema("pm")
 }
@@ -249,13 +167,13 @@ model PkmNote {
   title       String
   content     String
   tags        String[]   @default([])
-  attachments Json?
-  isPublic    Boolean    @default(false)
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
-  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project     Project?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  attachments Json?
+  isPublic    Boolean    @default(false)
   indexJobs   IndexJob[]
+  project     Project?   @relation(fields: [projectId], references: [id])
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, updatedAt(sort: Desc)])
   @@index([userId, isPublic, updatedAt(sort: Desc)])
@@ -272,12 +190,12 @@ model Project {
   createdAt        DateTime              @default(now())
   updatedAt        DateTime              @updatedAt
   ownerId          String?
-  owner            User?                 @relation(fields: [ownerId], references: [id], onDelete: SetNull)
-  members          UserOnProject[]
-  responsibilities Responsibility[]
-  tickets          Ticket[]
-  searchDocuments  SearchDocument[]
   pkmNotes         PkmNote[]
+  owner            User?                 @relation(fields: [ownerId], references: [id])
+  responsibilities Responsibility[]
+  searchDocuments  SearchDocument[]
+  tickets          Ticket[]
+  members          UserOnProject[]
   weeklyReports    WeeklyReportProject[]
 
   @@schema("pm")
@@ -289,8 +207,8 @@ model Responsibility {
   kind      ResponsibilityKind
   createdAt DateTime           @default(now())
   updatedAt DateTime           @updatedAt
-  project   Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
   modules   Module[]
+  project   Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, kind])
   @@schema("pm")
@@ -316,26 +234,27 @@ model Ticket {
   title           String
   description     String?
   progress        Int                     @default(0)
-  status          TicketStatus            @default(DEVELOPING)
-  deadline        DateTime?
   projectId       String
   moduleId        String
   creatorId       String
   createdAt       DateTime                @default(now())
   updatedAt       DateTime                @updatedAt
-  project         Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  module          Module                  @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-  creator         User                    @relation("TicketCreator", fields: [creatorId], references: [id], onDelete: Restrict)
-  assignees       TicketAssignee[]
-  repoBindings    TicketRepoBinding[]
-  commits         TicketCommit[]
-  assigneeHistory TicketAssigneeHistory[]
-  statusHistory   TicketStatusHistory[]
-  notifications   Notification[]
-  pushSources     DesignProgramBinding[]  @relation("PushSourceTicket")
-  pushTargets     DesignProgramBinding[]  @relation("PushTargetTicket")
+  status          TicketStatus            @default(DEVELOPING)
+  deadline        DateTime?
+  priority        Int                     @default(2)
   bugSources      BugProgramBinding[]     @relation("BugSourceTicket")
   bugTargets      BugProgramBinding[]     @relation("BugTargetTicket")
+  pushSources     DesignProgramBinding?   @relation("PushSourceTicket")
+  pushTargets     DesignProgramBinding[]  @relation("PushTargetTicket")
+  notifications   Notification[]
+  creator         User                    @relation("TicketCreator", fields: [creatorId], references: [id])
+  module          Module                  @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  project         Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignees       TicketAssignee[]
+  assigneeHistory TicketAssigneeHistory[]
+  commits         TicketCommit[]
+  repoBindings    TicketRepoBinding[]
+  statusHistory   TicketStatusHistory[]
 
   @@index([status, deadline])
   @@schema("pm")
@@ -343,7 +262,7 @@ model Ticket {
 
 model DesignProgramBinding {
   id                 String   @id @default(cuid())
-  sourceTicketId     String
+  sourceTicketId     String   @unique
   targetTicketId     String?
   createdById        String
   status             String
@@ -355,11 +274,10 @@ model DesignProgramBinding {
   bugCommitIds       String[] @default([])
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
+  createdBy          User     @relation(fields: [createdById], references: [id])
   sourceTicket       Ticket   @relation("PushSourceTicket", fields: [sourceTicketId], references: [id], onDelete: Cascade)
-  targetTicket       Ticket?  @relation("PushTargetTicket", fields: [targetTicketId], references: [id], onDelete: SetNull)
-  createdBy          User     @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  targetTicket       Ticket?  @relation("PushTargetTicket", fields: [targetTicketId], references: [id])
 
-  @@unique([sourceTicketId])
   @@index([createdById, createdAt(sort: Desc)])
   @@schema("pm")
 }
@@ -369,13 +287,13 @@ model BugProgramBinding {
   bugTicketId     String
   programTicketId String
   draftTitle      String   @default("")
-  fixCommitIds    String[] @default([])
   boundById       String
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  fixCommitIds    String[] @default([])
+  boundBy         User     @relation(fields: [boundById], references: [id])
   bugTicket       Ticket   @relation("BugSourceTicket", fields: [bugTicketId], references: [id], onDelete: Cascade)
   programTicket   Ticket   @relation("BugTargetTicket", fields: [programTicketId], references: [id], onDelete: Cascade)
-  boundBy         User     @relation(fields: [boundById], references: [id], onDelete: Restrict)
 
   @@unique([bugTicketId, programTicketId])
   @@index([programTicketId])
@@ -400,8 +318,8 @@ model TicketStatusHistory {
   status      TicketStatus
   changedById String
   createdAt   DateTime     @default(now())
+  changedBy   User         @relation("StatusHistoryActor", fields: [changedById], references: [id])
   ticket      Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  changedBy   User         @relation("StatusHistoryActor", fields: [changedById], references: [id], onDelete: Restrict)
 
   @@index([ticketId, createdAt(sort: Desc)])
   @@schema("pm")
@@ -417,9 +335,9 @@ model Notification {
   actorId   String?
   read      Boolean          @default(false)
   createdAt DateTime         @default(now())
-  user      User             @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor     User?            @relation("NotificationActor", fields: [actorId], references: [id])
   ticket    Ticket?          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  actor     User?            @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  user      User             @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, read, createdAt(sort: Desc)])
   @@index([ticketId, createdAt(sort: Desc)])
@@ -429,11 +347,11 @@ model Notification {
 model TicketAssigneeHistory {
   id          String   @id @default(cuid())
   ticketId    String
-  assigneeIds String[] @default([])
   changedById String
   createdAt   DateTime @default(now())
+  assigneeIds String[] @default([])
+  changedBy   User     @relation("AssigneeHistoryActor", fields: [changedById], references: [id])
   ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  changedBy   User     @relation("AssigneeHistoryActor", fields: [changedById], references: [id], onDelete: Restrict)
 
   @@index([ticketId, createdAt(sort: Desc)])
   @@schema("pm")
@@ -460,8 +378,8 @@ model TicketCommit {
   author      String
   committedAt DateTime
   subject     String
-  branches    String[] @default([])
   createdAt   DateTime @default(now())
+  branches    String[] @default([])
   ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@unique([repoPath, commitSha])
@@ -496,7 +414,7 @@ model SystemSetting {
   updatedById     String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-  updatedBy       User?    @relation("SystemSettingUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedBy       User?    @relation("SystemSettingUpdater", fields: [updatedById], references: [id])
 
   @@schema("pm")
 }
@@ -505,35 +423,28 @@ model SystemSetting {
 /// 前端只负责发送原始事件，后端负责计算 isValidView。
 /// Tier 3（通知/审计）已有独立系统，本表不承接。
 model ActivityLog {
-  id String @id @default(cuid())
-
+  id           String   @id @default(cuid())
   /// 事件协议版本（用于 schema 演进时兼容旧数据）
-  eventVersion String @default("1.0")
+  eventVersion String   @default("1.0")
   /// 动作类型（ACTION.*），冗余存储而非外键：避免枚举变更牵连历史
   action       String
-
   /// 执行者
-  actorId   String
-  actorName String?
-
+  actorId      String
+  actorName    String?
   /// 目标
-  targetType String?
-  targetId   String?
-  targetName String?
-
+  targetType   String?
+  targetId     String?
+  targetName   String?
   /// 会话
-  sessionId String?
-
+  sessionId    String?
   /// 原始上下文（前端上报的 dwellMs / enterAt / leaveAt 等）
-  context Json?
-
+  context      Json?
   /// 后端计算字段（可信，前端不可干预）
-  dwellMs     Int?
+  dwellMs      Int?
   /// dwellMs > 3000 的有效访问标记
-  isValidView Boolean?
-
+  isValidView  Boolean?
   /// 入库时间
-  createdAt DateTime @default(now())
+  createdAt    DateTime @default(now())
 
   @@index([action, createdAt(sort: Desc)])
   @@index([actorId, createdAt(sort: Desc)])
@@ -543,34 +454,32 @@ model ActivityLog {
 }
 
 model AiConversation {
-  id            String   @id @default(cuid())
+  id            String          @id @default(cuid())
   userId        String
   title         String
   summary       Json?
-  tags          String[] @default([])
-  messageCount  Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  lastMessageAt DateTime @default(now())
-
-  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages AiChatMessage[]
+  messageCount  Int             @default(0)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  lastMessageAt DateTime        @default(now())
+  tags          String[]        @default([])
+  messages      AiChatMessage[]
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, lastMessageAt(sort: Desc)])
   @@schema("pm")
 }
 
 model AiChatMessage {
-  id             String   @id @default(cuid())
+  id             String         @id @default(cuid())
   conversationId String
   role           String
-  content        String   @db.Text
+  content        String
   sources        Json?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime       @default(now())
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
-  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-
-  @@index([conversationId, createdAt(sort: Asc)])
+  @@index([conversationId, createdAt])
   @@schema("pm")
 }
 
@@ -580,28 +489,26 @@ model AiUserProfile {
   sourceSummaryCount Int      @default(0)
   updatedAt          DateTime @updatedAt
   createdAt          DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@schema("pm")
 }
 
 model WeeklyReport {
-  id               String    @id @default(cuid())
+  id               String                @id @default(cuid())
   userId           String
   weekStart        DateTime
   weekEnd          DateTime
   title            String
-  content          String    @db.Text
+  content          String
   attachments      Json?
-  aiSummary        String?   @db.Text
+  aiSummary        String?
   aiSummaryAt      DateTime?
-  aiSummaryPartial Boolean   @default(false)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-
-  user     User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  projects WeeklyReportProject[]
+  aiSummaryPartial Boolean               @default(false)
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  user             User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projects         WeeklyReportProject[]
 
   @@unique([userId, weekStart])
   @@index([userId, weekStart(sort: Desc)])
@@ -609,14 +516,90 @@ model WeeklyReport {
 }
 
 model WeeklyReportProject {
-  id        String @id @default(cuid())
+  id        String       @id @default(cuid())
   reportId  String
   projectId String
-
-  report  WeeklyReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  report    WeeklyReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
   @@unique([reportId, projectId])
   @@index([projectId])
+  @@schema("pm")
+}
+
+enum UserRole {
+  ROOT
+  USER
+
+  @@schema("pm")
+}
+
+enum ModerationAction {
+  BAN_USER
+  UNBAN_USER
+  UPDATE_ROLE
+  DELETE_TICKET
+  CREATE_TICKET
+  CREATE_MODULE
+  UPDATE_MODULE
+  DELETE_MODULE
+  MERGE_MODULE
+  CREATE_PROJECT
+  DELETE_PROJECT
+  UPDATE_TICKET_STATUS
+  UPDATE_TICKET_ASSIGNEE
+  UPDATE_TICKET_PROGRESS
+  EDIT_TICKET
+  CHANGE_TICKET_MODULE
+  UPDATE_PROFILE
+  UPDATE_PASSWORD
+  UPDATE_SYSTEM_SETTINGS
+
+  @@schema("pm")
+}
+
+enum ResponsibilityKind {
+  PROGRAM
+  DESIGN
+  BUG
+
+  @@schema("pm")
+}
+
+enum TicketStatus {
+  DEVELOPING
+  READY_FOR_TEST
+  DONE
+  DELIVERED
+  OVERDUE
+  CLOSED
+
+  @@schema("pm")
+}
+
+enum NotificationType {
+  TICKET_ASSIGNED
+  TICKET_DELIVERED
+  TICKET_COMPLETED
+  TICKET_STATUS_CHANGED
+
+  @@schema("pm")
+}
+
+enum SearchDocumentSourceType {
+  TICKET
+  COMMIT
+  KNOWLEDGE_DOC
+  PKM_NOTE
+
+  @@schema("pm")
+}
+
+enum IndexJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+
   @@schema("pm")
 }

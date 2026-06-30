@@ -32,6 +32,7 @@ export async function GET(
                     ticketNo: true,
                     title: true,
                     status: true,
+                    priority: true,
                     deadline: true,
                     assignees: {
                       include: {
@@ -68,6 +69,7 @@ export async function GET(
               ticketNo: ticket.ticketNo,
               title: ticket.title,
               status: ticket.status,
+              priority: ticket.priority,
               deadline: ticket.deadline?.toISOString() ?? null,
               assignees: ticket.assignees.map((item) => item.user),
             })),

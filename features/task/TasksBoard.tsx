@@ -48,6 +48,21 @@ const COLUMNS: { key: TicketStatus; label: string; accent: string; head: string 
     },
   ];
 
+function PriorityBadge({ priority }: { priority: number }) {
+  const styles: Record<number, string> = {
+    0: "bg-danger text-white border-danger",
+    1: "bg-warning text-white border-warning",
+    2: "bg-brand-50 text-brand-700 border-brand-200",
+    3: "bg-ink-100 text-ink-500 border-ink-200",
+  };
+  const labels: Record<number, string> = { 0: "P0", 1: "P1", 2: "P2", 3: "P3" };
+  return (
+    <span className={`inline-block rounded border px-1 py-0.5 text-[10px] font-semibold ${styles[priority] ?? styles[2]}`}>
+      {labels[priority] ?? "P2"}
+    </span>
+  );
+}
+
 const KIND_LABEL: Record<"PROGRAM" | "DESIGN", string> = {
   PROGRAM: "程序",
   DESIGN: "设计",
@@ -162,7 +177,8 @@ function TasksColumns({ query }: { query: string }) {
                     href={`/tickets/${t.id}`}
                     className="block rounded-lg border border-ink-100 bg-white p-3 shadow-soft transition hover:border-brand-200 hover:shadow-base"
                   >
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <PriorityBadge priority={t.priority} />
                       <span className="font-mono text-xs text-ink-400">#{t.ticketNo}</span>
                       <span className="rounded bg-ink-100 px-1.5 py-0.5 text-[11px] text-ink-500">
                         {KIND_LABEL[t.module.responsibility.kind]}

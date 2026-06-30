@@ -13,6 +13,7 @@ import {
   type CreateTicketInput,
 } from "./action";
 import type { TicketCreateUser, TicketCreateResponsibility } from "@/entities/ticket/model/types";
+import { PRIORITY_LABEL } from "@/entities/ticket/model/types";
 
 export type TicketCreateInitialValues = {
   moduleId?: string;
@@ -24,6 +25,7 @@ export type TicketCreateInitialValues = {
   designAssigneeIds?: string[];
   title?: string;
   description?: string;
+  priority?: number;
 };
 
 type CreatedTicketPayload = {
@@ -143,6 +145,9 @@ export function CreateTicketForm({
     const defaultDeadline = computeDefaultDeadline(new Date());
     return formatDateForInput(defaultDeadline);
   });
+
+  // Priority state (default to P2 = 2)
+  const [priority, setPriority] = useState(initialValues?.priority ?? 2);
 
   function formatDateForInput(date: Date): string {
     const year = date.getFullYear();
@@ -333,6 +338,7 @@ export function CreateTicketForm({
         description: fullDescription,
         assigneeIds: effectiveProgramAssigneeIds,
         deadline: deadline || null,
+        priority,
       };
 
       let result;
@@ -380,6 +386,7 @@ export function CreateTicketForm({
       setDescription("");
       setDescriptionImages([]);
       setDeadline(formatDateForInput(computeDefaultDeadline(new Date())));
+      setPriority(2);
       onMessage?.("单子已创建");
       await onCreated?.({
         ticket: result.ticket,
@@ -608,6 +615,38 @@ export function CreateTicketForm({
             onChange={(e) => setDeadline(e.target.value)}
             className="w-full rounded-lg border border-ink-200 px-3 py-2 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
           />
+        </label>
+
+        <label className="space-y-1 text-sm">
+          <span className="text-ink-700">优先级</span>
+          <div className="flex gap-2">
+            {([0, 1, 2, 3] as const).map((p) => (
+              <label
+                key={p}
+                className={`flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+                  priority === p
+                    ? p === 0
+                      ? "bg-red-100 text-red-700 border-red-300"
+                      : p === 1
+                        ? "bg-amber-100 text-amber-700 border-amber-300"
+                        : p === 2
+                          ? "bg-brand-50 text-brand-700 border-brand-300"
+                          : "bg-ink-100 text-ink-600 border-ink-300"
+                    : "border-ink-200 bg-white text-ink-600 hover:bg-ink-50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="priority"
+                  value={p}
+                  checked={priority === p}
+                  onChange={() => setPriority(p)}
+                  className="sr-only"
+                />
+                {PRIORITY_LABEL[p]}
+              </label>
+            ))}
+          </div>
         </label>
 
         <label className="space-y-1 text-sm">

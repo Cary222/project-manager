@@ -32,6 +32,7 @@ export async function POST(request: Request) {
       status?: TicketStatus;
       repoPaths?: string[];
       deadline?: string | Date | null;
+      priority?: number;
     };
 
     if (!body.title?.trim() || !body.projectId || !body.moduleId) {
@@ -73,6 +74,7 @@ export async function POST(request: Request) {
           creatorId: session.user.id,
           status: body.status ?? TicketStatus.DEVELOPING,
           deadline: body.deadline ? new Date(body.deadline) : null,
+          priority: body.priority ?? 2,
           repoBindings: {
             create: (body.repoPaths ?? [])
               .filter((repoPath) => repoPath.trim().length > 0)
@@ -150,6 +152,7 @@ export async function GET(request: Request) {
         ticketNo: true,
         title: true,
         status: true,
+        priority: true,
         project: {
           select: { id: true, name: true },
         },

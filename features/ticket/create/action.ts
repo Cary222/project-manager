@@ -27,6 +27,7 @@ export type CreateTicketInput = {
   status?: TicketStatus;
   repoPaths?: string[];
   deadline?: string | Date | null;
+  priority?: number;
 };
 
 export type CreateTicketResult =
@@ -72,6 +73,7 @@ export async function createTicketAction(input: CreateTicketInput): Promise<Crea
           creatorId: session.user.id,
           status: input.status ?? TicketStatus.DEVELOPING,
           deadline: input.deadline ? new Date(input.deadline) : null,
+          priority: input.priority ?? 2,
           repoBindings: {
             create: (input.repoPaths ?? [])
               .filter((repoPath) => repoPath.trim().length > 0)

@@ -13,6 +13,7 @@ import {
   STATUS_LABEL,
   STATUS_STYLE,
   STATUS_ORDER,
+  PRIORITY_LABEL,
 } from "@/entities/ticket/model/types";
 
 type ListTicket = {
@@ -20,6 +21,7 @@ type ListTicket = {
   ticketNo: number;
   title: string;
   status: TicketStatus;
+  priority: number;
   project: { id: string; name: string };
   module: { name: string; responsibility: { kind: string } };
   assignees: { id: string; name: string | null; email: string }[];
@@ -35,10 +37,11 @@ function TicketsTableSkeleton() {
   return (
     <div className="overflow-hidden rounded-xl border border-ink-200 bg-white shadow-soft">
       <div className="hidden grid-cols-12 gap-4 border-b border-ink-100 bg-ink-100/60 px-5 py-3 text-xs font-medium text-ink-500 md:grid">
-        <div className="col-span-2">单号</div>
+        <div className="col-span-1">单号</div>
+        <div className="col-span-2">优先级</div>
         <div className="col-span-4">标题</div>
         <div className="col-span-2">项目 / 模块</div>
-        <div className="col-span-2">状态</div>
+        <div className="col-span-1">状态</div>
         <div className="col-span-2">指派给</div>
       </div>
       <div className="divide-y divide-ink-100">
@@ -47,8 +50,11 @@ function TicketsTableSkeleton() {
             key={index}
             className="grid grid-cols-1 gap-2 px-5 py-4 md:grid-cols-12 md:items-center md:gap-4"
           >
+            <div className="col-span-1">
+              <div className="h-4 w-12 animate-pulse rounded bg-ink-100" />
+            </div>
             <div className="col-span-2">
-              <div className="h-4 w-16 animate-pulse rounded bg-ink-100" />
+              <div className="h-5 w-8 animate-pulse rounded bg-ink-100" />
             </div>
             <div className="col-span-4">
               <div className="h-4 w-48 animate-pulse rounded bg-ink-100" />
@@ -56,7 +62,7 @@ function TicketsTableSkeleton() {
             <div className="col-span-2">
               <div className="h-4 w-32 animate-pulse rounded bg-ink-100" />
             </div>
-            <div className="col-span-2">
+            <div className="col-span-1">
               <div className="h-6 w-16 animate-pulse rounded-full bg-ink-100" />
             </div>
             <div className="col-span-2">
@@ -97,8 +103,13 @@ function TicketsTable({
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
+      // Sort by priority first (lower number = higher priority)
+      const priorityDiff = a.priority - b.priority;
+      if (priorityDiff !== 0) return priorityDiff;
+      // Then by status
       const statusDiff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
       if (statusDiff !== 0) return statusDiff;
+      // Then by ticketNo descending (newer first)
       return b.ticketNo - a.ticketNo;
     });
   }, [filtered]);
@@ -114,10 +125,11 @@ function TicketsTable({
   return (
     <div className="overflow-hidden rounded-xl border border-ink-200 bg-white shadow-soft">
       <div className="hidden grid-cols-12 gap-4 border-b border-ink-100 bg-ink-100/60 px-5 py-3 text-xs font-medium text-ink-500 md:grid">
-        <div className="col-span-2">单号</div>
+        <div className="col-span-1">单号</div>
+        <div className="col-span-2">优先级</div>
         <div className="col-span-4">标题</div>
         <div className="col-span-2">项目 / 模块</div>
-        <div className="col-span-2">状态</div>
+        <div className="col-span-1">状态</div>
         <div className="col-span-2">指派给</div>
       </div>
       {isLoading ? (
@@ -140,8 +152,23 @@ function TicketsTable({
                       : "hover:bg-ink-100/40"
                   }`}
                 >
-                  <div className="col-span-2">
+                  <div className="col-span-1">
                     <span className="font-mono text-sm text-ink-400">#{t.ticketNo}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span
+                      className={`inline-block rounded border px-2 py-0.5 text-xs font-semibold ${
+                        t.priority === 0
+                          ? "bg-red-100 text-red-700 border-red-300"
+                          : t.priority === 1
+                            ? "bg-amber-100 text-amber-700 border-amber-300"
+                            : t.priority === 2
+                              ? "bg-brand-50 text-brand-700 border-brand-200"
+                              : "bg-ink-100 text-ink-500 border-ink-200"
+                      }`}
+                    >
+                      {PRIORITY_LABEL[t.priority as 0 | 1 | 2 | 3] ?? `P${t.priority}`}
+                    </span>
                   </div>
                   <div className="col-span-4 min-w-0">
                     <p
@@ -161,7 +188,7 @@ function TicketsTable({
                       {t.module?.responsibility?.kind ? KIND_LABEL[t.module.responsibility.kind] : "—"}
                     </p>
                   </div>
-                  <div className="col-span-2">
+                  <div className="col-span-1">
                     <span
                       className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
                         STATUS_STYLE[t.status] || "bg-ink-100 text-ink-500"

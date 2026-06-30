@@ -9,6 +9,8 @@ export type {
 
 export type TicketStatus = "DEVELOPING" | "READY_FOR_TEST" | "DELIVERED" | "DONE" | "OVERDUE" | "CLOSED";
 
+export type TicketPriority = 0 | 1 | 2 | 3;
+
 export type UserBrief = {
   id: string;
   name: string | null;
@@ -35,6 +37,7 @@ export type Ticket = {
   title: string;
   description: string | null;
   progress: number;
+  priority: number;
   status: TicketStatus;
   creatorId: string;
   project: { id: string; name: string; responsibilities: Responsibility[] };
@@ -169,4 +172,18 @@ export const STATUS_ORDER: Record<TicketStatus, number> = {
   OVERDUE: 3,
   DONE: 4,
   CLOSED: 5,
+};
+
+export const PRIORITY_LABEL: Record<TicketPriority, string> = {
+  0: "P0",
+  1: "P1",
+  2: "P2",
+  3: "P3",
+};
+
+export const PRIORITY_STYLE: Record<TicketPriority, string> = {
+  0: "bg-red-100 text-red-700 border border-red-300",
+  1: "bg-amber-100 text-amber-700 border border-amber-300",
+  2: "bg-brand-50 text-brand-700 border border-brand-200",
+  3: "bg-ink-100 text-ink-500 border border-ink-200",
 };

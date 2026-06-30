@@ -25,6 +25,7 @@ import {
   KIND_LABEL,
   STATUS_LABEL,
   STATUS_STYLE,
+  PRIORITY_LABEL,
 } from "@/entities/ticket/model/types";
 import { DesignTicketDetail } from "./DesignTicketDetail";
 import { ProgramTicketDetail } from "./ProgramTicketDetail";
@@ -160,6 +161,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   const [localStatus, setLocalStatus] = useState<TicketStatus | null>(null);
   const [localAssigneeIds, setLocalAssigneeIds] = useState<string[]>([]);
   const [localModuleId, setLocalModuleId] = useState<string>("");
+  const [localPriority, setLocalPriority] = useState<number>(2);
   const [programShowBugPushModal, setProgramShowBugPushModal] = useState(false);
 
   // Sync local edit state when ticket loads
@@ -168,6 +170,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     setLocalStatus(ticket.status);
     setLocalAssigneeIds(ticket.assignees.map((a) => a.id));
     setLocalModuleId(ticket.module.id);
+    setLocalPriority(ticket.priority ?? 2);
   }, [ticket]);
 
   // Load current user's responsibilities
@@ -300,6 +303,22 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
       return;
     }
     setMessage("状态已保存");
+    await refreshTicket();
+  }
+
+  async function updatePriority() {
+    setMessage("");
+    if (!ticket) return;
+    const res = await fetch(`/api/tickets/${ticket.id}/priority`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ priority: localPriority }),
+    });
+    if (!res.ok) {
+      setMessage("优先级保存失败");
+      return;
+    }
+    setMessage("优先级已保存");
     await refreshTicket();
   }
 
@@ -487,6 +506,41 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
 
             {/* Right sidebar */}
             <div className="space-y-5">
+              <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+                <h2 className="mb-3 font-medium">优先级</h2>
+                <div className="mb-3 flex items-center gap-2">
+                  <div className="flex gap-1">
+                    {([0, 1, 2, 3] as const).map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => setLocalPriority(p)}
+                        className={`rounded border px-2 py-1 text-xs font-semibold transition-colors ${
+                          localPriority === p
+                            ? p === 0
+                              ? "bg-red-100 text-red-700 border-red-300"
+                              : p === 1
+                                ? "bg-amber-100 text-amber-700 border-amber-300"
+                                : p === 2
+                                  ? "bg-brand-50 text-brand-700 border-brand-300"
+                                  : "bg-ink-100 text-ink-600 border-ink-300"
+                            : "border-ink-200 bg-white text-ink-500 hover:bg-ink-50"
+                        }`}
+                      >
+                        {PRIORITY_LABEL[p]}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={updatePriority}
+                    className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
+                  >
+                    保存
+                  </button>
+                </div>
+              </section>
+
               <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
                 <h2 className="mb-3 font-medium">状态</h2>
                 <div className="mb-3 flex items-center gap-2">

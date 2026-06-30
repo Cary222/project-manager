@@ -30,6 +30,7 @@ type ProjectTicket = {
   ticketNo: number;
   title: string;
   status: TicketStatus;
+  priority: number;
   project: { id: string; name: string };
   module: { name: string; responsibility: { kind: "PROGRAM" | "DESIGN" } };
 };
@@ -143,7 +144,25 @@ function KanbanSkeleton() {
 
 // ---- Kanban columns ----
 
-function KanbanColumns({ tickets, query }: { tickets: ProjectTicket[]; query: string }) {
+function PriorityBadge({ priority }: { priority: number }) {
+  return (
+    <span
+      className={`inline-block rounded border px-1.5 py-0.5 text-[10px] font-semibold ${
+        priority === 0
+          ? "bg-red-100 text-red-700 border-red-300"
+          : priority === 1
+            ? "bg-amber-100 text-amber-700 border-amber-300"
+            : priority === 2
+              ? "bg-brand-50 text-brand-700 border-brand-200"
+              : "bg-ink-100 text-ink-500 border-ink-200"
+      }`}
+    >
+      {priority === 0 ? "P0" : priority === 1 ? "P1" : priority === 2 ? "P2" : "P3"}
+    </span>
+  );
+}
+
+function KanbanColumns({ tickets, query, sortByPriority }: { tickets: ProjectTicket[]; query: string; sortByPriority?: boolean }) {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return tickets;
@@ -166,10 +185,14 @@ function KanbanColumns({ tickets, query }: { tickets: ProjectTicket[]; query: st
     };
     for (const t of filtered) map[t.status].push(t);
     for (const k of Object.keys(map) as TicketStatus[]) {
-      map[k].sort((a, b) => b.ticketNo - a.ticketNo);
+      if (sortByPriority) {
+        map[k].sort((a, b) => a.priority - b.priority || b.ticketNo - a.ticketNo);
+      } else {
+        map[k].sort((a, b) => b.ticketNo - a.ticketNo);
+      }
     }
     return map;
-  }, [filtered]);
+  }, [filtered, sortByPriority]);
 
   return (
     <div className="grid gap-4 lg:grid-cols-4">
@@ -198,7 +221,8 @@ function KanbanColumns({ tickets, query }: { tickets: ProjectTicket[]; query: st
                     href={`/tickets/${t.id}`}
                     className="block rounded-lg border border-ink-100 bg-white p-3 shadow-soft transition hover:border-brand-200 hover:shadow-base"
                   >
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <PriorityBadge priority={t.priority} />
                       <span className="font-mono text-xs text-ink-400">#{t.ticketNo}</span>
                       <span className="rounded bg-ink-100 px-1.5 py-0.5 text-[11px] text-ink-500">
                         {KIND_LABEL[t.module.responsibility.kind]}
@@ -234,6 +258,7 @@ type TaskTabProps = {
 
 function TaskTab({ tickets, taskCounts }: TaskTabProps) {
   const [query, setQuery] = useState("");
+  const [sortByPriority, setSortByPriority] = useState(false);
   const stats: TaskStats = {
     total: taskCounts.total,
     dev: taskCounts.developing,
@@ -247,17 +272,43 @@ function TaskTab({ tickets, taskCounts }: TaskTabProps) {
     <div className="space-y-5">
       <TaskStatsCards stats={stats} />
 
-      <div className="relative w-full max-w-sm">
-        <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="搜索任务标题、编号、模块…"
-          className="w-full rounded-lg border border-ink-200 bg-white py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
-        />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="relative w-full max-w-sm">
+          <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="搜索任务标题、编号、模块…"
+            className="w-full rounded-lg border border-ink-200 bg-white py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+          />
+        </div>
+        <div className="flex items-center gap-2 rounded-lg border border-ink-200 bg-white p-1">
+          <button
+            type="button"
+            onClick={() => setSortByPriority(false)}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+              !sortByPriority
+                ? "bg-brand-50 text-brand-700"
+                : "text-ink-500 hover:bg-ink-50"
+            }`}
+          >
+            按模块
+          </button>
+          <button
+            type="button"
+            onClick={() => setSortByPriority(true)}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+              sortByPriority
+                ? "bg-brand-50 text-brand-700"
+                : "text-ink-500 hover:bg-ink-50"
+            }`}
+          >
+            按优先级
+          </button>
+        </div>
       </div>
 
-      <KanbanColumns tickets={tickets} query={query} />
+      <KanbanColumns tickets={tickets} query={query} sortByPriority={sortByPriority} />
     </div>
   );
 }
@@ -719,6 +770,7 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
           ticketNo: t.ticketNo,
           title: t.title,
           status: t.status as TicketStatus,
+          priority: t.priority ?? 2,
           project: { id: project.id, name: project.name },
           module: {
             name: t.module?.name ?? "",
