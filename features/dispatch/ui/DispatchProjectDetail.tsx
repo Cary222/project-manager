@@ -7,7 +7,7 @@ import { CreateTicketForm } from "@/features/ticket/create";
 import type { TicketCreateResponsibility, TicketCreateUser } from "@/entities/ticket/model/types";
 import { useSession } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { IconArrowLeft, IconEdit, IconPlus, IconTrash } from "@/shared/ui/icons";
+import { IconArrowLeft, IconEdit, IconPlus, IconTrash, IconX } from "@/shared/ui/icons";
 import { fetchJson } from "@/shared/api/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/shared/api/swr-config";
 import { KIND_LABEL, Module } from "@/entities/ticket/model/types";
@@ -308,6 +308,20 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
     await loadProject();
   }
 
+  async function closeTicket(ticket: MyTicket) {
+    if (!window.confirm(`确定关闭单子 #${ticket.ticketNo} 吗？`)) {
+      return;
+    }
+    setMessage("");
+    const res = await fetch(`/api/tickets/${ticket.id}/close`, { method: "POST" });
+    if (!res.ok) {
+      toast.error("关闭单子失败");
+      return;
+    }
+    toast.success("单子已关闭");
+    await loadProject();
+  }
+
   if (isLoading) {
     return <DispatchProjectDetailLoading />;
   }
@@ -566,12 +580,13 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
                           {moduleTickets.map((ticket) => {
                             const isDelivered = ticket.status === "DELIVERED";
                             const isDone = ticket.status === "DONE";
-                            const isClosed = isDelivered || isDone;
+                            const isClosed = ticket.status === "CLOSED";
+                            const isTerminal = isDelivered || isDone || isClosed;
                             return (
                               <div
                                 key={ticket.id}
                                 className={`rounded-lg border p-3 transition ${
-                                  isClosed
+                                  isTerminal
                                     ? "border-ink-100 bg-ink-100/40"
                                     : "border-ink-200 hover:border-brand-200 hover:shadow-soft"
                                 }`}
@@ -590,22 +605,43 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
                                   <p
                                     className={`mt-1.5 text-sm font-medium ${
                                       isClosed ? "text-ink-400" : ""
-                                    } ${isDone ? "line-through" : ""}`}
+                                    } ${isDone ? "line-through" : ""}${
+                                      ticket.status === "OVERDUE" && !isClosed ? " text-red-600" : ""
+                                    }`}
                                   >
                                     {ticket.title}
                                   </p>
                                   <p className="mt-1 text-xs text-ink-400">
                                     指派：{formatAssigneeNames(ticket.assignees)}
                                   </p>
+                                  {ticket.deadline && ticket.status !== "CLOSED" && (
+                                    <p className={`mt-0.5 text-xs ${
+                                      ticket.status === "OVERDUE"
+                                        ? "text-red-600 font-medium"
+                                        : "text-ink-400"
+                                    }`}>
+                                      截止：{new Date(ticket.deadline).toLocaleDateString("zh-CN")}
+                                      {ticket.status === "OVERDUE" ? " (已逾期)" : ""}
+                                    </p>
+                                  )}
                                 </Link>
                                 {isRoot ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => deleteTicket(ticket)}
-                                    className="mt-2 inline-flex items-center gap-1 text-xs text-ink-400 hover:text-danger"
-                                  >
-                                    <IconTrash className="h-3.5 w-3.5" /> 删除单子
-                                  </button>
+                                  <div className="mt-2 flex items-center gap-3">
+                                    <button
+                                      type="button"
+                                      onClick={() => closeTicket(ticket)}
+                                      className="inline-flex items-center gap-1 text-xs text-ink-400 hover:text-emerald-600"
+                                    >
+                                      <IconX className="h-3.5 w-3.5" /> 关闭单子
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => deleteTicket(ticket)}
+                                      className="inline-flex items-center gap-1 text-xs text-ink-400 hover:text-danger"
+                                    >
+                                      <IconTrash className="h-3.5 w-3.5" /> 删除单子
+                                    </button>
+                                  </div>
                                 ) : null}
                               </div>
                             );

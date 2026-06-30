@@ -12,7 +12,9 @@ function toUtcEndOfDay(date: Date): Date {
 export function getWeekRange(reference: Date = new Date()): { weekStart: Date; weekEnd: Date } {
   const utc = toUtcStartOfDay(reference);
   const day = utc.getUTCDay();
-  const offset = day === 0 ? -6 : 1 - day;
+  //周日(0)时: weekStart = 当天(不是-6天), weekEnd = 当天23:59:59
+  //其他: weekStart = 本周一, weekEnd = 本周日23:59:59
+  const offset = day === 0 ? 0 : 1 - day;
   const monday = new Date(utc.getTime() + offset * 24 * 60 * 60 * 1000);
   return {
     weekStart: toUtcStartOfDay(monday),

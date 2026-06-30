@@ -36,6 +36,8 @@ const STATUS_STYLE: Record<TicketStatus, string> = {
   READY_FOR_TEST: "bg-amber-50 text-amber-600",
   DELIVERED: "bg-violet-50 text-violet-700",
   DONE: "bg-emerald-50 text-emerald-600",
+  OVERDUE: "bg-red-50 text-red-600",
+  CLOSED: "bg-ink-100 text-ink-500",
 };
 
 const STATUS_DOT: Record<TicketStatus, string> = {
@@ -43,6 +45,8 @@ const STATUS_DOT: Record<TicketStatus, string> = {
   READY_FOR_TEST: "bg-warning",
   DELIVERED: "bg-purple",
   DONE: "bg-success",
+  OVERDUE: "bg-danger",
+  CLOSED: "bg-ink-400",
 };
 
 const KIND_LABEL: Record<"PROGRAM" | "DESIGN", string> = {
@@ -81,7 +85,7 @@ function StatCard({
   icon: React.ReactNode;
 }) {
   const toneMap = {
-    brand: "bg-brand-50 text-brand-600",
+    brand: "bg-brand-50 text-brand-700",
     amber: "bg-amber-50 text-warning",
     danger: "bg-red-50 text-danger",
     purple: "bg-violet-50 text-purple",

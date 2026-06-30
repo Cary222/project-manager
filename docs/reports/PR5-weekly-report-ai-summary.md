@@ -602,3 +602,49 @@ T=5~30s     doUpdateProfile → 调 updateUserProfile
 | PR2 复现 | `docs/reports/PR2-stats-and-reports.md` |
 | PR1 复现 | `docs/reports/PR1-weekly-reports.md` |
 | subagent SOP | `.cursor/rules/subagent-coordination-sop.mdc` |
+| code-reviewer agent | `.cursor/agents/code-reviewer.md` |
+
+---
+
+## 11. Code Review 审查
+
+> 本节记录 PR5 的 code-reviewer 硬技术审查结论。ai-learning-mentor 软架构审计已在 PR5 开发期间完成（见 §8 踩坑记录坑 3/4/5）。code-reviewer 审查与 ai-learning-mentor 审计的分工：前者管硬技术（类型 / 安全 / N+1 / FSD），后者管软架构（取舍 / 边界 / 可观测性 / 成本）。
+
+**审查时间**：2026-06-29（PR5 完工后）
+**审查文件**：`docs/reports/PR5-code-review.md`
+
+### 审查结论
+
+| 维度 | 结论 |
+|------|------|
+| **Verdict** | ✅ **Approved** — 无 Critical 问题 |
+| **tsc 错误** | ✅ 无 PR5 相关错误（仅有历史遗留的 e2e/admin.test.ts） |
+| **XSS 安全** | ✅ `escapeAiSummary` 先转义 `& < > " '` 再还原 markdown |
+| **Auth 检查** | ✅ 详情页用 `auth()`、regenerate API 有 401/403/404 |
+| **FSD 边界** | ✅ `summarize.ts` 在 `features/reports/weekly-reports/lib/` 边界清晰 |
+| **错误处理** | ✅ fire-and-forget 有 try/catch，partial 状态兜底 |
+| **测试覆盖** | ✅ Test 9/10 覆盖 PR5 新增路径（content 空 / LLM 失败） |
+
+### Improvements（推荐项，可选）
+
+| # | 文件 | 问题 | 建议 |
+|---|------|------|------|
+| 1 | `app/api/reports/weekly-reports/[id]/regenerate/route.ts:9-15` | 注释写"刷新用户画像"但实际是"生成周报 AI 总结"，语义已变 | 更新注释匹配 PR5 实际行为 |
+| 2 | `scripts/weekly-report-bg-job-unit-test.ts` | 测试编号跳号（Test 4 缺失） | 补 Test 4 或重新统一编号 |
+| 3 | `features/reports/weekly-reports/lib/summarize.ts:71` | `content.trim() === ""` 对 null 值不够健壮 | 加 `|| null` 兜底：`if (!report.content || report.content?.trim() === "")` |
+
+### Nitpicks（可选，不影响合并）
+
+- `summarize.ts:86` 中文截断提示 `…（内容已截断）` 未 i18n（项目若有 i18n 体系则统一）
+- `[id]/page.tsx:46` `escapeAiSummary` 未转义 `/`（但 `<>` 已转义，实际攻击面极小，接受现状）
+
+### 踩坑记录对照（code-reviewer 逐条验证）
+
+| 坑 | PR5 复现文档记录 | code-reviewer 实际验证 |
+|----|----------------|----------------------|
+| 坑 1: `getServerSession` → `auth()` | ✅ 已修复 | ✅ `[id]/page.tsx:111` 用 `auth()`，import 从 `@/lib/auth` |
+| 坑 2: `submittedAt` 不存在 | ✅ 已修复 | ✅ `[id]/page.tsx:168` 用 `report.createdAt` |
+| 坑 3: XSS 未 escape | ✅ 已修复 | ✅ `escapeAiSummary` 函数（line 38-49）先转义后还原 markdown |
+| 坑 4: 500ms setTimeout 语义 | ✅ 保留（加注释） | ✅ 有注释说明"分布式防御" |
+| 坑 5: PATCH 两次 LLM 调两次 | ✅ PR6 待做 | ✅ PR5 范围外 |
+| 坑 6: 注释写"折叠"但实际"展开" | ✅ 已修复 | ✅ `[id]/page.tsx:51` 注释为"始终展开" |

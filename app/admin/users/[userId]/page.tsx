@@ -11,7 +11,9 @@ const STATUS_ORDER: Record<TicketStatus, number> = {
   DEVELOPING: 0,
   READY_FOR_TEST: 1,
   DELIVERED: 2,
-  DONE: 3,
+  OVERDUE: 3,
+  DONE: 4,
+  CLOSED: 5,
 };
 
 const STATUS_LABEL: Record<TicketStatus, string> = {
@@ -19,6 +21,8 @@ const STATUS_LABEL: Record<TicketStatus, string> = {
   READY_FOR_TEST: "待测试",
   DELIVERED: "已交付",
   DONE: "已完成",
+  OVERDUE: "已逾期",
+  CLOSED: "已关闭",
 };
 
 const KIND_LABEL: Record<string, string> = {

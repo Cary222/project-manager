@@ -52,6 +52,8 @@ enum TicketStatus {
   READY_FOR_TEST
   DELIVERED
   DONE
+  OVERDUE
+  CLOSED
 
   @@schema("pm")
 }
@@ -66,37 +68,37 @@ enum NotificationType {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String    @unique
-  emailVerified DateTime?
-  image         String?
-  passwordHash  String?
-  role          UserRole  @default(USER)
-  bannedAt      DateTime?
-  bio           String?   @db.Text
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  accounts      Account[]
-  sessions      Session[]
-  createdTickets Ticket[] @relation("TicketCreator")
-  ticketAssignments TicketAssignee[]
+  id                     String                  @id @default(cuid())
+  name                   String?
+  email                  String                  @unique
+  emailVerified          DateTime?
+  image                  String?
+  passwordHash           String?
+  role                   UserRole                @default(USER)
+  bannedAt               DateTime?
+  bio                    String?                 @db.Text
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  accounts               Account[]
+  sessions               Session[]
+  createdTickets         Ticket[]                @relation("TicketCreator")
+  ticketAssignments      TicketAssignee[]
   assigneeHistoryChanges TicketAssigneeHistory[] @relation("AssigneeHistoryActor")
-  statusHistoryChanges TicketStatusHistory[] @relation("StatusHistoryActor")
-  moderationLogs ModerationLog[] @relation("ModerationActor")
-  updatedSystemSettings SystemSetting[] @relation("SystemSettingUpdater")
-  notifications Notification[] @relation("NotificationRecipient")
-  actorNotifications Notification[] @relation("NotificationActor")
-  pushRecords        DesignProgramBinding[]
-  bugBindings        BugProgramBinding[]
-  pkmNotes           PkmNote[]
-  responsibilities   UserResponsibility[]
-  userOnProjects     UserOnProject[]
-  ownedProjects      Project[]
+  statusHistoryChanges   TicketStatusHistory[]   @relation("StatusHistoryActor")
+  moderationLogs         ModerationLog[]         @relation("ModerationActor")
+  updatedSystemSettings  SystemSetting[]         @relation("SystemSettingUpdater")
+  notifications          Notification[]          @relation("NotificationRecipient")
+  actorNotifications     Notification[]          @relation("NotificationActor")
+  pushRecords            DesignProgramBinding[]
+  bugBindings            BugProgramBinding[]
+  pkmNotes               PkmNote[]
+  responsibilities       UserResponsibility[]
+  userOnProjects         UserOnProject[]
+  ownedProjects          Project[]
 
-  aiConversations   AiConversation[]
-  aiProfile         AiUserProfile?
-  weeklyReports     WeeklyReport[]
+  aiConversations AiConversation[]
+  aiProfile       AiUserProfile?
+  weeklyReports   WeeklyReport[]
 
   @@schema("pm")
 }
@@ -122,7 +124,7 @@ model UserResponsibility {
   kind      ResponsibilityKind
   createdAt DateTime           @default(now())
 
-  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, kind])
   @@schema("pm")
@@ -192,19 +194,19 @@ enum SearchDocumentSourceType {
 }
 
 model SearchDocument {
-  id          String                   @id @default(cuid())
-  sourceType  SearchDocumentSourceType
-  sourceId    String
-  chunkIndex  Int                      @default(0)
-  projectId   String?
-  title       String
-  content     String
-  url         String
-  metadata    Json?
-  embedding   Unsupported("public.vector")?
-  createdAt   DateTime                @default(now())
-  updatedAt   DateTime                @updatedAt
-  project     Project?                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id         String                        @id @default(cuid())
+  sourceType SearchDocumentSourceType
+  sourceId   String
+  chunkIndex Int                           @default(0)
+  projectId  String?
+  title      String
+  content    String
+  url        String
+  metadata   Json?
+  embedding  Unsupported("public.vector")?
+  createdAt  DateTime                      @default(now())
+  updatedAt  DateTime                      @updatedAt
+  project    Project?                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@unique([sourceType, sourceId, chunkIndex])
   @@index([sourceType, updatedAt(sort: Desc)])
@@ -222,18 +224,18 @@ enum IndexJobStatus {
 }
 
 model IndexJob {
-  id          String          @id @default(cuid())
-  noteId      String
-  status      IndexJobStatus  @default(PENDING)
-  attempt     Int             @default(0)
-  maxAttempts Int             @default(5)
-  error       String?
+  id           String         @id @default(cuid())
+  noteId       String
+  status       IndexJobStatus @default(PENDING)
+  attempt      Int            @default(0)
+  maxAttempts  Int            @default(5)
+  error        String?
   errorSources Json?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-  startedAt   DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  startedAt    DateTime?
 
-  note        PkmNote? @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  note PkmNote? @relation(fields: [noteId], references: [id], onDelete: Cascade)
 
   @@index([status, createdAt(sort: Asc)])
   @@index([noteId, status])
@@ -241,18 +243,18 @@ model IndexJob {
 }
 
 model PkmNote {
-  id          String   @id @default(cuid())
+  id          String     @id @default(cuid())
   userId      String
   projectId   String?
   title       String
   content     String
-  tags        String[] @default([])
+  tags        String[]   @default([])
   attachments Json?
-  isPublic    Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  isPublic    Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project     Project?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
   indexJobs   IndexJob[]
 
   @@index([userId, updatedAt(sort: Desc)])
@@ -263,16 +265,16 @@ model PkmNote {
 }
 
 model Project {
-  id               String           @id @default(cuid())
+  id               String                @id @default(cuid())
   name             String
   description      String?
-  status           String           @default("ACTIVE")
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  status           String                @default("ACTIVE")
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
   ownerId          String?
-  owner            User?            @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  owner            User?                 @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   members          UserOnProject[]
-  responsibilities  Responsibility[]
+  responsibilities Responsibility[]
   tickets          Ticket[]
   searchDocuments  SearchDocument[]
   pkmNotes         PkmNote[]
@@ -309,31 +311,33 @@ model Module {
 }
 
 model Ticket {
-  id            String                @id @default(cuid())
-  ticketNo      Int                   @unique
-  title         String
-  description   String?
-  progress      Int                   @default(0)
-  status        TicketStatus          @default(DEVELOPING)
-  projectId     String
-  moduleId      String
-  creatorId     String
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
-  project       Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  module        Module                @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-  creator       User                  @relation("TicketCreator", fields: [creatorId], references: [id], onDelete: Restrict)
-  assignees     TicketAssignee[]
-  repoBindings  TicketRepoBinding[]
-  commits       TicketCommit[]
+  id              String                  @id @default(cuid())
+  ticketNo        Int                     @unique
+  title           String
+  description     String?
+  progress        Int                     @default(0)
+  status          TicketStatus            @default(DEVELOPING)
+  deadline        DateTime?
+  projectId       String
+  moduleId        String
+  creatorId       String
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  project         Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  module          Module                  @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  creator         User                    @relation("TicketCreator", fields: [creatorId], references: [id], onDelete: Restrict)
+  assignees       TicketAssignee[]
+  repoBindings    TicketRepoBinding[]
+  commits         TicketCommit[]
   assigneeHistory TicketAssigneeHistory[]
-  statusHistory TicketStatusHistory[]
-  notifications Notification[]
-  pushSources   DesignProgramBinding[]    @relation("PushSourceTicket")
-  pushTargets   DesignProgramBinding[]    @relation("PushTargetTicket")
-  bugSources    BugProgramBinding[]       @relation("BugSourceTicket")
-  bugTargets    BugProgramBinding[]      @relation("BugTargetTicket")
+  statusHistory   TicketStatusHistory[]
+  notifications   Notification[]
+  pushSources     DesignProgramBinding[]  @relation("PushSourceTicket")
+  pushTargets     DesignProgramBinding[]  @relation("PushTargetTicket")
+  bugSources      BugProgramBinding[]     @relation("BugSourceTicket")
+  bugTargets      BugProgramBinding[]     @relation("BugTargetTicket")
 
+  @@index([status, deadline])
   @@schema("pm")
 }
 
@@ -448,17 +452,17 @@ model TicketRepoBinding {
 }
 
 model TicketCommit {
-  id         String   @id @default(cuid())
-  ticketId   String
-  ticketNo   Int
-  repoPath   String
-  commitSha  String
-  author     String
+  id          String   @id @default(cuid())
+  ticketId    String
+  ticketNo    Int
+  repoPath    String
+  commitSha   String
+  author      String
   committedAt DateTime
-  subject    String
-  branches   String[] @default([])
-  createdAt  DateTime @default(now())
-  ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  subject     String
+  branches    String[] @default([])
+  createdAt   DateTime @default(now())
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@unique([repoPath, commitSha])
   @@index([ticketNo, committedAt(sort: Desc)])
@@ -466,17 +470,17 @@ model TicketCommit {
 }
 
 model SyncCursor {
-  id           String   @id @default(cuid())
-  repoPath     String   @unique
-  lastCommitAt DateTime?
+  id            String    @id @default(cuid())
+  repoPath      String    @unique
+  lastCommitAt  DateTime?
   lastCommitSha String?
-  updatedAt    DateTime @updatedAt
+  updatedAt     DateTime  @updatedAt
 
   @@schema("pm")
 }
 
 model Counter {
-  key       String @id
+  key       String   @id
   nextValue Int
   updatedAt DateTime @updatedAt
 
@@ -501,35 +505,35 @@ model SystemSetting {
 /// 前端只负责发送原始事件，后端负责计算 isValidView。
 /// Tier 3（通知/审计）已有独立系统，本表不承接。
 model ActivityLog {
-  id           String   @id @default(cuid())
+  id String @id @default(cuid())
 
   /// 事件协议版本（用于 schema 演进时兼容旧数据）
-  eventVersion String   @default("1.0")
+  eventVersion String @default("1.0")
   /// 动作类型（ACTION.*），冗余存储而非外键：避免枚举变更牵连历史
   action       String
 
   /// 执行者
-  actorId      String
-  actorName    String?
+  actorId   String
+  actorName String?
 
   /// 目标
-  targetType   String?
-  targetId     String?
-  targetName   String?
+  targetType String?
+  targetId   String?
+  targetName String?
 
   /// 会话
-  sessionId    String?
+  sessionId String?
 
   /// 原始上下文（前端上报的 dwellMs / enterAt / leaveAt 等）
-  context      Json?
+  context Json?
 
   /// 后端计算字段（可信，前端不可干预）
-  dwellMs      Int?
+  dwellMs     Int?
   /// dwellMs > 3000 的有效访问标记
-  isValidView  Boolean?
+  isValidView Boolean?
 
   /// 入库时间
-  createdAt    DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([action, createdAt(sort: Desc)])
   @@index([actorId, createdAt(sort: Desc)])
@@ -539,15 +543,15 @@ model ActivityLog {
 }
 
 model AiConversation {
-  id             String   @id @default(cuid())
-  userId         String
-  title          String
-  summary        Json?
-  tags           String[] @default([])
-  messageCount   Int      @default(0)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  lastMessageAt  DateTime @default(now())
+  id            String   @id @default(cuid())
+  userId        String
+  title         String
+  summary       Json?
+  tags          String[] @default([])
+  messageCount  Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  lastMessageAt DateTime @default(now())
 
   user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages AiChatMessage[]
@@ -583,18 +587,18 @@ model AiUserProfile {
 }
 
 model WeeklyReport {
-  id              String                 @id @default(cuid())
-  userId          String
-  weekStart       DateTime
-  weekEnd         DateTime
-  title           String
-  content         String                 @db.Text
-  attachments     Json?
-  aiSummary       String?                @db.Text
-  aiSummaryAt     DateTime?
-  aiSummaryPartial Boolean               @default(false)
-  createdAt       DateTime               @default(now())
-  updatedAt       DateTime               @updatedAt
+  id               String    @id @default(cuid())
+  userId           String
+  weekStart        DateTime
+  weekEnd          DateTime
+  title            String
+  content          String    @db.Text
+  attachments      Json?
+  aiSummary        String?   @db.Text
+  aiSummaryAt      DateTime?
+  aiSummaryPartial Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   user     User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   projects WeeklyReportProject[]
@@ -605,9 +609,9 @@ model WeeklyReport {
 }
 
 model WeeklyReportProject {
-  id              String   @id @default(cuid())
-  reportId        String
-  projectId        String
+  id        String @id @default(cuid())
+  reportId  String
+  projectId String
 
   report  WeeklyReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
   project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)

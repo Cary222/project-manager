@@ -26,7 +26,12 @@ export async function GET(
               include: {
                 tickets: {
                   orderBy: { ticketNo: "desc" },
-                  include: {
+                  select: {
+                    id: true,
+                    ticketNo: true,
+                    title: true,
+                    status: true,
+                    deadline: true,
                     assignees: {
                       include: {
                         user: {
@@ -58,7 +63,11 @@ export async function GET(
           modules: responsibility.modules.map((module) => ({
             ...module,
             tickets: module.tickets.map((ticket) => ({
-              ...ticket,
+              id: ticket.id,
+              ticketNo: ticket.ticketNo,
+              title: ticket.title,
+              status: ticket.status,
+              deadline: ticket.deadline?.toISOString() ?? null,
               assignees: ticket.assignees.map((item) => item.user),
             })),
           })),

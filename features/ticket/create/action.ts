@@ -1,9 +1,8 @@
 "use server";
 
-import { TicketStatus, UserRole } from "@prisma/client";
+import { ModerationAction, TicketStatus, UserRole } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
 import {
-  assigneeUserSelect,
   normalizeAssigneeIds,
   replaceTicketAssignees,
 } from "@/entities/ticket/lib/ticket-assignees";
@@ -16,6 +15,9 @@ import {
 } from "@/features/admin/notifications-lib";
 import { syncTicketSearchDocument } from "@/shared/lib/search";
 
+// Auto-start the overdue scanner when this module is first loaded
+void import("@/shared/lib/cron-scheduler").catch(() => {});
+
 export type CreateTicketInput = {
   projectId: string;
   moduleId: string;
@@ -24,6 +26,7 @@ export type CreateTicketInput = {
   assigneeIds?: string[];
   status?: TicketStatus;
   repoPaths?: string[];
+  deadline?: string | Date | null;
 };
 
 export type CreateTicketResult =
@@ -68,6 +71,7 @@ export async function createTicketAction(input: CreateTicketInput): Promise<Crea
           moduleId,
           creatorId: session.user.id,
           status: input.status ?? TicketStatus.DEVELOPING,
+          deadline: input.deadline ? new Date(input.deadline) : null,
           repoBindings: {
             create: (input.repoPaths ?? [])
               .filter((repoPath) => repoPath.trim().length > 0)
@@ -118,7 +122,7 @@ export async function createTicketAction(input: CreateTicketInput): Promise<Crea
     }
 
     void createModerationLog({
-      action: "CREATE_TICKET" as any,
+      action: ModerationAction.CREATE_TICKET,
       targetId: ticket.ticketNo.toString(),
       targetType: "Ticket",
       actorId: session.user.id,
@@ -210,7 +214,7 @@ export async function createBugTicketAction(
     await syncTicketCounterAfterCreate(ticket.ticketNo);
 
     void createModerationLog({
-      action: "CREATE_TICKET" as any,
+      action: ModerationAction.CREATE_TICKET,
       targetId: ticket.ticketNo.toString(),
       targetType: "Ticket",
       actorId: session.user.id,

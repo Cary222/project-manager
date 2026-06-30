@@ -72,6 +72,8 @@ const COLUMNS: { key: TicketStatus; label: string; accent: string; head: string 
   { key: "READY_FOR_TEST", label: "待测试", accent: "border-t-amber-500", head: "text-amber-700 bg-amber-50" },
   { key: "DELIVERED", label: "已交付", accent: "border-t-purple", head: "text-violet-700 bg-violet-50" },
   { key: "DONE", label: "已完成", accent: "border-t-emerald-500", head: "text-emerald-700 bg-emerald-50" },
+  { key: "OVERDUE", label: "已逾期", accent: "border-t-red-500", head: "text-red-700 bg-red-50" },
+  { key: "CLOSED", label: "已关闭", accent: "border-t-ink-400", head: "text-ink-600 bg-ink-100" },
 ];
 
 const STATUS_STYLE: Record<string, string> = {
@@ -157,6 +159,8 @@ function KanbanColumns({ tickets, query }: { tickets: ProjectTicket[]; query: st
       READY_FOR_TEST: [],
       DELIVERED: [],
       DONE: [],
+      OVERDUE: [],
+      CLOSED: [],
     };
     for (const t of filtered) map[t.status].push(t);
     for (const k of Object.keys(map) as TicketStatus[]) {

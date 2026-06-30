@@ -15,10 +15,18 @@ export type UserTicketSummary = {
   progress: number;
 };
 
+export type ProjectMember = {
+  id: string;
+  name: string | null;
+  email: string;
+  role: string;
+};
+
 export type UserProjectSummary = {
   id: string;
   name: string;
   role: string;
+  members: ProjectMember[];
 };
 
 export type WeeklyReportSummary = {
@@ -84,7 +92,13 @@ export async function getUserProfileAction(userId: string): Promise<UserProfile>
       userOnProjects: {
         include: {
           project: {
-            select: { id: true, name: true, status: true },
+            include: {
+              members: {
+                include: {
+                  user: { select: { id: true, name: true, email: true } },
+                },
+              },
+            },
           },
         },
         take: 10,
@@ -128,6 +142,12 @@ export async function getUserProfileAction(userId: string): Promise<UserProfile>
       id: up.project.id,
       name: up.project.name,
       role: up.role,
+      members: up.project.members.map((m) => ({
+        id: m.user.id,
+        name: m.user.name,
+        email: m.user.email,
+        role: m.role,
+      })),
     })),
     recentReports: user.weeklyReports.map((r) => ({
       id: r.id,

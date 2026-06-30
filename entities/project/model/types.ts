@@ -25,7 +25,8 @@ export type MyTicket = {
   id: string;
   ticketNo: number;
   title: string;
-  status: "DEVELOPING" | "READY_FOR_TEST" | "DELIVERED" | "DONE";
+  status: "DEVELOPING" | "READY_FOR_TEST" | "DELIVERED" | "DONE" | "OVERDUE" | "CLOSED";
+  deadline: string | null;
   project: { id: string; name: string };
   module: { name: string; responsibility: { kind: "PROGRAM" | "DESIGN" } };
   assignees: { name: string | null; email: string }[];

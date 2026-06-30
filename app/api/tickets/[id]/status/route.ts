@@ -12,11 +12,16 @@ import {
 } from "@/features/admin/notifications-lib";
 import { syncTicketSearchDocument } from "@/shared/lib/search";
 
+// Auto-start the overdue scanner when this module is first loaded
+void import("@/shared/lib/cron-scheduler").catch(() => {});
+
 const TICKET_STATUS_VALUES = [
   "DEVELOPING",
   "READY_FOR_TEST",
   "DELIVERED",
   "DONE",
+  "OVERDUE",
+  "CLOSED",
 ] as const satisfies readonly TicketStatus[];
 
 const STATUS_VALUES = new Set<string>(TICKET_STATUS_VALUES);
@@ -26,12 +31,20 @@ const STATUS_LABEL: Record<TicketStatus, string> = {
   READY_FOR_TEST: "待测试",
   DELIVERED: "已交付",
   DONE: "已完成",
+  OVERDUE: "已逾期",
+  CLOSED: "已关闭",
 };
 
 const USER_ALLOWED_STATUSES = new Set<TicketStatus>([
   TicketStatus.DEVELOPING,
   TicketStatus.READY_FOR_TEST,
   TicketStatus.DELIVERED,
+]);
+
+// Root-only statuses that regular users cannot set directly
+const ROOT_ONLY_STATUSES = new Set<TicketStatus>([
+  TicketStatus.OVERDUE,
+  TicketStatus.CLOSED,
 ]);
 
 const DESIGN_USER_ALLOWED_STATUSES = new Set<TicketStatus>([
@@ -103,6 +116,11 @@ export async function PATCH(
       if (!allowedStatuses.has(nextStatus)) {
         return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
       }
+    }
+
+    // OVERDUE and CLOSED can only be set by root (or system via cron)
+    if (!isRoot && ROOT_ONLY_STATUSES.has(nextStatus)) {
+      return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
     }
 
     if (!isRoot && nextStatus === TicketStatus.DONE) {

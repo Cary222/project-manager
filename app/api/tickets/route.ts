@@ -15,6 +15,9 @@ import {
 } from "@/features/admin/notifications-lib";
 import { syncTicketSearchDocument } from "@/shared/lib/search";
 
+// Auto-start the overdue scanner when this module is first loaded
+void import("@/shared/lib/cron-scheduler").catch(() => {});
+
 export async function POST(request: Request) {
   try {
     const session = await requireSession();
@@ -28,6 +31,7 @@ export async function POST(request: Request) {
       assigneeIds?: string[];
       status?: TicketStatus;
       repoPaths?: string[];
+      deadline?: string | Date | null;
     };
 
     if (!body.title?.trim() || !body.projectId || !body.moduleId) {
@@ -68,6 +72,7 @@ export async function POST(request: Request) {
           moduleId,
           creatorId: session.user.id,
           status: body.status ?? TicketStatus.DEVELOPING,
+          deadline: body.deadline ? new Date(body.deadline) : null,
           repoBindings: {
             create: (body.repoPaths ?? [])
               .filter((repoPath) => repoPath.trim().length > 0)

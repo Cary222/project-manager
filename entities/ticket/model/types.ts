@@ -7,7 +7,7 @@ export type {
   ProjectStatus,
 } from "@/entities/project/model/types";
 
-export type TicketStatus = "DEVELOPING" | "READY_FOR_TEST" | "DELIVERED" | "DONE";
+export type TicketStatus = "DEVELOPING" | "READY_FOR_TEST" | "DELIVERED" | "DONE" | "OVERDUE" | "CLOSED";
 
 export type UserBrief = {
   id: string;
@@ -143,6 +143,8 @@ export const STATUS_LABEL: Record<TicketStatus, string> = {
   READY_FOR_TEST: "待测试",
   DELIVERED: "已交付",
   DONE: "已完成",
+  OVERDUE: "已逾期",
+  CLOSED: "已关闭",
 };
 
 export const STATUS_STYLE: Record<TicketStatus, string> = {
@@ -150,6 +152,8 @@ export const STATUS_STYLE: Record<TicketStatus, string> = {
   READY_FOR_TEST: "bg-amber-50 text-warning",
   DELIVERED: "bg-violet-50 text-purple",
   DONE: "bg-emerald-50 text-emerald-600",
+  OVERDUE: "bg-red-50 text-red-600",
+  CLOSED: "bg-ink-100 text-ink-500",
 };
 
 export const KIND_LABEL: Record<"PROGRAM" | "DESIGN" | "BUG", string> = {
@@ -162,5 +166,7 @@ export const STATUS_ORDER: Record<TicketStatus, number> = {
   DEVELOPING: 0,
   READY_FOR_TEST: 1,
   DELIVERED: 2,
-  DONE: 3,
+  OVERDUE: 3,
+  DONE: 4,
+  CLOSED: 5,
 };

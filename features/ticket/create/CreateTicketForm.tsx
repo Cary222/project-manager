@@ -5,6 +5,7 @@ import { AssigneePicker } from "@/shared/ui/AssigneePicker";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
 import { composeImageMarkdown, extractInlineImages } from "@/shared/lib/pkm";
 import { fileToDataUrl } from "@/shared/lib/upload";
+import { computeDefaultDeadline } from "@/shared/lib/ticket-deadline";
 import {
   createTicketAction,
   createBugTicketAction,
@@ -136,6 +137,21 @@ export function CreateTicketForm({
     initialDescriptionState.images
   );
   const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
+
+  // Deadline state
+  const [deadline, setDeadline] = useState(() => {
+    const defaultDeadline = computeDefaultDeadline(new Date());
+    return formatDateForInput(defaultDeadline);
+  });
+
+  function formatDateForInput(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  }
   const isLightboxOpenRef = useRef(false);
   // Synchronous re-entrancy guard. `submitting` (useState) only blocks clicks after
   // React re-renders, but a fast double-click can fire `handleSubmit` twice in
@@ -316,6 +332,7 @@ export function CreateTicketForm({
         title: title.trim(),
         description: fullDescription,
         assigneeIds: effectiveProgramAssigneeIds,
+        deadline: deadline || null,
       };
 
       let result;
@@ -362,6 +379,7 @@ export function CreateTicketForm({
       setTitle("");
       setDescription("");
       setDescriptionImages([]);
+      setDeadline(formatDateForInput(computeDefaultDeadline(new Date())));
       onMessage?.("单子已创建");
       await onCreated?.({
         ticket: result.ticket,
@@ -581,6 +599,16 @@ export function CreateTicketForm({
             </p>
           ) : null}
         </div>
+
+        <label className="space-y-1 text-sm">
+          <span className="text-ink-700">截止日期（可选）</span>
+          <input
+            type="datetime-local"
+            value={deadline}
+            onChange={(e) => setDeadline(e.target.value)}
+            className="w-full rounded-lg border border-ink-200 px-3 py-2 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+          />
+        </label>
 
         <label className="space-y-1 text-sm">
           <span className="text-ink-700">标题</span>
