@@ -382,6 +382,14 @@ export function AppShell({
             {userMenuOpen ? (
               <div className="absolute right-0 top-12 z-30 w-48 rounded-2xl border border-ink-200 bg-white p-2 shadow-elevated pm-fade-in">
                 <Link
+                  href={`/team/${session?.user?.id}`}
+                  onClick={() => setUserMenuOpen(false)}
+                  className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-ink-600 transition hover:bg-ink-100 hover:text-ink-900"
+                >
+                  <IconTeam className="text-ink-400" />
+                  <span>个人主页</span>
+                </Link>
+                <Link
                   href="/settings"
                   onClick={() => setUserMenuOpen(false)}
                   className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-ink-600 transition hover:bg-ink-100 hover:text-ink-900"

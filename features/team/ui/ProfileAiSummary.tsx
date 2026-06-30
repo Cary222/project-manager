@@ -27,13 +27,11 @@ const SECTION_LABEL: Record<ProfileKey, string> = {
 type ProfileKey = "roles" | "expertise" | "interests" | "projects" | "recentTopics";
 
 function isEmptyProfile(p: NonNullable<AiProfileSummary["profile"]>): boolean {
-  return (
-    p.roles.length === 0 &&
-    p.expertise.length === 0 &&
-    p.interests.length === 0 &&
-    p.projects.length === 0 &&
-    p.recentTopics.length === 0
-  );
+  const fields: ProfileKey[] = ["roles", "expertise", "interests", "projects", "recentTopics"];
+  return fields.every((key) => {
+    const val = p[key];
+    return !Array.isArray(val) || val.length === 0;
+  });
 }
 
 function formatUpdatedAt(date: Date | null): string {

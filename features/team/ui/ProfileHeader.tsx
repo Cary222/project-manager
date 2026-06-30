@@ -36,7 +36,7 @@ export function ProfileHeader({ profile }: Props) {
       </div>
 
       {/* 技能标签 */}
-      {profile.skills.length > 0 && (
+      {Array.isArray(profile.skills) && profile.skills.length > 0 && (
         <div className="mt-4 flex flex-wrap gap-2">
           {profile.skills.map((s) => (
             <span className="rounded-lg bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700">
