@@ -8,9 +8,10 @@ import { useRouter } from "next/navigation";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
 import { MarkdownContent } from "@/shared/ui/MarkdownContent";
 import { AssigneePicker } from "@/shared/ui/AssigneePicker";
+import { DocumentPreviewModal, type PreviewableFile } from "@/shared/ui/DocumentPreviewModal";
 import { formatAssigneeList } from "@/entities/ticket/lib/ticket-assignees";
 import { composeImageMarkdown, extractInlineImages } from "@/shared/lib/pkm";
-import { uploadImage } from "@/shared/lib/upload";
+import { uploadFile } from "@/shared/lib/upload";
 import { IconArrowLeft, IconClock, IconEdit, IconTrash, IconMenu } from "@/shared/ui/icons";
 import { fetchJson } from "@/shared/api/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/shared/api/swr-config";
@@ -176,7 +177,9 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
   const isLightboxOpenRef = useRef(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const ticketAttachmentInputRef = useRef<HTMLInputElement>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [attachments, setAttachments] = useState<Array<{ fileId: string; name: string; mimeType: string; size: number; sourceType: string; sourceId: string }>>([]);
   const [kebabOpen, setKebabOpen] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
@@ -186,6 +189,13 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   const [localModuleId, setLocalModuleId] = useState<string>("");
   const [localPriority, setLocalPriority] = useState<number>(2);
   const [programShowBugPushModal, setProgramShowBugPushModal] = useState(false);
+  const [previewFile, setPreviewFile] = useState<PreviewableFile | null>(null);
+
+  // Sync ticket-level attachments (sourceType: TICKET) into local state
+  useEffect(() => {
+    if (!ticket?.allAttachments) return;
+    setAttachments([...ticket.allAttachments].filter((a) => a.sourceType === "TICKET"));
+  }, [ticket?.allAttachments]);
 
   // Sync local edit state when ticket loads
   useEffect(() => {
@@ -330,7 +340,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
 
   async function insertDescriptionImage(file: File) {
     try {
-      const { url: relUrl } = await uploadImage(file);
+      const { url: relUrl } = await uploadFile(file);
       const origin = typeof window !== "undefined" ? window.location.origin : "";
       const absoluteUrl = origin ? `${origin}${relUrl}` : relUrl;
       setEditDescriptionImages((prev) => [...prev, { src: absoluteUrl, name: file.name }]);
@@ -341,6 +351,30 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
 
   function removeDescriptionImage(index: number) {
     setEditDescriptionImages((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  // Upload a file as a ticket-level attachment (sourceType: TICKET)
+  async function uploadTicketAttachment(file: File) {
+    try {
+      const result = await uploadFile(file);
+      const att = {
+        fileId: result.fileId,
+        name: result.name,
+        mimeType: result.mimeType,
+        size: result.size,
+        sourceType: "TICKET" as const,
+        sourceId: ticket?.id ?? "",
+      };
+      setAttachments((prev) => [...prev, att]);
+      // Persist to backend
+      await fetch(`/api/tickets/${ticketId}/attachments`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "add", attachment: att }),
+      });
+    } catch (err) {
+      console.error("Failed to upload ticket attachment:", err);
+    }
   }
 
   // Build merged activity log (time-descending)
@@ -433,6 +467,9 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
             a.click();
           }}
         />
+      )}
+      {previewFile && (
+        <DocumentPreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
       )}
       <div className="space-y-5 pm-fade-in">
           {message && (
@@ -700,6 +737,119 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                     </button>
                   </div>
                 )}
+
+                {/* Attachments section — ticket + comment attachments, with inline upload */}
+                <div className="mt-5 border-t border-ink-100 pt-5">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h2 className="text-sm font-medium text-ink-700">
+                      附件 <span className="font-normal text-ink-400">
+                        ({attachments.length})
+                      </span>
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => ticketAttachmentInputRef.current?.click()}
+                      className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-600 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700"
+                    >
+                      + 上传附件
+                    </button>
+                    <input
+                      ref={ticketAttachmentInputRef}
+                      type="file"
+                      accept="*/*"
+                      multiple
+                      className="hidden"
+                      onChange={async (e) => {
+                        const files = e.target.files;
+                        if (!files) return;
+                        for (const file of Array.from(files)) {
+                          await uploadTicketAttachment(file);
+                        }
+                        e.currentTarget.value = "";
+                      }}
+                    />
+                  </div>
+                  {attachments.length === 0 ? (
+                    <p className="text-xs text-ink-400">暂无附件</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {attachments.map((att) => {
+                        const mimeType = att.mimeType ?? "application/octet-stream";
+                        const isImage = mimeType.startsWith("image/");
+                        const canPreview = isImage || mimeType === "application/pdf" || mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || mimeType === "text/markdown";
+                        const fileUrl = `/api/upload/${att.fileId}`;
+                        const attSize = att.size ?? 0;
+                        const sizeLabel =
+                          attSize < 1024
+                            ? `${attSize} B`
+                            : attSize < 1024 * 1024
+                            ? `${(attSize / 1024).toFixed(1)} KB`
+                            : `${(attSize / 1024 / 1024).toFixed(1)} MB`;
+                        const sourceLabel =
+                          att.sourceType === "TICKET" ? "工单附件" : "评论附件";
+                        return (
+                          <li
+                            key={att.fileId}
+                            className="flex items-center gap-3 rounded-lg border border-ink-100 bg-ink-50 px-3 py-2"
+                          >
+                            {isImage ? (
+                              <button
+                                type="button"
+                                onClick={() => setPreviewImage({ src: fileUrl, name: att.name || "image" })}
+                                className="shrink-0"
+                              >
+                                <img
+                                  src={fileUrl}
+                                  alt={att.name}
+                                  className="h-8 w-8 shrink-0 rounded object-cover hover:ring-2 hover:ring-brand-400"
+                                />
+                              </button>
+                            ) : (
+                              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-ink-200">
+                                <svg
+                                  width="16"
+                                  height="16"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  className="text-ink-500"
+                                >
+                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                  <polyline points="14,2 14,8 20,8" />
+                                </svg>
+                              </div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-medium text-ink-800">{att.name}</p>
+                              <p className="text-xs text-ink-400">
+                                {sizeLabel} · {sourceLabel}
+                              </p>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1.5">
+                              {canPreview && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewFile({ name: att.name || "document", url: fileUrl, mimeType })}
+                                  className="rounded-lg border border-ink-200 bg-white px-2 py-1 text-xs text-ink-600 hover:bg-brand-50 hover:border-brand-300 hover:text-brand-700"
+                                >
+                                  预览
+                                </button>
+                              )}
+                              <a
+                                href={fileUrl}
+                                download={att.name}
+                                className="rounded-lg border border-ink-200 bg-white px-2.5 py-1 text-xs text-ink-600 hover:bg-ink-100"
+                              >
+                                下载
+                              </a>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
               </section>
 
               {/* Kind-specific detail cards */}

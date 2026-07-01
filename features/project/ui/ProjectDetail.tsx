@@ -6,7 +6,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { IconSearch, IconSettings, IconTask, IconTeam, IconEdit, IconMenu, IconRepo, IconBook } from "@/shared/ui/icons";
 import { BackLink, SimplePageHeader, HeaderSkeleton } from "@/shared/ui/headers";
-import { normalizePkmAttachments, type PkmAttachment } from "@/shared/lib/pkm";
+import { type FileAttachment } from "@/shared/lib/pkm";
 import { AttachmentItem, type PreviewableFile } from "@/shared/ui/AttachmentItem";
 import { DocumentPreviewModal } from "@/shared/ui/DocumentPreviewModal";
 import { uploadAttachmentAsNote } from "@/shared/lib/upload";
@@ -24,6 +24,15 @@ import {
 import { isRoot } from "@/shared/lib/permissions-client";
 
 // ---- Types ----
+
+type TicketAttachmentForProject = {
+  ticketId: string;
+  fileId: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  createdAt: string;
+};
 
 type ProjectTicket = {
   id: string;
@@ -66,6 +75,8 @@ export type ProjectWithStatus = {
       tickets?: MyTicket[];
     }[];
   }[];
+  /** PR10: 单子附件数据 */
+  ticketAttachments?: TicketAttachmentForProject[];
 };
 
 // ---- Kanban column config ----
@@ -530,6 +541,54 @@ function CodeTab() {
 
 // ---- Docs tab ----
 
+type FileReferenceResponse = {
+  fileAssetId: string;
+  total: number;
+  bySourceType: Record<string, Array<{ sourceId: string; createdAt: string }>>;
+};
+
+type SourceRef = { sourceId: string; createdAt: string };
+
+function SourceRefChip({
+  sourceType,
+  ref,
+}: {
+  sourceType: string;
+  ref: SourceRef;
+}) {
+  const href =
+    sourceType === "TICKET"
+      ? `/tickets/${ref.sourceId}`
+      : sourceType === "TICKET_COMMENT"
+        ? `/tickets/${ref.sourceId}`
+        : sourceType === "PKM_NOTE"
+          ? `/pkm/notes/${ref.sourceId}`
+          : sourceType === "PROJECT"
+            ? `/projects/${ref.sourceId}`
+            : "#";
+
+  const label =
+    sourceType === "TICKET"
+      ? `工单 ${ref.sourceId.slice(0, 8)}…`
+      : sourceType === "TICKET_COMMENT"
+        ? `评论 ${ref.sourceId.slice(0, 8)}…`
+        : sourceType === "PKM_NOTE"
+          ? `笔记 ${ref.sourceId.slice(0, 8)}…`
+          : sourceType === "PROJECT"
+            ? `项目 ${ref.sourceId.slice(0, 8)}…`
+            : ref.sourceId.slice(0, 8);
+
+  return (
+    <Link
+      href={href}
+      className="inline-flex items-center gap-1 rounded border border-ink-200 bg-white px-2 py-1 text-xs text-ink-600 transition hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700"
+    >
+      <span className="font-medium">{sourceType.replace("_", " ")}</span>
+      <span className="max-w-[120px] truncate">{label}</span>
+    </Link>
+  );
+}
+
 function DocsTab({ project }: { project: ProjectWithStatus }) {
   const router = useRouter();
   const [previewFile, setPreviewFile] = useState<PreviewableFile | null>(null);
@@ -539,12 +598,13 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
       noteId: string;
       noteTitle: string;
       updatedAt?: Date;
-      attachment: PkmAttachment;
+      attachment: FileAttachment;
       uploader: string;
     }> = [];
     for (const note of project.pkmNotes ?? []) {
-      const atts = normalizePkmAttachments(note.attachments);
+      const atts = (note.attachments as FileAttachment[] | null | undefined) ?? [];
       for (const att of atts) {
+        if (!att.fileId) continue;
         items.push({
           noteId: note.id,
           noteTitle: note.title,
@@ -556,6 +616,107 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
     }
     return items;
   }, [project.pkmNotes]);
+
+  // PR10: 单子来源附件（直接从 project.ticketAttachments 获取）
+  const ticketAttachments = useMemo(() => {
+    const items: Array<{
+      ticketId: string;
+      attachment: FileAttachment;
+      createdAt?: Date;
+    }> = [];
+    for (const att of project.ticketAttachments ?? []) {
+      items.push({
+        ticketId: att.ticketId,
+        attachment: {
+          fileId: att.fileId,
+          name: att.name,
+          mimeType: att.mimeType,
+          size: att.size,
+        },
+        createdAt: att.createdAt ? new Date(att.createdAt) : undefined,
+      });
+    }
+    return items;
+  }, [project.ticketAttachments]);
+
+  // 按 fileId 缓存引用数据（来自 FileReference）
+  const [refsByFileId, setRefsByFileId] = useState<
+    Record<string, Record<string, SourceRef[]>>
+  >({});
+  const [refsLoading, setRefsLoading] = useState<Set<string>>(new Set());
+
+  // 当 allAttachments 变化时，批量拉取引用数据
+  useEffect(() => {
+    const fileIds = allAttachments
+      .map((item) => item.attachment.fileId)
+      .filter((id): id is string => id !== null);
+
+    // 去重 + 过滤掉已有数据的
+    const newIds = fileIds.filter((id) => !refsByFileId[id] && !refsLoading.has(id));
+    if (newIds.length === 0) return;
+
+    setRefsLoading((prev) => new Set([...prev, ...newIds]));
+
+    Promise.all(
+      newIds.map(async (fileId) => {
+        try {
+          const res = await fetch(`/api/file-assets/${fileId}/references`);
+          if (!res.ok) return { fileId, refs: {} };
+          const data: FileReferenceResponse = await res.json();
+          return { fileId, refs: data.bySourceType };
+        } catch {
+          return { fileId, refs: {} };
+        }
+      }),
+    ).then((results) => {
+      setRefsByFileId((prev) => {
+        const next = { ...prev };
+        for (const { fileId, refs } of results) {
+          next[fileId] = refs;
+        }
+        return next;
+      });
+      setRefsLoading((prev) => {
+        const next = new Set(prev);
+        for (const { fileId } of results) {
+          next.delete(fileId);
+        }
+        return next;
+      });
+    });
+  }, [allAttachments, refsByFileId, refsLoading]);
+
+  // 聚合所有 fileId 对应的 TICKET / TICKET_COMMENT 引用（来源单子）
+  const ticketRefs = useMemo(() => {
+    const result: Array<{ fileId: string; fileName: string | undefined; sourceType: string; sourceId: string; createdAt: string }> = [];
+    for (const item of allAttachments) {
+      const fileId = item.attachment.fileId;
+      if (!fileId) continue;
+      const refs = refsByFileId[fileId];
+      if (!refs) continue;
+      for (const [st, items] of Object.entries(refs)) {
+        if (st === "TICKET" || st === "TICKET_COMMENT") {
+          for (const ref of items) {
+            result.push({ fileId, fileName: item.attachment.name, sourceType: st, ...ref });
+          }
+        }
+      }
+    }
+    return result;
+  }, [allAttachments, refsByFileId]);
+
+  // 构建 fileId -> ticketInfo 映射（用于显示单子来源）
+  const ticketInfoMap = useMemo(() => {
+    const map: Record<string, { ticketNo: string; title: string }> = {};
+    for (const resp of project.responsibilities ?? []) {
+      for (const mod of resp.modules ?? []) {
+        for (const t of mod.tickets ?? []) {
+          map[t.id] = { ticketNo: String(t.ticketNo), title: t.title };
+        }
+      }
+    }
+    return map;
+  }, [project.responsibilities]);
 
   return (
     <>
@@ -572,6 +733,119 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
             accept=".pdf,.doc,.docx,.ppt,.pptx,.xlsx,.xls,.txt,.md,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/markdown,text/plain"
           />
         </div>
+
+        {/* 来源单子（新：FileReference 路径） */}
+        {ticketRefs.length > 0 && (
+          <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+            <h2 className="mb-3 text-base font-semibold text-ink-900">
+              来源单子
+              <span className="ml-2 text-sm font-normal text-ink-400">（{ticketRefs.length} 条）</span>
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {ticketRefs.map((ref, i) => (
+                <SourceRefChip
+                  key={`${ref.fileId}-${ref.sourceType}-${ref.sourceId}-${i}`}
+                  sourceType={ref.sourceType}
+                  ref={ref}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 单子文档（新：PR10 单子附件） */}
+        {ticketAttachments.length > 0 && (
+          <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+            <h2 className="mb-4 text-base font-semibold text-ink-900">
+              单子文档
+              <span className="ml-2 text-sm font-normal text-ink-400">（{ticketAttachments.length} 个文件）</span>
+            </h2>
+            <ul className="space-y-2">
+              {ticketAttachments.map((item, i) => {
+                const ticketInfo = ticketInfoMap[item.ticketId];
+                const att = item.attachment;
+                const mimeType = att.mimeType ?? "application/octet-stream";
+                const isImage = mimeType.startsWith("image/");
+                const canPreview = isImage || mimeType === "application/pdf" || mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || mimeType === "text/markdown";
+                const fileUrl = `/api/upload/${att.fileId}`;
+                const size = att.size ?? 0;
+                const sizeLabel =
+                  size < 1024
+                    ? `${size} B`
+                    : size < 1024 * 1024
+                      ? `${(size / 1024).toFixed(1)} KB`
+                      : `${(size / 1024 / 1024).toFixed(1)} MB`;
+
+                return (
+                  <li key={`${item.ticketId}-${att.fileId}-${i}`} className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2 text-xs text-ink-400">
+                      来源单子：
+                      {ticketInfo ? (
+                        <Link
+                          href={`/tickets/${item.ticketId}`}
+                          className="font-medium text-ink-600 transition hover:text-brand-600 hover:underline"
+                        >
+                          #{ticketInfo.ticketNo} {ticketInfo.title}
+                        </Link>
+                      ) : (
+                        <span className="truncate">{item.ticketId.slice(0, 8)}…</span>
+                      )}
+                      {item.createdAt && (
+                        <> · {item.createdAt.toLocaleDateString("zh-CN")}</>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 rounded-lg border border-ink-100 bg-ink-50 px-3 py-2">
+                      {isImage ? (
+                        <img
+                          src={fileUrl}
+                          alt={att.name}
+                          className="h-8 w-8 shrink-0 rounded object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-ink-200">
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            className="text-ink-500"
+                          >
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14,2 14,8 20,8" />
+                          </svg>
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-ink-800">{att.name}</p>
+                        <p className="text-xs text-ink-400">{sizeLabel}</p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {canPreview && (
+                          <button
+                            type="button"
+                            onClick={() => setPreviewFile({ name: att.name || "document", url: fileUrl, mimeType })}
+                            className="rounded-lg border border-ink-200 bg-white px-2 py-1 text-xs text-ink-600 hover:bg-brand-50 hover:border-brand-300 hover:text-brand-700"
+                          >
+                            预览
+                          </button>
+                        )}
+                        <a
+                          href={fileUrl}
+                          download={att.name}
+                          className="rounded-lg border border-ink-200 bg-white px-2.5 py-1 text-xs text-ink-600 hover:bg-ink-100"
+                        >
+                          下载
+                        </a>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
 
         {/* Attachment list */}
         <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
@@ -734,6 +1008,7 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
   const router = useRouter();
   const { toast } = useToast();
 
+  const [mounted, setMounted] = useState(false);
   const tabParam = searchParams.get("tab") as TabKey | null;
   const validTabs: TabKey[] = ["overview", "tasks", "dispatch", "code", "docs", "members", "settings"];
   const [activeTab, setActiveTab] = useState<TabKey>(
@@ -741,12 +1016,14 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
   );
   const [overviewEditing, setOverviewEditing] = useState(false);
 
+  useEffect(() => { setMounted(true); }, []);
+
   const currentUserId = session?.user?.id ?? "";
   const userIsRoot = isRoot(session?.user?.role);
   const isOwner = project.members?.some(
     (m) => m.user.id === currentUserId && m.role === "OWNER"
   ) ?? false;
-  const canEditProject = userIsRoot || isOwner;
+  const canEditProject = mounted && (userIsRoot || isOwner);
 
   const taskCounts = useMemo(() => computeTaskCounts({ project }), [project]);
 

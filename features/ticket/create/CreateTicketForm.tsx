@@ -3,7 +3,9 @@
 import { useRef, useState } from "react";
 import { AssigneePicker } from "@/shared/ui/AssigneePicker";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
-import { composeImageMarkdown, extractInlineImages } from "@/shared/lib/pkm";
+import { AttachmentEditor, type PreviewableFile } from "@/shared/ui/AttachmentEditor";
+import { DocumentPreviewModal } from "@/shared/ui/DocumentPreviewModal";
+import { composeImageMarkdown, extractInlineImages, type FileAttachment } from "@/shared/lib/pkm";
 import { uploadImage } from "@/shared/lib/upload";
 import { computeDefaultDeadline } from "@/shared/lib/ticket-deadline";
 import {
@@ -139,6 +141,8 @@ export function CreateTicketForm({
     initialDescriptionState.images
   );
   const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
+  const [attachments, setAttachments] = useState<FileAttachment[]>([]);
+  const [previewFile, setPreviewFile] = useState<PreviewableFile | null>(null);
 
   // Deadline state
   const [deadline, setDeadline] = useState(() => {
@@ -269,6 +273,22 @@ export function CreateTicketForm({
     });
   }
 
+  function handleAttachmentChange(next: FileAttachment[]) {
+    setAttachments(next);
+  }
+
+  function handleImageSelect(file: File) {
+    insertImage(file);
+  }
+
+  function handleAttachmentError(msg: string) {
+    onMessage?.(msg);
+  }
+
+  function handleAttachmentPreview(file: PreviewableFile) {
+    setPreviewFile(file);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
@@ -358,6 +378,7 @@ export function CreateTicketForm({
         assigneeIds: effectiveProgramAssigneeIds,
         deadline: deadline || null,
         priority,
+        attachments,
       };
 
       let result;
@@ -404,6 +425,7 @@ export function CreateTicketForm({
       setTitle("");
       setDescription("");
       setDescriptionImages([]);
+      setAttachments([]);
       setDeadline(formatDateForInput(computeDefaultDeadline(new Date())));
       setPriority(2);
       onMessage?.("单子已创建");
@@ -433,6 +455,9 @@ export function CreateTicketForm({
             a.click();
           }}
         />
+      )}
+      {previewFile && (
+        <DocumentPreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
       )}
 
       <form onSubmit={handleSubmit} className={className}>
@@ -741,6 +766,15 @@ export function CreateTicketForm({
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21,15 16,10 5,21" /></svg>
                 上传图片
               </button>
+
+              <AttachmentEditor
+                attachments={attachments}
+                onChange={handleAttachmentChange}
+                onImageSelect={handleImageSelect}
+                onError={handleAttachmentError}
+                renderPreview={handleAttachmentPreview}
+                compact
+              />
             </div>
             <input
               ref={imageInputRef}
