@@ -109,12 +109,78 @@ export async function GET(
             changedBy: { select: assigneeUserSelect },
           },
         },
+        comments: {
+          orderBy: { createdAt: "asc" },
+          take: 200,
+          select: { id: true },
+        },
       },
     });
 
     if (!ticket) {
       return NextResponse.json({ error: "ticket not found" }, { status: 404 });
     }
+
+    const commentIds = ticket.comments.map((c) => c.id);
+
+    // Query all FileReferences for this ticket's comments + the ticket itself
+    const [commentRefs, ticketRefs] = await Promise.all([
+      commentIds.length > 0
+        ? prisma.fileReference.findMany({
+            where: {
+              sourceType: "TICKET_COMMENT",
+              sourceId: { in: commentIds },
+              deletedAt: null,
+            },
+            include: {
+              fileAsset: {
+                select: {
+                  id: true,
+                  originalName: true,
+                  mimeType: true,
+                  size: true,
+                  hash: true,
+                },
+              },
+            },
+          })
+        : [],
+      prisma.fileReference.findMany({
+        where: {
+          sourceType: "TICKET",
+          sourceId: ticket.id,
+          deletedAt: null,
+        },
+        include: {
+          fileAsset: {
+            select: {
+              id: true,
+              originalName: true,
+              mimeType: true,
+              size: true,
+              hash: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    // Merge and dedupe by fileId (keep first occurrence)
+    const allRefs = [...ticketRefs];
+    for (const ref of commentRefs) {
+      if (!allRefs.find((r) => r.fileAssetId === ref.fileAssetId)) {
+        allRefs.push(ref);
+      }
+    }
+
+    const allAttachments = allRefs.map((r) => ({
+      fileId: r.fileAssetId,
+      name: r.fileAsset.originalName,
+      mimeType: r.fileAsset.mimeType,
+      size: r.fileAsset.size,
+      sourceType: r.sourceType,
+      sourceId: r.sourceId,
+    }));
 
     const assigneeHistory = await enrichAssigneeHistory(ticket.assigneeHistory);
 
@@ -139,6 +205,7 @@ export async function GET(
         pushSources: ticket.pushSources,
         bugSources: ticket.bugSources,
         moderationLogs,
+        allAttachments,
       },
     });
   } catch (error) {

@@ -39,7 +39,7 @@ model User {
   statusHistoryChanges   TicketStatusHistory[]   @relation("StatusHistoryActor")
   userOnProjects         UserOnProject[]
   responsibilities       UserResponsibility[]
-  uploadedFiles          UploadedFile[]
+  uploadedFiles          FileAsset[]
   weeklyReports          WeeklyReport[]
 
   @@schema("pm")
@@ -137,28 +137,34 @@ model SearchDocument {
   embedding  Unsupported("vector")?
   chunkIndex Int                      @default(0)
   project    Project?                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// 结构化字段：关联 Document.id（而不是 FileAsset.id）
+  /// PR11 清理旧 metadata.fileAssetId
+  documentId String?                  @unique
+  document   Document?                @relation(fields: [documentId], references: [id], onDelete: SetNull)
 
   @@unique([sourceType, sourceId, chunkIndex])
   @@index([sourceType, updatedAt(sort: Desc)])
   @@index([projectId, updatedAt(sort: Desc)])
+  @@index([documentId])
   @@schema("pm")
 }
 
 model IndexJob {
-  id           String         @id @default(cuid())
-  noteId       String
-  status       IndexJobStatus @default(PENDING)
-  attempt      Int            @default(0)
-  maxAttempts  Int            @default(5)
+  id           String              @id @default(cuid())
+  noteId       String?
+  targetType   IndexJobTargetType
+  targetId     String
+  status       IndexJobStatus      @default(PENDING)
+  attempt      Int                 @default(0)
+  maxAttempts  Int                 @default(5)
   error        String?
   errorSources Json?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
   startedAt    DateTime?
-  note         PkmNote        @relation(fields: [noteId], references: [id], onDelete: Cascade)
 
-  @@index([status, createdAt])
-  @@index([noteId, status])
+  @@index([targetType, targetId])
+  @@index([status, createdAt(sort: Desc)])
   @@schema("pm")
 }
 
@@ -173,7 +179,6 @@ model PkmNote {
   updatedAt   DateTime   @updatedAt
   attachments Json?
   isPublic    Boolean    @default(false)
-  indexJobs   IndexJob[]
   project     Project?   @relation(fields: [projectId], references: [id])
   user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -270,6 +275,8 @@ model TicketComment {
   content   String
   /// 用户在评论中用 @ 提到的人(userId 列表)。用于:1)发提及通知;2)防 XSS 渲染只允许在这里列出的用户
   mentionedUserIds String[] @default([])
+  /// 评论附件（PR10 FileAttachment 格式），Json 类型
+  attachments    Json     @default("[]")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
@@ -548,17 +555,74 @@ model WeeklyReportProject {
 
 /// 用户上传的图片/文件二进制，存 DB 不落本地文件系统。
 /// URL 由 `/api/upload/[id]` 代理返回；这样多实例部署不需要共享磁盘。
-model UploadedFile {
-  id           String   @id @default(cuid())
+model FileAsset {
+  id           String         @id @default(cuid())
   uploaderId   String
   originalName String
   mimeType     String
   size         Int
   bytes        Bytes
-  createdAt    DateTime @default(now())
-  uploader     User     @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  /// sha256 hex (64 字符)，服务端权威计算，客户端 hash 仅作 hint
+  hash         String?
+  status       FileAssetStatus @default(ACTIVE)
+  createdAt    DateTime       @default(now())
+  uploader     User           @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  /// Document 是 FileAsset 的派生（1:1），FileAsset 删除时级联删除 Document
+  document     Document?
+  /// FileReference 反向引用：FileAsset 被哪些业务实体引用
+  references   FileReference[]
 
+  @@unique([hash, size])
   @@index([uploaderId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("UploadedFile")
+  @@schema("pm")
+}
+
+/// 文件引用关系表（唯一权威来源）。
+/// 所有"业务实体引用了哪些文件"的查询都从这张表读。
+/// 业务实体的 attachments Json 仍保留作为前端序列化快照（向前兼容），PR11 切换读路径。
+model FileReference {
+  id          String                  @id @default(cuid())
+  fileAssetId String
+  sourceType  FileReferenceSourceType
+  sourceId    String
+  /// 软删除（PR10 Schema 先预留字段，hook 留 PR11 实现）
+  deletedAt   DateTime?
+  createdAt   DateTime               @default(now())
+
+  fileAsset FileAsset @relation(fields: [fileAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([fileAssetId, sourceType, sourceId])
+  @@index([sourceType, sourceId])
+  @@index([fileAssetId])
+  @@index([fileAssetId, deletedAt])
+  @@schema("pm")
+}
+
+/// 文档处理层：FileAsset 的派生（1:1），存文本提取/chunk/embeddings 结果
+model Document {
+  id            String         @id @default(cuid())
+  /// 关联 FileAsset（1:1）。FileAsset 删除时级联删除 Document。
+  fileAssetId   String         @unique
+  fileAsset     FileAsset      @relation(fields: [fileAssetId], references: [id], onDelete: Cascade)
+  status        DocumentStatus @default(PENDING)
+  /// 版本号，PR11 实现重处理时递增
+  version       Int            @default(1)
+  /// chunk 缓存（量小保留，PR11 可剥）
+  extractedText String?
+  pageCount     Int?
+  /// OCR / PDF 解析的扩展信息
+  metadata      Json?
+  /// 失败时的错误信息
+  error         Json?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  /// 反向 relation：SearchDocument.documentId → Document
+  searchDocuments SearchDocument[]
+
+  @@index([status, updatedAt(sort: Desc)])
+  @@index([fileAssetId])
   @@schema("pm")
 }
 
@@ -625,7 +689,7 @@ enum NotificationType {
 enum SearchDocumentSourceType {
   TICKET
   COMMIT
-  KNOWLEDGE_DOC
+  DOCUMENT
   PKM_NOTE
 
   @@schema("pm")
@@ -636,6 +700,39 @@ enum IndexJobStatus {
   PROCESSING
   COMPLETED
   FAILED
+
+  @@schema("pm")
+}
+
+enum IndexJobTargetType {
+  PKM_NOTE
+  FILE_ASSET
+  TICKET
+
+  @@schema("pm")
+}
+
+enum FileAssetStatus {
+  ACTIVE
+  DELETED
+
+  @@schema("pm")
+}
+
+enum DocumentStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+
+  @@schema("pm")
+}
+
+enum FileReferenceSourceType {
+  PKM_NOTE
+  TICKET
+  TICKET_COMMENT
+  PROJECT
 
   @@schema("pm")
 }

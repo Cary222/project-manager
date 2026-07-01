@@ -7,7 +7,7 @@ import { WeeklyDraftPanel } from "./WeeklyDraftPanel";
 import type { WeeklyDraftSummary } from "@/features/reports/weekly-reports/lib/draft-summary";
 import type { WeeklyReportWithProjects } from "@/features/weekly-reports/lib/weekly-report-store";
 import { AttachmentEditor } from "@/shared/ui/AttachmentEditor";
-import { normalizePkmAttachments, type PkmAttachment } from "@/shared/lib/pkm";
+import type { FileAttachment } from "@/shared/lib/pkm";
 
 type ProjectOption = { id: string; name: string };
 
@@ -52,8 +52,8 @@ export function WeeklyReportForm({
   const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(
     new Set(initialProjectIds ?? [])
   );
-  const [attachments, setAttachments] = useState<PkmAttachment[]>(() =>
-    normalizePkmAttachments(initialReport?.attachments)
+  const [attachments, setAttachments] = useState<FileAttachment[]>(
+    () => (initialReport?.attachments as FileAttachment[] | null | undefined) ?? []
   );
   const [loading, setLoading] = useState(false);
   const [projectsLoading, setProjectsLoading] = useState(true);

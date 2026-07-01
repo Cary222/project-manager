@@ -3,9 +3,14 @@
  *
  * 职责：
  *   1. 从 pm.IndexJob 表轮询 PENDING 状态的 job
- *   2. 调用 syncPkmNoteSearchDocumentFull(noteId) 执行完整索引（解析附件 + 生成向量）
+ *   2. 根据 targetType 分派到对应的处理函数
  *   3. 处理失败时按指数退避重试（1s/5s/30s/2min/10min），最多 5 次
  *   4. 启动时清理卡在 PROCESSING 状态的 stale job（> 5 分钟）
+ *
+ * targetType 处理：
+ *   - PKM_NOTE: 调用 syncPkmNoteSearchDocumentFull(noteId) 完整索引
+ *   - FILE_ASSET: 占位（Feature 2 实现）
+ *   - TICKET: 占位（Feature 2 实现）
  *
  * 启动：
  *   npm run worker               # 开发
@@ -18,6 +23,7 @@
 import { loadEnvConfig } from "@next/env";
 import { prisma } from "@/shared/db/client";
 import { syncPkmNoteSearchDocumentFull } from "@/shared/lib/search";
+import { processFileAssetJob } from "@/shared/lib/document";
 import { claimNextJob, getBackoffDelayMs, recoverStaleJobs } from "@/shared/lib/jobs";
 
 loadEnvConfig(process.cwd());
@@ -30,21 +36,49 @@ async function processNextJob(): Promise<boolean> {
   if (!job) return false;
 
   console.log(
-    `${LOG_PREFIX} job ${job.id} note=${job.noteId} attempt=${job.attempt + 1}/${job.maxAttempts}`,
+    `${LOG_PREFIX} job ${job.id} target=${job.targetType}:${job.targetId} attempt=${job.attempt + 1}/${job.maxAttempts}`,
   );
 
   try {
-    const chunks = await syncPkmNoteSearchDocumentFull(job.noteId);
-    await prisma.indexJob.update({
-      where: { id: job.id },
-      data: {
-        status: "COMPLETED",
-        error: null,
-      },
-    });
-    console.log(
-      `${LOG_PREFIX} job ${job.id} completed (${chunks?.length ?? 0} chunks indexed)`,
-    );
+    if (job.targetType === "PKM_NOTE") {
+      // 向后兼容：优先用 noteId（老数据），没有则用 targetId
+      const noteId = job.noteId ?? job.targetId;
+      const chunks = await syncPkmNoteSearchDocumentFull(noteId);
+      await prisma.indexJob.update({
+        where: { id: job.id },
+        data: {
+          status: "COMPLETED",
+          error: null,
+        },
+      });
+      console.log(
+        `${LOG_PREFIX} job ${job.id} completed (${chunks?.length ?? 0} chunks indexed)`,
+      );
+    } else if (job.targetType === "FILE_ASSET") {
+      // Feature 2: process FileAsset → Document → SearchDocument
+      await processFileAssetJob(job.targetId);
+      await prisma.indexJob.update({
+        where: { id: job.id },
+        data: {
+          status: "COMPLETED",
+          error: null,
+        },
+      });
+      console.log(
+        `${LOG_PREFIX} job ${job.id} FILE_ASSET indexing completed`,
+      );
+    } else if (job.targetType === "TICKET") {
+      // Feature 2 实现 ticket indexing
+      console.warn(`[worker] job ${job.id} TICKET indexing not implemented yet`);
+      await prisma.indexJob.update({
+        where: { id: job.id },
+        data: {
+          status: "COMPLETED",
+          error: "not_implemented",
+        },
+      });
+    }
+
     return true;
   } catch (error) {
     await handleJobError(job, error);
@@ -53,7 +87,7 @@ async function processNextJob(): Promise<boolean> {
 }
 
 async function handleJobError(
-  job: { id: string; noteId: string; attempt: number; maxAttempts: number },
+  job: { id: string; targetType: string; targetId: string; attempt: number; maxAttempts: number },
   error: unknown,
 ): Promise<void> {
   const msg = error instanceof Error ? error.message : String(error);
@@ -69,14 +103,14 @@ async function handleJobError(
       },
     });
     console.error(
-      `${LOG_PREFIX} job ${job.id} FAILED after ${job.maxAttempts} attempts: ${msg}`,
+      `${LOG_PREFIX} job ${job.id} (${job.targetType}:${job.targetId}) FAILED after ${job.maxAttempts} attempts: ${msg}`,
     );
     return;
   }
 
   const delayMs = getBackoffDelayMs(nextAttempt);
   console.warn(
-    `${LOG_PREFIX} job ${job.id} attempt ${nextAttempt}/${job.maxAttempts} failed: ${msg}. Retry in ${delayMs}ms`,
+    `${LOG_PREFIX} job ${job.id} (${job.targetType}:${job.targetId}) attempt ${nextAttempt}/${job.maxAttempts} failed: ${msg}. Retry in ${delayMs}ms`,
   );
 
   await prisma.indexJob.update({

@@ -1,36 +1,25 @@
 "use client";
 
-import { useState } from "react";
-import { type PkmAttachment } from "@/shared/lib/pkm";
-import { AttachmentItem, type PreviewableFile } from "@/shared/ui/AttachmentItem";
-import { DocumentPreviewModal } from "@/shared/ui/DocumentPreviewModal";
+import { AttachmentItem } from "@/shared/ui/AttachmentItem";
+import type { FileAttachment } from "@/shared/lib/pkm";
 
-interface Props {
-  attachments: PkmAttachment[];
-}
+type NoteAttachmentsProps = {
+  attachments: FileAttachment[];
+};
 
-export function NoteAttachments({ attachments }: Props) {
-  const [previewFile, setPreviewFile] = useState<PreviewableFile | null>(null);
+export function NoteAttachments({ attachments }: NoteAttachmentsProps) {
+  if (!attachments || attachments.length === 0) {
+    return null;
+  }
 
   return (
-    <>
-      {previewFile && (
-        <DocumentPreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
-      )}
-      {attachments.length > 0 && (
-        <div className="mt-6 border-t border-ink-100 pt-4">
-          <h2 className="text-sm font-medium text-ink-800">附件</h2>
-          <div className="mt-3 space-y-2">
-            {attachments.map((attachment, index) => (
-              <AttachmentItem
-                key={`${attachment.name}-${index}`}
-                attachment={attachment}
-                onPreview={setPreviewFile}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </>
+    <div className="mt-5 rounded-lg border border-ink-200 bg-ink-50/60 p-4">
+      <p className="mb-3 text-sm font-medium text-ink-700">附件</p>
+      <ul className="space-y-2">
+        {attachments.map((att, i) => (
+          <AttachmentItem key={`${att.fileId}-${i}`} attachment={att} />
+        ))}
+      </ul>
+    </div>
   );
 }

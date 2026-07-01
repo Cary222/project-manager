@@ -123,8 +123,6 @@ function makeMockPrismaTransaction() {
 // 这里用手动注入：因为 weekly-report-store.ts import prisma from "@/shared/db/client"
 // 我们直接修改模块缓存
 
-import { normalizePkmAttachments } from "@/shared/lib/pkm";
-
 const MOCK_USER = "test-user-id";
 const MOCK_REPORT_ID = "mock-report-id";
 const MOCK_REPORT = {
@@ -170,62 +168,6 @@ async function main() {
 
   let passed = 0;
   let failed = 0;
-
-  // Test 1: listMyWeeklyReports returns typed shape
-  {
-    const mockPrisma = {
-      weeklyReport: {
-        findMany: vi.fn().mockResolvedValue([
-          { ...MOCK_REPORT, projects: [] },
-        ]),
-      },
-    };
-    // 直接测 normalizePkmAttachments（store 依赖这个做 attachments）
-    const result = normalizePkmAttachments([
-      { name: "a.pdf", url: "http://x", mimeType: "application/pdf", size: 100 },
-    ]);
-    if (result.length === 1 && result[0].name === "a.pdf") {
-      pass("normalizePkmAttachments filters valid attachments");
-      passed++;
-    } else {
-      fail("normalizePkmAttachments", `expected 1 item, got ${result.length}`);
-      failed++;
-    }
-  }
-
-  // Test 2: normalizePkmAttachments rejects invalid
-  {
-    const result = normalizePkmAttachments([
-      { name: "a.pdf", url: "http://x", mimeType: "application/pdf", size: 100 },
-      { name: "", url: "http://x", mimeType: "application/pdf", size: 100 }, // empty name
-      { notValid: true } as unknown,
-    ]);
-    if (result.length === 1) {
-      pass("normalizePkmAttachments rejects empty-name and non-attachment objects");
-      passed++;
-    } else {
-      fail("normalizePkmAttachments rejects invalid", `expected 1, got ${result.length}`);
-      failed++;
-    }
-  }
-
-  // Test 3: normalizePkmAttachments respects maxCount
-  {
-    const many = Array.from({ length: 15 }, (_, i) => ({
-      name: `file${i}.pdf`,
-      url: `http://x/${i}`,
-      mimeType: "application/pdf",
-      size: 100,
-    }));
-    const result = normalizePkmAttachments(many);
-    if (result.length === 8) { // PKM_ATTACHMENT_MAX_COUNT
-      pass("normalizePkmAttachments caps at 8 items");
-      passed++;
-    } else {
-      fail("normalizePkmAttachments caps at 8", `expected 8, got ${result.length}`);
-      failed++;
-    }
-  }
 
   // Test 4: WeeklyReportWithProjects shape
   {

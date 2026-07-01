@@ -4,7 +4,7 @@ import { AppShell } from "@/shared/ui/AppShell";
 import { MarkdownContent } from "@/shared/ui/MarkdownContent";
 import { IconArrowLeft, IconKnowledge, IconTag } from "@/shared/ui/icons";
 import { prisma } from "@/shared/db/client";
-import { normalizePkmAttachments } from "@/shared/lib/pkm";
+import { type FileAttachment } from "@/shared/lib/pkm";
 import { requireSession } from "@/shared/lib/permissions";
 import { NoteAttachments } from "@/shared/ui/NoteAttachments";
 import { NoteDetailRecord } from "./NoteDetailRecord";
@@ -50,8 +50,34 @@ export default async function PkmNoteDetailPage({ params }: Params) {
     notFound();
   }
 
+  // PR10: 从 FileReference JOIN FileAsset 获取附件（权威数据源）
+  const fileRefs = await prisma.fileReference.findMany({
+    where: {
+      sourceType: "PKM_NOTE",
+      sourceId: id,
+      deletedAt: null,
+    },
+    include: {
+      fileAsset: {
+        select: {
+          id: true,
+          originalName: true,
+          mimeType: true,
+          size: true,
+        },
+      },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const attachments: FileAttachment[] = fileRefs.map((ref) => ({
+    fileId: ref.fileAssetId,
+    name: ref.fileAsset.originalName,
+    mimeType: ref.fileAsset.mimeType,
+    size: ref.fileAsset.size,
+  }));
+
   const authorName = note.user.name || note.user.email;
-  const attachments = normalizePkmAttachments(note.attachments);
 
   return (
     <AppShell

@@ -13,7 +13,6 @@ import { loadEnvConfig } from "@next/env";
 import { prisma } from "@/shared/db/client";
 import { extractAttachmentTexts } from "@/shared/lib/search";
 import { cleanExtractedTextForEmbedding } from "@/shared/lib/markdown";
-import { normalizePkmAttachments } from "@/shared/lib/pkm";
 
 loadEnvConfig(process.cwd());
 
@@ -45,9 +44,10 @@ async function main() {
 
   for (const note of notesWithAttachments) {
     console.log(`--- 笔记: ${note.title} (${note.id}) ---`);
-    const attachments = normalizePkmAttachments(note.attachments);
+    const attachments = note.attachments as import("@/shared/lib/pkm").FileAttachment[] ?? [];
 
     for (const att of attachments) {
+      if (!att.fileId) continue; // skip legacy format without fileId
       process.stdout.write(`  [${att.name}] 提取中... `);
 
       // 调客户端提取

@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { SearchDocumentSourceType as PrismaSearchDocumentSourceType } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
+import { enqueueIndexJobByNoteId, type IndexJobTarget } from "@/shared/lib/jobs";
 import {
   buildEmbeddingHash,
   buildEmbeddingInput,
@@ -11,7 +12,6 @@ import {
 import type {
   SearchDocumentCommitRecord,
   SearchDocumentMetadata,
-  SearchDocumentPkmAttachmentRecord,
   SearchDocumentPkmNoteRecord,
   SearchDocumentTicketRecord,
   SearchResponse,
@@ -21,12 +21,9 @@ import type {
   SearchableRecord,
 } from "@/shared/lib/search-types";
 import { SEARCH_DOCUMENT_SOURCE_TYPES } from "@/shared/lib/search-types";
-import {
-  normalizePkmAttachments,
-  PKM_ATTACHMENT_MAX_SIZE,
-  type PkmAttachment,
-} from "@/shared/lib/pkm";
+import { PKM_ATTACHMENT_MAX_SIZE, type FileAttachment } from "@/shared/lib/pkm";
 import { cleanExtractedTextForEmbedding, cleanMarkdownForEmbedding, formatAttachmentLabel } from "@/shared/lib/markdown";
+import { splitIntoChunks, CHUNK_DEFAULTS } from "@/shared/lib/chunk";
 
 const SEARCH_LIMIT_DEFAULT = 8;
 const SEARCH_LIMIT_MAX = 20;
@@ -216,29 +213,8 @@ function hasDirectQueryMatch(title: string, content: string, query: string) {
   return title.toLowerCase().includes(lowerQuery) || content.toLowerCase().includes(lowerQuery);
 }
 
-const CHUNK_SIZE = 1500;
-const CHUNK_OVERLAP = 200;
-
-export function splitIntoChunks(
-  text: string,
-  maxChars = CHUNK_SIZE,
-  overlapChars = CHUNK_OVERLAP,
-): string[] {
-  if (text.length <= maxChars) return [text];
-  overlapChars = Math.min(overlapChars, maxChars - 1);
-
-  const chunks: string[] = [];
-  let start = 0;
-
-  while (start < text.length) {
-    const end = Math.min(start + maxChars, text.length);
-    chunks.push(text.slice(start, end));
-    if (end === text.length) break;
-    start = end - overlapChars;
-  }
-
-  return chunks;
-}
+// 从 chunk 工具模块 re-export（向后兼容）
+export { splitIntoChunks, CHUNK_DEFAULTS } from "./chunk"
 
 function buildMetadataWithEmbeddingHash(record: SearchableRecord, embeddingHash: string) {
   return {
@@ -416,8 +392,12 @@ function buildSearchablePkmNoteDocumentContent(
 export async function buildSearchablePkmNoteChunks(
   note: SearchDocumentPkmNoteRecord,
   attachmentTexts: Map<string, string> = new Map(),
+  noteAttachments?: FileAttachment[],
 ): Promise<SearchableRecord[]> {
-  const attachments = normalizePkmAttachments(note.attachments);
+  // noteAttachments: explicitly pass FileAttachment[] from caller (syncPkmNoteSearchDocument).
+  // Fallback reads from note.attachments for callers that don't pre-process attachments.
+  const attachments = noteAttachments
+    ?? ((note.attachments as unknown as FileAttachment[] | null | undefined) ?? []);
 
   const rawChunks: string[] = [];
 
@@ -427,7 +407,9 @@ export async function buildSearchablePkmNoteChunks(
   }
 
   for (const attachment of attachments) {
-    const text = attachmentTexts.get(attachment.name);
+    const name = attachment.name;
+    if (!name) continue;
+    const text = attachmentTexts.get(name);
     if (!text) continue;
     const cleaned = cleanExtractedTextForEmbedding(text);
     if (!cleaned) continue;
@@ -436,7 +418,7 @@ export async function buildSearchablePkmNoteChunks(
 
   const totalChunks = rawChunks.length;
   const attachmentIndexedCount = attachments.reduce(
-    (count, att) => count + (attachmentTexts.get(att.name) ? 1 : 0),
+    (count, att) => count + (att.name ? (attachmentTexts.has(att.name) ? 1 : 0) : 0),
     0,
   );
   return rawChunks.map((content, idx) =>
@@ -461,15 +443,17 @@ const PAGE_BASED_MIME_TYPES = new Set([
 const PAGE_CHUNK_SIZE = 8;
 const PAGE_CHUNK_MAX_ROUNDS = 6;
 
-function isPageBasedAttachment(attachment: PkmAttachment): boolean {
-  return PAGE_BASED_MIME_TYPES.has(attachment.mimeType);
+function isPageBasedAttachment(attachment: FileAttachment): boolean {
+  const mime = attachment.mimeType ?? "";
+  return PAGE_BASED_MIME_TYPES.has(mime);
 }
 
 export async function extractAttachmentText(
-  attachment: PkmAttachment,
+  attachment: FileAttachment,
 ): Promise<AttachmentExtraction> {
-  if (attachment.size > PKM_ATTACHMENT_MAX_SIZE) {
-    return { name: attachment.name, text: "", source: "skipped_too_large" };
+  const size = attachment.size ?? 0;
+  if (size > PKM_ATTACHMENT_MAX_SIZE) {
+    return { name: attachment.name ?? "unknown", text: "", source: "skipped_too_large" };
   }
 
   if (!isPageBasedAttachment(attachment)) {
@@ -505,7 +489,7 @@ export async function extractAttachmentText(
 
   const joined = collected.join("\n\n");
   return {
-    name: attachment.name,
+    name: attachment.name ?? "unknown",
     text: joined.length > MAX_EXTRACTED_CHARS * 4
       ? `${joined.slice(0, MAX_EXTRACTED_CHARS * 4).trimEnd()}…`
       : joined,
@@ -514,9 +498,15 @@ export async function extractAttachmentText(
 }
 
 async function extractAttachmentTextSingle(
-  attachment: PkmAttachment,
+  attachment: FileAttachment,
   options: { pageFrom?: number; pageTo?: number } = {},
 ): Promise<AttachmentExtraction> {
+  const name = attachment.name ?? "unknown";
+  const mimeType = attachment.mimeType ?? "application/octet-stream";
+  const size = attachment.size ?? 0;
+  // PR10: URL is now /api/upload/<fileId> proxy
+  const url = `/api/upload/${attachment.fileId}`;
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), EXTRACT_TEXT_TIMEOUT_MS);
 
@@ -526,10 +516,10 @@ async function extractAttachmentTextSingle(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        url: attachment.url,
-        mimeType: attachment.mimeType,
-        name: attachment.name,
-        size: attachment.size,
+        url,
+        mimeType,
+        name,
+        size,
         page_from: options.pageFrom,
         page_to: options.pageTo,
       }),
@@ -537,7 +527,7 @@ async function extractAttachmentTextSingle(
     });
 
     if (!response.ok) {
-      return { name: attachment.name, text: "", source: `http_${response.status}` };
+      return { name, text: "", source: `http_${response.status}` };
     }
 
     const payload = (await response.json()) as {
@@ -550,7 +540,7 @@ async function extractAttachmentTextSingle(
       ? `${rawText.slice(0, MAX_EXTRACTED_CHARS).trimEnd()}…`
       : rawText;
     return {
-      name: attachment.name,
+      name,
       text,
       source: typeof payload.source === "string" ? payload.source : "unknown",
     };
@@ -558,14 +548,14 @@ async function extractAttachmentTextSingle(
     const source = error instanceof Error && error.name === "AbortError"
       ? "timeout"
       : "error";
-    return { name: attachment.name, text: "", source };
+    return { name, text: "", source };
   } finally {
     clearTimeout(timeout);
   }
 }
 
 export async function extractAttachmentTexts(
-  attachments: PkmAttachment[],
+  attachments: FileAttachment[],
 ): Promise<Map<string, string>> {
   if (attachments.length === 0) return new Map();
 
@@ -720,7 +710,17 @@ export async function syncPkmNoteSearchDocument(
   const isAsync = options.async !== false;
   const note = await prisma.pkmNote.findUnique({
     where: { id: noteId },
-    include: {
+    select: {
+      id: true,
+      userId: true,
+      projectId: true,
+      title: true,
+      content: true,
+      tags: true,
+      attachments: true,
+      isPublic: true,
+      createdAt: true,
+      updatedAt: true,
       user: { select: { id: true, name: true, email: true } },
       project: { select: { id: true, name: true } },
     },
@@ -736,7 +736,7 @@ export async function syncPkmNoteSearchDocument(
     return null;
   }
 
-  const attachments = normalizePkmAttachments(note.attachments);
+  const attachments = (note.attachments as FileAttachment[] | null | undefined) ?? [];
 
   // 异步路径（默认，API 路由用）：跳过附件解析，只写 content 入库，入队 Worker 处理
   // 同步路径（CLI backfill/reindex/Worker 用）：解析附件 + 生成向量，完整索引
@@ -753,10 +753,10 @@ export async function syncPkmNoteSearchDocument(
     },
   });
 
-  const chunks = await buildSearchablePkmNoteChunks({ ...note, attachments }, attachmentTexts);
+  const chunks = await buildSearchablePkmNoteChunks(note as unknown as SearchDocumentPkmNoteRecord, attachmentTexts, attachments);
 
   if (chunks.length === 0) {
-    if (isAsync) await enqueueIndexJob(noteId);
+    if (isAsync) await enqueueIndexJobByNoteId(noteId);
     return [];
   }
 
@@ -765,7 +765,7 @@ export async function syncPkmNoteSearchDocument(
     const savedChunks = await Promise.all(
       chunks.map((chunk, idx) => upsertSearchDocument(chunk, idx, true)),
     );
-    await enqueueIndexJob(noteId);
+    await enqueueIndexJobByNoteId(noteId);
     return savedChunks;
   }
 
@@ -793,18 +793,32 @@ export async function syncPkmNoteSearchDocumentFull(noteId: string): ReturnType<
   return syncPkmNoteSearchDocument(noteId, { async: false });
 }
 
-export async function enqueueIndexJob(noteId: string): Promise<void> {
-  await prisma.indexJob.deleteMany({
-    where: { noteId, status: "PENDING" },
-  });
-  await prisma.indexJob.create({
-    data: { noteId, status: "PENDING", attempt: 0 },
-  });
-  console.log(`[search:job] enqueued index job for note ${noteId}`);
+// Re-export enqueueIndexJobByNoteId for callers that import from search.ts
+export { enqueueIndexJobByNoteId } from "@/shared/lib/jobs";
+
+/**
+ * enqueueIndexJob — backward-compatible overload that accepts string noteId.
+ * New callers: use enqueueIndexJob({ targetType: "PKM_NOTE", targetId: noteId })
+ * from "@/shared/lib/jobs" directly.
+ * @deprecated 请使用 enqueueIndexJob({ targetType: "PKM_NOTE", targetId: noteId })
+ */
+export async function enqueueIndexJob(noteId: string): Promise<void>;
+export async function enqueueIndexJob(target: IndexJobTarget): Promise<void>;
+export async function enqueueIndexJob(target: string | IndexJobTarget): Promise<void> {
+  if (typeof target === "string") {
+    await enqueueIndexJobByNoteId(target);
+  } else {
+    await enqueueIndexJobByNoteId(target.targetId);
+  }
 }
 
+/**
+ * @deprecated 请使用 enqueueIndexJob({ targetType: "PKM_NOTE", targetId: noteId })
+ */
+export const enqueueIndexJob$legacy = enqueueIndexJobByNoteId;
+
 export async function extractAttachmentTextsWithSources(
-  attachments: PkmAttachment[],
+  attachments: FileAttachment[],
 ): Promise<{
   results: Record<string, AttachmentExtraction>;
   failedCount: number;

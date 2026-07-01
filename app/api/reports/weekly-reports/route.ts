@@ -10,10 +10,10 @@ const createSchema = z.object({
   title: z.string().min(1).max(200),
   content: z.string(),
   attachments: z.array(z.object({
-    name: z.string(),
-    url: z.string(),
-    mimeType: z.string(),
-    size: z.number(),
+    fileId: z.string(),
+    name: z.string().optional(),
+    mimeType: z.string().optional(),
+    size: z.number().optional(),
   })).optional(),
   projectIds: z.array(z.string()).optional(),
 });

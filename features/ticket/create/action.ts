@@ -14,6 +14,7 @@ import {
   createManyNotifications,
 } from "@/features/admin/notifications-lib";
 import { syncTicketSearchDocument } from "@/shared/lib/search";
+import type { FileAttachment } from "@/shared/lib/pkm";
 
 // Auto-start the overdue scanner when this module is first loaded
 void import("@/shared/lib/cron-scheduler").catch(() => {});
@@ -28,6 +29,7 @@ export type CreateTicketInput = {
   repoPaths?: string[];
   deadline?: string | Date | null;
   priority?: number;
+  attachments?: FileAttachment[];
 };
 
 export type CreateTicketResult =
@@ -92,6 +94,17 @@ export async function createTicketAction(input: CreateTicketInput): Promise<Crea
           changedById: session.user.id,
         },
       });
+
+      // PR10: 创建附件的 FileReference 记录（sourceType: TICKET）
+      if (input.attachments && input.attachments.length > 0) {
+        await tx.fileReference.createMany({
+          data: input.attachments.map((att) => ({
+            fileAssetId: att.fileId,
+            sourceType: "TICKET",
+            sourceId: created.id,
+          })),
+        });
+      }
 
       return created;
     });

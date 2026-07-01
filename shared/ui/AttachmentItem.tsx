@@ -1,6 +1,6 @@
 "use client";
 
-import { type PkmAttachment } from "@/shared/lib/pkm";
+import { type FileAttachment } from "@/shared/lib/pkm";
 import { type PreviewableFile } from "@/shared/ui/DocumentPreviewModal";
 
 export type { PreviewableFile };
@@ -62,35 +62,46 @@ function formatBytes(bytes: number) {
 }
 
 interface Props {
-  attachment: PkmAttachment;
+  /** PR10 FileAttachment 格式：{ fileId }，name/mimeType/size 可选 */
+  attachment: FileAttachment;
   onPreview?: (file: PreviewableFile) => void;
 }
 
+/**
+ * 附件渲染组件（PR10）。
+ * 格式：{ fileId, name?, mimeType?, size? }
+ * 预览/下载：/api/upload/<fileId>
+ */
 export function AttachmentItem({ attachment, onPreview }: Props) {
-  const canPreview = isPreviewable(attachment.mimeType);
+  const mimeType = attachment.mimeType ?? "application/octet-stream";
+  const fileName = attachment.name ?? "未知文件";
+  const size = attachment.size ?? 0;
+
+  const downloadUrl = `/api/upload/${attachment.fileId}`;
+  const previewUrl = downloadUrl;
 
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-ink-200 px-3 py-2 text-sm hover:border-brand-200 hover:bg-brand-50/40">
       <div className="flex min-w-0 items-center gap-2">
-        {getFileBadge(attachment.mimeType)}
+        {getFileBadge(mimeType)}
         <div className="min-w-0">
           <p className="truncate font-medium text-ink-700">
-            {attachment.name}
+            {fileName}
           </p>
           <p className="text-xs text-ink-400">
-            {attachment.mimeType} · {formatBytes(attachment.size)}
+            {mimeType} · {formatBytes(size)}
           </p>
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
-        {canPreview && (
+        {isPreviewable(mimeType) && (
           <button
             type="button"
             onClick={() =>
               onPreview?.({
-                name: attachment.name,
-                url: attachment.url,
-                mimeType: attachment.mimeType,
+                name: fileName,
+                url: previewUrl,
+                mimeType,
               })
             }
             className="rounded-lg border border-ink-200 bg-white px-2.5 py-1 text-xs text-ink-600 hover:border-brand-300 hover:text-brand-700"
@@ -99,8 +110,8 @@ export function AttachmentItem({ attachment, onPreview }: Props) {
           </button>
         )}
         <a
-          href={attachment.url}
-          download={attachment.name}
+          href={downloadUrl}
+          download={fileName}
           target="_blank"
           rel="noreferrer"
           className="rounded-lg bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100"

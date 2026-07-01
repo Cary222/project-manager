@@ -6,6 +6,8 @@ import {
   buildMentionedNotification,
 } from "@/features/admin/notifications-lib";
 import { syncTicketSearchDocument } from "@/shared/lib/search";
+import { extractFileAttachmentsFromLegacy } from "@/shared/lib/pkm";
+import { recordFileReference } from "@/shared/lib/file-reference";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -94,6 +96,7 @@ export async function POST(request: Request, { params }: RouteParams) {
 
     const body = (await request.json().catch(() => ({}))) as {
       content?: unknown;
+      attachments?: unknown;
     };
 
     if (typeof body.content !== "string") {
@@ -155,7 +158,12 @@ export async function POST(request: Request, { params }: RouteParams) {
       validatedMentionedIds = users.map((u) => u.id);
     }
 
+    // PR10 F5: 处理附件，转换旧格式 + 提取 FileAttachment[]
+    const { attachments: extractedAttachments } =
+      await extractFileAttachmentsFromLegacy(body.attachments, session.user.id);
+
     const created = await prisma.$transaction(async (tx) => {
+      // 先创建评论（不包含 attachments，规避未 generate 的类型）
       const comment = await tx.ticketComment.create({
         data: {
           ticketId: ticket.id,
@@ -167,6 +175,25 @@ export async function POST(request: Request, { params }: RouteParams) {
           author: { select: { id: true, name: true, email: true } },
         },
       });
+
+      // PR10 F5: 再更新 attachments 字段（用 raw update 避免类型限制）
+      if (extractedAttachments.length > 0) {
+        await tx.ticketComment.update({
+          where: { id: comment.id },
+          data: { attachments: extractedAttachments as any },
+        });
+      }
+
+      // PR10 F5: 双写 FileReference（只处理有 fileId 的附件）
+      for (const att of extractedAttachments) {
+        if (!att.fileId) continue; // 旧格式无 FileAsset 引用，跳过
+        await recordFileReference(tx, {
+          fileAssetId: att.fileId,
+          sourceType: "TICKET_COMMENT",
+          sourceId: comment.id,
+        });
+      }
+
       await tx.moderationLog.create({
         data: {
           action: ModerationAction.EDIT_TICKET,
@@ -176,6 +203,7 @@ export async function POST(request: Request, { params }: RouteParams) {
           reason: `在单子 #${ticket.ticketNo} 发布备注`,
         },
       });
+
       return comment;
     });
 
@@ -210,7 +238,12 @@ export async function POST(request: Request, { params }: RouteParams) {
       }
     }
 
-    return NextResponse.json({ comment: created });
+    // PR10 F5: 返回带上 attachments（人工拼装，不依赖 Prisma 类型）
+    const responseComment = {
+      ...created,
+      attachments: extractedAttachments,
+    };
+    return NextResponse.json({ comment: responseComment });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";
     return NextResponse.json({ error: message }, { status: 500 });

@@ -4,6 +4,7 @@
  * Worker 和 CLI 都可能调用，所以单独抽出。
  */
 import { prisma } from "@/shared/db/client";
+import type { IndexJob, IndexJobTargetType as PrismaIndexJobTargetType } from "@prisma/client";
 
 export const STALE_JOB_THRESHOLD_MS = 5 * 60 * 1000;
 
@@ -17,6 +18,46 @@ export const EXPONENTIAL_BACKOFF_MS = [
 
 export function getBackoffDelayMs(nextAttempt: number): number {
   return EXPONENTIAL_BACKOFF_MS[Math.min(nextAttempt - 1, EXPONENTIAL_BACKOFF_MS.length - 1)];
+}
+
+/**
+ * IndexJob 的通用 target 类型
+ */
+export type IndexJobTarget =
+  | { targetType: "PKM_NOTE"; targetId: string }
+  | { targetType: "FILE_ASSET"; targetId: string }
+  | { targetType: "TICKET"; targetId: string };
+
+export async function enqueueIndexJob(target: IndexJobTarget): Promise<string> {
+  await prisma.indexJob.deleteMany({
+    where: {
+      targetType: target.targetType as PrismaIndexJobTargetType,
+      targetId: target.targetId,
+      status: "PENDING",
+    },
+  });
+
+  const result = await prisma.indexJob.create({
+    data: {
+      targetType: target.targetType as PrismaIndexJobTargetType,
+      targetId: target.targetId,
+      // 向后兼容：PKM_NOTE 时填 noteId
+      noteId: target.targetType === "PKM_NOTE" ? target.targetId : null,
+      status: "PENDING",
+      attempt: 0,
+    },
+    select: { id: true },
+  });
+
+  console.log(`[jobs] enqueued ${target.targetType} index job targetId=${target.targetId} jobId=${result.id}`);
+  return result.id;
+}
+
+/**
+ * @deprecated 请使用 enqueueIndexJob({ targetType: "PKM_NOTE", targetId: noteId })
+ */
+export async function enqueueIndexJobByNoteId(noteId: string): Promise<string> {
+  return enqueueIndexJob({ targetType: "PKM_NOTE", targetId: noteId });
 }
 
 /**
@@ -43,7 +84,7 @@ export async function recoverStaleJobs(): Promise<number> {
  * 原子抢下一个 PENDING job 并标记为 PROCESSING。
  * 多 worker 并发安全。
  */
-export async function claimNextJob() {
+export async function claimNextJob(): Promise<IndexJob | null> {
   return prisma.$transaction(async (tx) => {
     const found = await tx.indexJob.findFirst({
       where: { status: "PENDING" },

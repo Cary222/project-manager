@@ -1,6 +1,6 @@
 import { prisma } from "@/shared/db/client";
-import { normalizePkmAttachments } from "@/shared/lib/pkm";
 import type { WeeklyReport } from "@prisma/client";
+import type { FileAttachment } from "@/shared/lib/pkm";
 
 export type WeeklyReportWithProjects = WeeklyReport & {
   projects: { id: string; name: string }[];
@@ -52,11 +52,17 @@ export async function createWeeklyReport(
     weekEnd: Date;
     title: string;
     content: string;
-    attachments?: unknown;
+    attachments?: FileAttachment[] | unknown;
     projectIds?: string[];
   },
 ): Promise<WeeklyReportWithProjects> {
-  const attachments = normalizePkmAttachments(input.attachments);
+  // Normalize to FileAttachment[] only if it's an old-format array (contains url without fileId)
+  let attachments: FileAttachment[] = [];
+  if (Array.isArray(input.attachments)) {
+    attachments = (input.attachments as FileAttachment[]).filter(
+      (a): a is FileAttachment => typeof a === "object" && a !== null && "fileId" in a && typeof a.fileId === "string",
+    );
+  }
 
   const report = await prisma.$transaction(async (tx) => {
     const created = await tx.weeklyReport.create({
@@ -101,13 +107,20 @@ export async function updateWeeklyReport(
   input: Partial<{
     title: string;
     content: string;
-    attachments: unknown;
+    attachments: FileAttachment[] | unknown;
     projectIds: string[];
   }>,
 ): Promise<WeeklyReportWithProjects> {
-  const attachments = input.attachments !== undefined
-    ? normalizePkmAttachments(input.attachments)
-    : undefined;
+  let attachments: FileAttachment[] | undefined;
+  if (input.attachments !== undefined) {
+    if (Array.isArray(input.attachments)) {
+      attachments = (input.attachments as FileAttachment[]).filter(
+        (a): a is FileAttachment => typeof a === "object" && a !== null && "fileId" in a && typeof a.fileId === "string",
+      );
+    } else {
+      attachments = undefined;
+    }
+  }
 
   const updated = await prisma.$transaction(async (tx) => {
     const existing = await tx.weeklyReport.findFirst({ where: { id, userId } });

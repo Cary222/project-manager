@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/shared/db/client";
 import { requireSession } from "@/shared/lib/permissions";
+import { removeFileReferences } from "@/shared/lib/file-reference";
 
 type RouteParams = { params: Promise<{ id: string; commentId: string }> };
 
@@ -33,7 +34,14 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
     }
 
-    await prisma.ticketComment.delete({ where: { id: commentId } });
+    // PR10 F5: 事务内删除评论 + 清理 FileReference
+    await prisma.$transaction(async (tx) => {
+      await tx.ticketComment.delete({ where: { id: commentId } });
+      await removeFileReferences(tx, {
+        sourceType: "TICKET_COMMENT",
+        sourceId: commentId,
+      });
+    });
     return NextResponse.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";

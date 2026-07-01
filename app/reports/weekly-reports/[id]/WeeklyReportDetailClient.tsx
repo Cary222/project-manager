@@ -196,12 +196,7 @@ export function WeeklyReportDetailClient({ initialReport, reportId }: Props) {
                 {attachments.map((att, i) => (
                   <AttachmentItem
                     key={i}
-                    attachment={{
-                      name: att.name ?? `附件 ${i + 1}`,
-                      url: att.url ?? "#",
-                      mimeType: att.mimeType ?? "application/octet-stream",
-                      size: att.size ?? 0,
-                    }}
+                    attachment={att as Parameters<typeof AttachmentItem>[0]["attachment"]}
                     onPreview={setPreviewFile}
                   />
                 ))}

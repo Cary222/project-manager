@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
 import { requireSession } from "@/shared/lib/permissions";
 import { PRIVATE_LIST_CACHE_CONTROL } from "@/lib/cache-control";
-import { normalizePkmAttachments } from "@/shared/lib/pkm";
+import { extractFileAttachmentsFromLegacy } from "@/shared/lib/pkm";
 import { syncPkmNoteSearchDocument } from "@/shared/lib/search";
+import { recordFileReference } from "@/shared/lib/file-reference";
 
 function normalizeTags(tags: unknown) {
   if (!Array.isArray(tags)) return [] as string[];
@@ -66,7 +68,6 @@ export async function POST(request: Request) {
     const projectId = body.projectId?.trim() || null;
     const isPublic = body.isPublic === true;
     const tags = normalizeTags(body.tags);
-    const attachments = normalizePkmAttachments(body.attachments);
 
     if (!title) {
       return NextResponse.json({ error: "title is required" }, { status: 400 });
@@ -83,24 +84,45 @@ export async function POST(request: Request) {
       }
     }
 
-    const note = await prisma.pkmNote.create({
-      data: {
-        userId: session.user.id,
-        title,
-        content,
-        tags,
-        projectId,
-        isPublic,
-        attachments,
-      },
-      include: {
-        project: {
-          select: {
-            id: true,
-            name: true,
+    // 提取附件（新格式 + 旧 base64 转换）
+    const { attachments, convertedFileIds } = await extractFileAttachmentsFromLegacy(
+      body.attachments,
+      session.user.id,
+    );
+
+    // 双写：PkmNote + FileReference（同一事务）
+    const note = await prisma.$transaction(async (tx) => {
+      const created = await tx.pkmNote.create({
+        data: {
+          userId: session.user.id,
+          title,
+          content,
+          tags,
+          projectId,
+          isPublic,
+          attachments: attachments as unknown as Prisma.InputJsonValue,
+        },
+        include: {
+          project: {
+            select: {
+              id: true,
+              name: true,
+            },
           },
         },
-      },
+      });
+
+      // 双写 FileReference（只处理有 fileId 的附件）
+      for (const att of attachments) {
+        if (!att.fileId) continue; // 旧格式无 FileAsset 引用，跳过
+        await recordFileReference(tx, {
+          fileAssetId: att.fileId,
+          sourceType: "PKM_NOTE",
+          sourceId: created.id,
+        });
+      }
+
+      return created;
     });
 
     await syncPkmNoteSearchDocument(note.id, { async: true });

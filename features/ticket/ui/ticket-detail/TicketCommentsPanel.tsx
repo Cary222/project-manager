@@ -8,7 +8,9 @@ import { IconTrash } from "@/shared/ui/icons";
 import { fetchJson } from "@/shared/api/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/shared/api/swr-config";
 import { MarkdownContent } from "@/shared/ui/MarkdownContent";
-import { uploadImage } from "@/shared/lib/upload";
+import { uploadFile, toAbsoluteUploadUrl } from "@/shared/lib/upload";
+import type { CommentItem } from "@/entities/ticket/model/types";
+import type { FileAttachment } from "@/shared/lib/pkm";
 
 function IconEmoji(p: React.SVGProps<SVGSVGElement>) {
   return (
@@ -44,17 +46,6 @@ type CommentUser = {
   id: string;
   name: string | null;
   email: string;
-};
-
-type CommentItem = {
-  id: string;
-  ticketId: string;
-  authorId: string;
-  content: string;
-  mentionedUserIds: string[];
-  createdAt: string;
-  author: CommentUser;
-  mentionedUsers?: CommentUser[];
 };
 
 type CommentsResponse = { comments: CommentItem[] };
@@ -115,10 +106,11 @@ export function TicketCommentsPanel({ ticketId, ticketNumericId }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // 图片插入后形成的草稿(走 inline markdown data URL:`![](name:filename.png)`)
-  const [draftImages, setDraftImages] = useState<{ src: string; name: string }[]>([]);
-  // 用于显示已上传但未发布的图
+  // 图片/文件插入后形成的草稿附件列表（PR10: FileAttachment 格式，走 uploadFile)
+  const [draftAttachments, setDraftAttachments] = useState<FileAttachment[]>([]);
+  // 用于触发文件选择
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Mention popup state
@@ -212,28 +204,20 @@ export function TicketCommentsPanel({ ticketId, ticketNumericId }: Props) {
     });
   }
 
-  // ── Image attachment ──────────────────────────────────────────
-  async function appendImageFile(file: File) {
+  // ── File attachment (PR10) ───────────────────────────────────────
+  async function appendAttachment(file: File) {
     setErrorMsg(null);
     try {
-      const { url: relUrl } = await uploadImage(file);
-      const origin =
-        typeof window !== "undefined" ? window.location.origin : "";
-      const absoluteUrl = origin ? `${origin}${relUrl}` : relUrl;
-      const safeName = file.name.replace(/\s+/g, "_").slice(0, 60);
-      setDraftImages((prev) => [...prev, { src: absoluteUrl, name: safeName }]);
-      const insertion = `![${safeName}](${absoluteUrl})`;
-      setDraft((prev) => (prev.length === 0 ? insertion : `${prev}\n${insertion}`));
-      requestAnimationFrame(() => {
-        const ta = textareaRef.current;
-        if (ta) {
-          ta.focus();
-          const end = ta.value.length;
-          ta.setSelectionRange(end, end);
-        }
-      });
+      const result = await uploadFile(file);
+      const attachment: FileAttachment = {
+        fileId: result.fileId,
+        name: result.name,
+        mimeType: result.mimeType,
+        size: result.size,
+      };
+      setDraftAttachments((prev) => [...prev, attachment]);
     } catch (error) {
-      setErrorMsg(error instanceof Error ? error.message : "图片上传失败");
+      setErrorMsg(error instanceof Error ? error.message : "上传失败");
     }
   }
 
@@ -254,14 +238,17 @@ export function TicketCommentsPanel({ ticketId, ticketNumericId }: Props) {
       const res = await fetch(`/api/tickets/${ticketNumericId}/comments`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({
+          content,
+          attachments: draftAttachments,
+        }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error || `HTTP ${res.status}`);
       }
       setDraft("");
-      setDraftImages([]);
+      setDraftAttachments([]);
       await mutate();
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "发布失败");
@@ -337,6 +324,43 @@ export function TicketCommentsPanel({ ticketId, ticketNumericId }: Props) {
                       <span>{formatTimeAgo(new Date(c.createdAt))}</span>
                     </div>
                     <MarkdownContent content={c.content} mentionMap={mentionMap} />
+                    {/* PR10 F5: 评论附件列表 */}
+                    {c.attachments && c.attachments.length > 0 && (
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {c.attachments.map((att, idx) => {
+                          const url = `/api/upload/${att.fileId}`;
+                          const isImage = att.mimeType?.startsWith("image/");
+                          return isImage ? (
+                            <a
+                              key={idx}
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block"
+                            >
+                              <img
+                                src={url}
+                                alt={att.name || att.fileId}
+                                className="max-h-16 rounded border border-ink-200 object-contain hover:opacity-80"
+                              />
+                            </a>
+                          ) : (
+                            <a
+                              key={idx}
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 rounded border border-ink-200 bg-ink-50 px-2 py-0.5 text-[11px] text-ink-600 hover:bg-ink-100"
+                            >
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><polyline points="14 3 14 8 19 8" />
+                              </svg>
+                              {att.name || att.fileId.slice(0, 12)}
+                            </a>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                   {canDelete && (
                     <button
@@ -354,31 +378,22 @@ export function TicketCommentsPanel({ ticketId, ticketNumericId }: Props) {
         )}
       </div>
 
-      {/* 已选择的图片预览 */}
-      {draftImages.length > 0 && (
+      {/* 草稿附件列表预览 */}
+      {draftAttachments.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2 border-t border-ink-100 pt-2">
-          {draftImages.map((img, i) => (
-            <div key={i} className="group relative">
-              <img
-                src={img.src}
-                alt={img.name}
-                className="max-h-20 rounded border border-ink-200 object-contain"
-              />
+          {draftAttachments.map((att, i) => (
+            <div key={i} className="group relative flex items-center gap-1.5 rounded border border-ink-200 bg-ink-50 px-2 py-1 text-xs text-ink-700">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><polyline points="14 3 14 8 19 8" />
+              </svg>
+              <span className="truncate max-w-[120px]" title={att.name}>{att.name || att.fileId.slice(0, 8)}</span>
               <button
                 type="button"
-                onClick={() => {
-                  setDraftImages((prev) => prev.filter((_, idx) => idx !== i));
-                  setDraft((prev) => {
-                    const token = `![${img.name}](${img.src})`;
-                    const lines = prev.split("\n").filter((line) => line.trim() !== token);
-                    return lines.join("\n");
-                  });
-                }}
-                className="absolute -right-2 -top-2 hidden h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white hover:bg-danger group-hover:flex"
+                onClick={() => setDraftAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+                className="ml-1 flex h-4 w-4 items-center justify-center rounded-full bg-ink-300 text-white hover:bg-danger"
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
               </button>
             </div>
@@ -434,17 +449,39 @@ export function TicketCommentsPanel({ ticketId, ticketNumericId }: Props) {
         {/* Toolbar */}
         <div className="flex items-center justify-between gap-2 border-t border-ink-100 px-2 py-1.5">
           <div className="flex items-center gap-1">
-            {/* 图片 */}
+            {/* 上传文档类附件（排除图片） */}
+            <button
+              type="button"
+              title="上传附件"
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded-md p-1.5 text-ink-500 hover:bg-ink-100 hover:text-ink-700"
+            >
+              <IconFile className="h-4 w-4" />
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,.md,.txt,.csv,.zip,.rar,.7z,.gz"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                const files = e.target.files;
+                if (!files) return;
+                for (const file of Array.from(files)) appendAttachment(file);
+                e.currentTarget.value = "";
+              }}
+            />
+            {/* 上传图片（作为评论附件） */}
             <button
               type="button"
               title="上传图片"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => imageInputRef.current?.click()}
               className="rounded-md p-1.5 text-ink-500 hover:bg-ink-100 hover:text-ink-700"
             >
               <IconImage className="h-4 w-4" />
             </button>
             <input
-              ref={fileInputRef}
+              ref={imageInputRef}
               type="file"
               accept="image/*"
               multiple
@@ -452,19 +489,10 @@ export function TicketCommentsPanel({ ticketId, ticketNumericId }: Props) {
               onChange={(e) => {
                 const files = e.target.files;
                 if (!files) return;
-                for (const file of Array.from(files)) appendImageFile(file);
+                for (const file of Array.from(files)) appendAttachment(file);
                 e.currentTarget.value = "";
               }}
             />
-            {/* 文件占位(目前隐藏) */}
-            <button
-              type="button"
-              title="附件(暂未开放)"
-              disabled
-              className="rounded-md p-1.5 text-ink-300"
-            >
-              <IconFile className="h-4 w-4" />
-            </button>
             {/* Emoji */}
             <div ref={emojiContainerRef} className="relative">
               <button

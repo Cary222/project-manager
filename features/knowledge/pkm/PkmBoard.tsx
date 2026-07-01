@@ -10,8 +10,7 @@ import { IconPkm, IconPlus, IconTag, IconTrash } from "@/shared/ui/icons";
 import {
   composeImageMarkdown,
   extractInlineImages,
-  normalizePkmAttachments,
-  type PkmAttachment,
+  type FileAttachment,
 } from "@/shared/lib/pkm";
 import { uploadImage } from "@/shared/lib/upload";
 
@@ -25,7 +24,7 @@ type PkmNote = {
   title: string;
   content: string;
   tags: string[];
-  attachments?: PkmAttachment[] | null;
+  attachments?: FileAttachment[] | null;
   isPublic: boolean;
   projectId: string | null;
   project: ProjectOption | null;
@@ -95,12 +94,7 @@ function summarizeContent(content: string) {
 
 export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNoteId }: PkmBoardProps) {
   const router = useRouter();
-  const [notes, setNotes] = useState(() =>
-    initialNotes.map((note) => ({
-      ...note,
-      attachments: normalizePkmAttachments(note.attachments),
-    }))
-  );
+  const [notes, setNotes] = useState(() => initialNotes);
   const [selectedId, setSelectedId] = useState<string | null>(initialNoteId || initialNotes[0]?.id || null);
   const [showForm, setShowForm] = useState(initialNotes.length === 0);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -110,7 +104,7 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
   const [projectId, setProjectId] = useState(EMPTY_FORM.projectId);
   const [isPublic, setIsPublic] = useState(EMPTY_FORM.isPublic);
   const [contentImages, setContentImages] = useState<{ src: string; name: string }[]>([]);
-  const [attachments, setAttachments] = useState<PkmAttachment[]>([]);
+  const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
   const isLightboxOpenRef = useRef(false);
   const [saving, setSaving] = useState(false);
@@ -168,7 +162,7 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
     setProjectId(note.projectId || "");
     setIsPublic(note.isPublic);
     setContentImages(initialContent.images);
-    setAttachments(normalizePkmAttachments(note.attachments));
+    setAttachments((note.attachments as FileAttachment[]) ?? []);
     setShowForm(true);
     setFlash(null);
     setSelectedId(note.id);
@@ -205,7 +199,7 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
     });
   }
 
-  function handleAttachmentChange(next: PkmAttachment[]) {
+  function handleAttachmentChange(next: FileAttachment[]) {
     setAttachments(next);
   }
 
@@ -249,10 +243,7 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
         throw new Error(data.error || "保存失败");
       }
 
-      const nextNote = {
-        ...data.note,
-        attachments: normalizePkmAttachments(data.note.attachments),
-      };
+      const nextNote = data.note as PkmNote;
 
       setNotes((current) => {
         const next = editingId
@@ -586,7 +577,7 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
               ) : (
                 notes.map((note) => {
                   const active = note.id === selectedId;
-                  const noteAttachments = normalizePkmAttachments(note.attachments);
+                  const noteAttachments = (note.attachments as FileAttachment[]) ?? [];
                   return (
                     <article
                       key={note.id}

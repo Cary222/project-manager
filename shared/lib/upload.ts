@@ -1,65 +1,71 @@
-/** 图片附件上传路线的设计文档。
+/** 文件上传路线的设计文档。
 
-# 路线 A：图片 → /api/upload → DB → /api/upload/[id] 代理
-- 客户端：`uploadImage(file)`（见本文件）
-- 服务端：`POST app/api/upload/route.ts`，接 multipart，写 `UploadedFile` 表（bytes BYTEA）
-- 返回：`{ url, id, name, mimeType, size }`，url 形如 `/api/upload/<cuid>`
+# 路线 A：文件上传 → /api/upload → DB → /api/upload/[id] 代理
+- 客户端：`uploadFile(file)`（见本文件），会先算 sha256 hash 作为 hint
+- 服务端：`POST app/api/upload/route.ts`，接 multipart，写 `FileAsset` 表（bytes BYTEA）
+- 服务端重算 sha256：客户端 hash 仅作 hint，服务端必须重新计算作为权威值
+- 返回：`{ url, fileId, name, mimeType, size, hash }`，url 形如 `/api/upload/<fileId>`
 - 浏览器渲染：`GET app/api/upload/[id]/route.ts` 从 DB 读 bytes 返回
-- 用途：ticket 备注图片 / 描述图片 / PKM 笔记内嵌图，避免 textarea 里塞 base64
+- 支持任意文件类型（最大 10MB）
+- 用途：ticket 备注附件 / 工单附件 / PKM 附件，避免 base64 内嵌
 
-# 路线 B：PKM 附件 → /api/pkm/notes + data URL
+# 路线 B：PKM 附件 → /api/pkm/notes + data URL（历史遗留）
 - 客户端：`uploadAttachmentAsNote(file, projectId, router)`（见本文件）
 - 服务端：现有的 `POST /api/pkm/notes`，attachments[].url 是 data URL
 - 用途：PKM 笔记附件（PDF / Word / Excel / 图片 / Markdown 等）
-- 保留 data URL 是历史设计：本项目当前没有对象存储，把附件 base64 内嵌到 PKM 笔记里
-  能避免依赖 OSS；代价是 PKM 笔记体积大，未来接 OSS 时再统一切到路线 A。
+- 保留 data URL 是历史设计：未来接 OSS 时统一切到路线 A。
 
-# 为什么把图片存 DB 而不是 `public/uploads/`
+# 为什么把文件存 DB 而不是 `public/uploads/`
 - 生产环境数据库是远端 PostgreSQL，多实例部署没有共享磁盘
 - 存 DB 让 `GET /api/upload/[id]` 从任一实例都能取到，URL 也不依赖 `NEXT_PUBLIC_BASE_URL`
 
 # 两条路线的关系
-- 不重复：路线 A 是「图片快速上传并由服务端代理读取」，路线 B 是「PKM 笔记附件内嵌」。
-- 当前 PR scope 内统一所有 *图片* 到路线 A；路线 B（PKM 多类型附件）暂留。
+- 路线 A 是「文件上传并由服务端代理读取」（PR10 新增）
+- 路线 B 是「PKM 笔记附件内嵌」（历史遗留）
 */
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
-const IMAGE_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/webp",
-  "image/svg+xml",
-]);
+import { sha256File } from "./hash";
 
-export type UploadedImage = {
-  /** 服务端返回的相对 URL（不含 origin），形如 `/uploads/xxx.png`。 */
+export type UploadedFileResult = {
+  /** 服务端返回的相对 URL（不含 origin），形如 `/api/upload/<fileId>`。 */
   url: string;
+  /** 服务端返回的 fileId（对应 FileAsset.id）。 */
+  fileId: string;
   name: string;
   mimeType: string;
   size: number;
+  /** 服务端权威 hash（客户端 hint 用于优化，服务端会重算）。 */
+  hash: string;
+  /**  true = 服务端发现 hash 命中，直接返回已有 fileId。 */
+  deduplicated?: boolean;
 };
 
 /**
- * 把图片文件上传到服务端 `POST /api/upload`，返回相对 URL。
+ * 把图片/文件上传到服务端 `POST /api/upload`，返回相对 URL。
+ * 支持任意文件类型（最大 10MB）。
+ * 客户端先计算 hash 作为 hint；服务端会重新计算作为权威值。
  * 客户端如果需要 absolute URL 自己拼 `window.location.origin`。
- * @throws 文件超 10MB、非图片类型、网络错误、上传返回非 2xx 时抛出 Error。
+ * @throws 文件超 10MB、空文件、网络错误、上传返回非 2xx 时抛出 Error。
  */
-export async function uploadImage(file: File): Promise<UploadedImage> {
+export async function uploadFile(file: File): Promise<UploadedFileResult> {
   if (file.size > MAX_SIZE) {
     throw new Error(`文件不能超过 ${formatBytes(MAX_SIZE)}`);
   }
   if (file.size === 0) {
     throw new Error("文件不能为空");
   }
-  if (!IMAGE_TYPES.has(file.type)) {
-    throw new Error(`不支持的图片类型：${file.type || "未知"}`);
-  }
+
+  // 客户端先算 hash 作为 hint（服务端会重算）
+  const clientHash = await sha256File(file);
+
   const form = new FormData();
   form.append("file", file, file.name);
+  form.append("clientHash", clientHash);
+
   const res = await fetch("/api/upload", { method: "POST", body: form });
-  const body = (await res.json().catch(() => ({}))) as Partial<UploadedImage> & {
+  const body = (await res.json().catch(() => ({}))) as Partial<UploadedFileResult> & {
     error?: string;
   };
   if (!res.ok || !body.url) {
@@ -67,11 +73,19 @@ export async function uploadImage(file: File): Promise<UploadedImage> {
   }
   return {
     url: body.url,
+    fileId: body.fileId ?? "",
     name: body.name ?? file.name,
     mimeType: body.mimeType ?? file.type,
     size: body.size ?? file.size,
+    hash: body.hash ?? clientHash,
+    deduplicated: body.deduplicated,
   };
 }
+
+/**
+ * @deprecated 请使用 `uploadFile`。本函数保留以避免破坏现有调用。
+ */
+export const uploadImage = uploadFile;
 
 /** 将 File 转成 data URL（base64）。 */
 export function fileToDataUrl(file: File): Promise<string> {

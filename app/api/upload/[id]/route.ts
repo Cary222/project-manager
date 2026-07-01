@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/shared/db/client";
 
 /**
- * 图片代理：从数据库读出 `UploadedFile.bytes`，按原 mimeType 返回。
+ * 文件代理：从数据库读出 `FileAsset.bytes`，按原 mimeType 返回。
  * 不做权限校验（图片需要浏览器直接渲染，必须允许 <img src> 匿名 GET）；
  * 文件 id 是 cuid，不可枚举；数据库占用空间有限，不会被滥用。
  */
@@ -17,8 +17,8 @@ export async function GET(_request: Request, { params }: RouteParams) {
       return NextResponse.json({ error: "BAD_ID" }, { status: 400 });
     }
 
-    const record = await prisma.uploadedFile.findUnique({
-      where: { id },
+    const record = await prisma.fileAsset.findUnique({
+      where: { id, status: "ACTIVE" },
       select: { bytes: true, mimeType: true, originalName: true, size: true },
     });
     if (!record) {

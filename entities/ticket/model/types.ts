@@ -7,6 +7,21 @@ export type {
   ProjectStatus,
 } from "@/entities/project/model/types";
 
+// Re-export FileAttachment from PKM layer (PR10 四层文件架构)
+export type { FileAttachment } from "@/shared/lib/pkm";
+
+export type CommentItem = {
+  id: string;
+  ticketId: string;
+  authorId: string;
+  content: string;
+  mentionedUserIds: string[];
+  attachments?: import("@/shared/lib/pkm").FileAttachment[];
+  createdAt: string;
+  author: { id: string; name: string | null; email: string };
+  mentionedUsers?: { id: string; name: string | null; email: string }[];
+};
+
 export type TicketStatus = "DEVELOPING" | "READY_FOR_TEST" | "DELIVERED" | "DONE" | "OVERDUE" | "CLOSED";
 
 export type TicketPriority = 0 | 1 | 2 | 3;
@@ -29,6 +44,15 @@ export type Responsibility = {
   id: string;
   kind: "PROGRAM" | "DESIGN" | "BUG";
   modules: Module[];
+};
+
+export type TicketAttachment = {
+  fileId: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  sourceType: "TICKET" | "TICKET_COMMENT";
+  sourceId: string;
 };
 
 export type Ticket = {
@@ -76,6 +100,7 @@ export type Ticket = {
     programTicketId: string;
     programTicket: { id: string; ticketNo: number; title: string };
   }[];
+  allAttachments?: TicketAttachment[];
 };
 
 export type TicketCreateUser = {

@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
 import { requireSession } from "@/shared/lib/permissions";
-import { normalizePkmAttachments } from "@/shared/lib/pkm";
+import { extractFileAttachmentsFromLegacy } from "@/shared/lib/pkm";
 import { SEARCH_DOCUMENT_SOURCE_TYPES } from "@/shared/lib/search-types";
 import {
   buildSearchDocumentSourceType,
   syncPkmNoteSearchDocument,
 } from "@/shared/lib/search";
+import { recordFileReference, removeFileReferences } from "@/shared/lib/file-reference";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -55,7 +57,6 @@ export async function PATCH(request: Request, { params }: Params) {
     const projectId = body.projectId?.trim() || null;
     const isPublic = body.isPublic === true;
     const tags = normalizeTags(body.tags);
-    const attachments = normalizePkmAttachments(body.attachments);
 
     if (!title) {
       return NextResponse.json({ error: "title is required" }, { status: 400 });
@@ -72,24 +73,47 @@ export async function PATCH(request: Request, { params }: Params) {
       }
     }
 
-    const updated = await prisma.pkmNote.update({
-      where: { id },
-      data: {
-        title,
-        content,
-        tags,
-        projectId,
-        isPublic,
-        attachments,
-      },
-      include: {
-        project: {
-          select: {
-            id: true,
-            name: true,
+    // 提取附件（新格式 + 旧 base64 转换）
+    const { attachments } = await extractFileAttachmentsFromLegacy(
+      body.attachments,
+      session.user.id,
+    );
+
+    // 双写：软删除旧 FileReference + 写新 FileReference + 更新 PkmNote（同一事务）
+    const updated = await prisma.$transaction(async (tx) => {
+      // 1. 软删除旧引用
+      await removeFileReferences(tx, { sourceType: "PKM_NOTE", sourceId: id });
+
+      // 2. 写新引用（只处理有 fileId 的附件）
+      for (const att of attachments) {
+        if (!att.fileId) continue; // 旧格式无 FileAsset 引用，跳过
+        await recordFileReference(tx, {
+          fileAssetId: att.fileId,
+          sourceType: "PKM_NOTE",
+          sourceId: id,
+        });
+      }
+
+      // 3. 更新 PkmNote
+      return tx.pkmNote.update({
+        where: { id },
+        data: {
+          title,
+          content,
+          tags,
+          projectId,
+          isPublic,
+          attachments: attachments as unknown as Prisma.InputJsonValue,
+        },
+        include: {
+          project: {
+            select: {
+              id: true,
+              name: true,
+            },
           },
         },
-      },
+      });
     });
 
     await syncPkmNoteSearchDocument(updated.id, { async: true });
@@ -118,7 +142,16 @@ export async function DELETE(_request: Request, { params }: Params) {
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
     }
 
-    // 清理关联资源（IndexJob 会被 PkmNote FK Cascade 自动清理）
+    // 清理关联资源
+    // 1. 软删除 FileReferences（防止 FileAsset 误删）
+    await prisma.$transaction(async (tx) => {
+      await tx.fileReference.updateMany({
+        where: { sourceType: "PKM_NOTE", sourceId: id, deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
+    });
+
+    // 2. 清理 SearchDocument（会被 PkmNote FK Cascade 自动清理，但显式删更干净）
     await prisma.searchDocument.deleteMany({
       where: {
         sourceType: buildSearchDocumentSourceType(SEARCH_DOCUMENT_SOURCE_TYPES.PKM_NOTE),

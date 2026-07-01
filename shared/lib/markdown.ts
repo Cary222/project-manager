@@ -1,4 +1,4 @@
-import { extractInlineImages, type PkmAttachment } from "@/shared/lib/pkm";
+import { extractInlineImages, type FileAttachment } from "@/shared/lib/pkm";
 
 const MARKDOWN_LINK_PATTERN = /\[([^\]]+)\]\(([^)\s]+)\)/g;
 const EXTERNAL_IMAGE_PATTERN = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
@@ -35,11 +35,11 @@ export function cleanMarkdownForEmbedding(markdown: string): string {
   return cleaned.trim();
 }
 
-export function formatAttachmentLabel(attachment: Pick<PkmAttachment, "name" | "mimeType">): string {
-  const name = attachment.name.trim();
-  const mimeType = attachment.mimeType.trim();
-  if (!mimeType) return name;
-  return `${name} (${mimeType})`;
+export function formatAttachmentLabel(attachment: Pick<FileAttachment, "name" | "mimeType">): string {
+  const name = (attachment.name ?? "").trim();
+  const mimeType = (attachment.mimeType ?? "").trim();
+  if (!mimeType) return name || "未知文件";
+  return `${name || "未知文件"} (${mimeType})`;
 }
 
 /**

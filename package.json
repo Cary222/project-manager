@@ -32,7 +32,8 @@
     "job:purge": "tsx scripts/vector-search/job-admin.ts purge-completed",
     "worker": "tsx worker/index.ts",
     "worker:prod": "NODE_ENV=production tsx worker/index.ts",
-    "test:async-index": "tsx scripts/test-async-index-pipeline.ts"
+    "test:async-index": "tsx scripts/test-async-index-pipeline.ts",
+    "migrate:pkm-attachments": "tsx scripts/migrate-pkm-base64-attachments.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.75",

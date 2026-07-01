@@ -1,28 +1,24 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/shared/lib/permissions";
 import { prisma } from "@/shared/db/client";
+import { sha256Hex } from "@/shared/lib/hash";
+import { enqueueIndexJob } from "@/shared/lib/jobs";
 
 /**
- * 图片上传服务端入口。配对客户端 `shared/lib/upload.ts` 的 `uploadImage()`。
- * 流程：multipart `POST /api/upload` (form-data 字段 `file`) → 校验大小 + mime →
- * 落 DB `UploadedFile` 表（bytes BYTEA） → 返回 `{ url, id, name, mimeType, size }`。
- * url 形如 `/api/upload/<cuid>`，由 `app/api/upload/[id]/route.ts` 的 GET handler 代理返回字节。
+ * 文件上传服务端入口。配对客户端 `shared/lib/upload.ts` 的 `uploadFile()`。
+ * 流程：
+ * 1. multipart `POST /api/upload` (form-data 字段 `file`, `clientHash`)
+ * 2. 服务端重算 sha256 hash（权威值，客户端 hash 仅作 hint）
+ * 3. 用服务端 hash + size 做去重检查（UNIQUE(hash, size)）
+ * 4. 命中则返回已有 fileId；未命中则写入 `FileAsset` 表
+ * 5. 返回 `{ url, fileId, name, mimeType, size, hash, deduplicated }`
  *
  * 设计取舍：
- * - 把图片存进数据库而不是 `public/uploads/`，是因为生产环境数据库是远端 PostgreSQL，
+ * - 把文件存进数据库而不是 `public/uploads/`，是因为生产环境数据库是远端 PostgreSQL，
  *   多实例部署没有共享磁盘，直接存 DB 让 `GET /api/upload/[id]` 从任一实例都能取到。
- * - 当前只接图片类型；PKM 附件（PDF/Word/Excel 等）走的是另一条
- *   `POST /api/pkm/notes` + data URL 的路线，不在本路由 scope 内。
+ * - hash 去重：服务端重算确保权威性，避免客户端 hash 被篡改导致的重复存储。
  */
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB，与 shared/lib/upload.ts 保持一致
-
-const IMAGE_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/webp",
-  "image/svg+xml",
-]);
 
 export async function POST(request: Request) {
   try {
@@ -46,29 +42,53 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "EMPTY_FILE" }, { status: 400 });
     }
 
-    if (!IMAGE_TYPES.has(file.type)) {
-      return NextResponse.json({ error: "UNSUPPORTED_MEDIA_TYPE" }, { status: 415 });
+    // 1. 服务端重新计算 sha256（权威值）
+    const bytes = Buffer.from(await file.arrayBuffer());
+    const hash = sha256Hex(bytes);
+
+    // 2. 用服务端 hash + size 做去重检查（客户端 clientHash 仅作 hint，不信任）
+    const existing = await prisma.fileAsset.findUnique({
+      where: { hash_size: { hash, size: file.size } },
+      select: { id: true, originalName: true, mimeType: true, size: true, hash: true },
+    });
+
+    if (existing) {
+      return NextResponse.json({
+        url: `/api/upload/${existing.id}`,
+        fileId: existing.id,
+        name: existing.originalName,
+        mimeType: existing.mimeType,
+        size: existing.size,
+        hash: existing.hash,
+        deduplicated: true,
+      });
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-
-    const record = await prisma.uploadedFile.create({
+    // 3. 未命中则创建新记录
+    const record = await prisma.fileAsset.create({
       data: {
         uploaderId: session.user.id,
         originalName: file.name,
         mimeType: file.type,
         size: file.size,
-        bytes: buffer,
+        bytes,
+        hash,
+        status: "ACTIVE",
       },
-      select: { id: true, originalName: true, mimeType: true, size: true },
+      select: { id: true, originalName: true, mimeType: true, size: true, hash: true },
     });
+
+    // 4. 入队 IndexJob，Worker 会走 processFileAssetJob → Document → SearchDocument
+    await enqueueIndexJob({ targetType: "FILE_ASSET", targetId: record.id });
 
     return NextResponse.json({
       url: `/api/upload/${record.id}`,
-      id: record.id,
+      fileId: record.id,
       name: record.originalName,
       mimeType: record.mimeType,
       size: record.size,
+      hash: record.hash,
+      deduplicated: false,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";
