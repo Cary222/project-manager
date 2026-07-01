@@ -13,7 +13,7 @@ import {
   normalizePkmAttachments,
   type PkmAttachment,
 } from "@/shared/lib/pkm";
-import { fileToDataUrl } from "@/shared/lib/upload";
+import { uploadImage } from "@/shared/lib/upload";
 
 type ProjectOption = {
   id: string;
@@ -186,11 +186,15 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
     }, 0);
   }
 
-  function insertImage(file: File) {
-    fileToDataUrl(file).then((src) => {
-      if (!src) return;
-      setContentImages((prev) => [...prev, { src, name: file.name }]);
-    });
+  async function insertImage(file: File) {
+    try {
+      const { url: relUrl } = await uploadImage(file);
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const absoluteUrl = origin ? `${origin}${relUrl}` : relUrl;
+      setContentImages((prev) => [...prev, { src: absoluteUrl, name: file.name }]);
+    } catch {
+      // 静默失败
+    }
   }
 
   function removeImage(index: number) {

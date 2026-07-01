@@ -4,17 +4,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
 import { MarkdownContent } from "@/shared/ui/MarkdownContent";
 import { AssigneePicker } from "@/shared/ui/AssigneePicker";
 import { formatAssigneeList } from "@/entities/ticket/lib/ticket-assignees";
 import { composeImageMarkdown, extractInlineImages } from "@/shared/lib/pkm";
-import { fileToDataUrl } from "@/shared/lib/upload";
-import { IconArrowLeft, IconClock, IconEdit } from "@/shared/ui/icons";
+import { uploadImage } from "@/shared/lib/upload";
+import { IconArrowLeft, IconClock, IconEdit, IconTrash, IconMenu } from "@/shared/ui/icons";
 import { fetchJson } from "@/shared/api/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/shared/api/swr-config";
 import { getMyResponsibilitiesAction } from "@/features/admin/admin";
-import { ResponsibilityKind } from "@prisma/client";
+import { ModerationAction, ResponsibilityKind } from "@prisma/client";
 import {
   type Ticket,
   type TicketStatus,
@@ -26,10 +27,27 @@ import {
   STATUS_LABEL,
   STATUS_STYLE,
   PRIORITY_LABEL,
+  PRIORITY_STYLE,
 } from "@/entities/ticket/model/types";
 import { DesignTicketDetail } from "./DesignTicketDetail";
 import { ProgramTicketDetail } from "./ProgramTicketDetail";
 import { BugTicketDetail } from "./BugTicketDetail";
+import { TicketCommentsPanel } from "./TicketCommentsPanel";
+
+type ModerationLogEntry = {
+  id: string;
+  action: string;
+  reason: string | null;
+  createdAt: Date;
+  actor: { id: string; name: string | null; email: string };
+};
+
+type EnrichedHistoryEntry =
+  | { type: "status"; status: TicketStatus; changedBy: { name: string | null; email: string }; createdAt: Date }
+  | { type: "assignee"; assignees: { name: string | null; email: string }[]; changedBy: { name: string | null; email: string }; createdAt: Date }
+  | { type: "priority"; priority: number; changedBy: { name: string | null; email: string }; createdAt: Date }
+  | { type: "module"; from: string; to: string; changedBy: { name: string | null; email: string }; createdAt: Date }
+  | { type: "created"; changedBy: { name: string | null; email: string }; createdAt: Date };
 
 // ==================== Loading Skeleton ====================
 
@@ -107,11 +125,14 @@ function Avatar({ name }: { name?: string | null }) {
 // ==================== Main Component ====================
 
 export function TicketDetail({ ticketId }: { ticketId: string }) {
+  const router = useRouter();
   const { data: session } = useSession();
   const isRoot = session?.user?.role === "ROOT";
 
   // Data layer — all SWR
-  const { data: ticketData, isLoading: ticketLoading, mutate: refreshTicket } = useSWR<{ ticket: Ticket }>(
+  const { data: ticketData, isLoading: ticketLoading, mutate: refreshTicket } = useSWR<{
+    ticket: Ticket & { moderationLogs?: ModerationLogEntry[] };
+  }>(
     `/api/tickets/${ticketId}`,
     fetchJson,
     STALE_SWR_OPTIONS,
@@ -154,7 +175,9 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   const [message, setMessage] = useState("");
   const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
   const isLightboxOpenRef = useRef(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [kebabOpen, setKebabOpen] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editDescriptionImages, setEditDescriptionImages] = useState<{ src: string; name: string }[]>([]);
@@ -234,92 +257,65 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
 
   // ---- Mutation helpers ----
 
-  async function saveTicketDetails() {
+  async function saveAll() {
     setMessage("");
     if (!ticket) return;
     const { content } = composeImageMarkdown(editDescriptionImages, editDescription);
-    const res = await fetch(`/api/tickets/${ticket.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: editTitle, description: content }),
-    });
-    if (!res.ok) {
-      setMessage("保存失败");
+    const body: Record<string, unknown> = {};
+    if (editTitle !== ticket.title) body.title = editTitle;
+    if (content !== (ticket.description ?? "")) body.description = content;
+    if (localStatus !== ticket.status) body.status = localStatus;
+    if (localPriority !== ticket.priority) body.priority = localPriority;
+    if (localModuleId !== ticket.module.id) body.moduleId = localModuleId;
+    const currentAssigneeIds = ticket.assignees.map((a) => a.id).sort();
+    const nextAssigneeIds = [...localAssigneeIds].sort();
+    if (JSON.stringify(currentAssigneeIds) !== JSON.stringify(nextAssigneeIds)) {
+      body.assigneeIds = localAssigneeIds;
+    }
+
+    if (Object.keys(body).length === 0) {
+      setIsEditing(false);
       return;
     }
-    setMessage("详情已保存");
+
+    const res = await fetch(`/api/tickets/${ticket.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      setMessage(data.error ?? "保存失败");
+      return;
+    }
+    setMessage("已保存");
     setIsEditing(false);
     await refreshTicket();
   }
 
-  async function updateModule() {
-    setMessage("");
+  function cancelEdit() {
+    setIsEditing(false);
     if (!ticket) return;
-    const res = await fetch(`/api/tickets/${ticket.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ moduleId: localModuleId }),
-    });
-    if (!res.ok) {
-      setMessage("移动模块失败");
-      return;
-    }
-    setMessage("模块已移动");
-    await refreshTicket();
+    setLocalStatus(ticket.status);
+    setLocalAssigneeIds(ticket.assignees.map((a) => a.id));
+    setLocalModuleId(ticket.module.id);
+    setLocalPriority(ticket.priority ?? 2);
+    const { plainContent, images } = extractInlineImages(ticket.description || "");
+    setEditTitle(ticket.title);
+    setEditDescription(plainContent);
+    setEditDescriptionImages(images);
   }
 
-  async function updateAssignee() {
-    setMessage("");
+  async function deleteTicket() {
     if (!ticket) return;
-    const res = await fetch(`/api/tickets/${ticket.id}/assignee`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ assigneeIds: localAssigneeIds }),
-    });
-    if (!res.ok) {
-      setMessage("指派人保存失败");
-      return;
-    }
-    setMessage("指派人已更新");
-    await refreshTicket();
-  }
-
-  async function updateStatus() {
+    if (!window.confirm(`确定删除单子 #${ticket.ticketNo} 吗？`)) return;
     setMessage("");
-    if (!ticket || !localStatus) return;
-
-    if (isProgramTicket && localStatus === "DELIVERED" && programBugRelations.length === 0) {
-      setProgramShowBugPushModal(true);
-      return;
-    }
-
-    const res = await fetch(`/api/tickets/${ticket.id}/status`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: localStatus }),
-    });
+    const res = await fetch(`/api/tickets/${ticket.id}`, { method: "DELETE" });
     if (!res.ok) {
-      setMessage("状态保存失败");
+      setMessage("删除失败");
       return;
     }
-    setMessage("状态已保存");
-    await refreshTicket();
-  }
-
-  async function updatePriority() {
-    setMessage("");
-    if (!ticket) return;
-    const res = await fetch(`/api/tickets/${ticket.id}/priority`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ priority: localPriority }),
-    });
-    if (!res.ok) {
-      setMessage("优先级保存失败");
-      return;
-    }
-    setMessage("优先级已保存");
-    await refreshTicket();
+    router.push("/tasks");
   }
 
   function openPreview(img: { src: string; name: string }) {
@@ -332,15 +328,82 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     setTimeout(() => { isLightboxOpenRef.current = false; }, 0);
   }
 
-  function insertDescriptionImage(file: File) {
-    fileToDataUrl(file).then((src) => {
-      if (src) setEditDescriptionImages((prev) => [...prev, { src, name: file.name }]);
-    });
+  async function insertDescriptionImage(file: File) {
+    try {
+      const { url: relUrl } = await uploadImage(file);
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const absoluteUrl = origin ? `${origin}${relUrl}` : relUrl;
+      setEditDescriptionImages((prev) => [...prev, { src: absoluteUrl, name: file.name }]);
+    } catch {
+      // 静默失败：编辑面板暂不弹错，避免干扰主流程
+    }
   }
 
   function removeDescriptionImage(index: number) {
     setEditDescriptionImages((prev) => prev.filter((_, i) => i !== index));
   }
+
+  // Build merged activity log (time-descending)
+  const activityLog = useMemo<EnrichedHistoryEntry[]>(() => {
+    if (!ticket) return [];
+    const entries: EnrichedHistoryEntry[] = [];
+
+    // Creation
+    entries.push({
+      type: "created",
+      changedBy: { name: session?.user?.name ?? null, email: session?.user?.email ?? "" },
+      createdAt: new Date(),
+    });
+
+    // Status history
+    for (const item of ticket.statusHistory ?? []) {
+      entries.push({
+        type: "status",
+        status: item.status,
+        changedBy: item.changedBy,
+        createdAt: new Date(item.createdAt),
+      });
+    }
+
+    // Assignee history
+    for (const item of ticket.assigneeHistory ?? []) {
+      entries.push({
+        type: "assignee",
+        assignees: item.assignees,
+        changedBy: item.changedBy,
+        createdAt: new Date(item.createdAt),
+      });
+    }
+
+    // Moderation logs: priority + module changes
+    const logs = (ticket as Ticket & { moderationLogs?: ModerationLogEntry[] }).moderationLogs ?? [];
+    for (const log of logs) {
+      if (log.action === ModerationAction.EDIT_TICKET && log.reason?.startsWith("优先级变更为 P")) {
+        const p = parseInt(log.reason.replace("优先级变更为 P", ""), 10);
+        if (!isNaN(p)) {
+          entries.push({
+            type: "priority",
+            priority: p,
+            changedBy: log.actor,
+            createdAt: new Date(log.createdAt),
+          });
+        }
+      } else if (log.action === ModerationAction.CHANGE_TICKET_MODULE) {
+        const match = log.reason?.match(/从模块 (.+?) 到 (.+)/);
+        if (match) {
+          entries.push({
+            type: "module",
+            from: match[1],
+            to: match[2],
+            changedBy: log.actor,
+            createdAt: new Date(log.createdAt),
+          });
+        }
+      }
+    }
+
+    return entries.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }, [ticket, session?.user]);
 
   if (ticketLoading) return <TicketDetailLoading />;
 
@@ -382,9 +445,44 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
               <section className="rounded-xl border border-ink-200 bg-white p-6 shadow-soft">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0 flex-1">
-                    <span className={`mb-2 inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_STYLE[ticket.status]}`}>
-                      {STATUS_LABEL[ticket.status]}
-                    </span>
+                    <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+                      {/* 优先级 */}
+                      <span className="inline-flex items-center gap-1 text-ink-500">
+                        <span className={`rounded px-1.5 py-0.5 font-semibold ${
+                          ticket.priority === 0 ? "bg-red-100 text-red-700" :
+                          ticket.priority === 1 ? "bg-amber-100 text-amber-700" :
+                          ticket.priority === 2 ? "bg-brand-50 text-brand-700" :
+                          "bg-ink-100 text-ink-600"
+                        }`}>
+                          {PRIORITY_LABEL[ticket.priority as 0 | 1 | 2 | 3]}
+                        </span>
+                      </span>
+                      {/* 状态 */}
+                      <span className="inline-flex items-center gap-1">
+                        <span className={`rounded-full px-2.5 py-0.5 font-medium ${STATUS_STYLE[ticket.status]}`}>
+                          {STATUS_LABEL[ticket.status]}
+                        </span>
+                      </span>
+                      {/* 指派人 */}
+                      {ticket.assignees.length > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-ink-500">
+                          {ticket.assignees.length > 3 ? (
+                            <span className="text-ink-400">+{ticket.assignees.length - 3}</span>
+                          ) : (
+                            <span className="text-ink-700">{ticket.assignees.map((a) => a.name || a.email.split("@")[0]).join("、")}</span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-ink-400">
+                          <span>指派</span>
+                          <span>未指派</span>
+                        </span>
+                      )}
+                      {/* 模块 */}
+                      <span className="inline-flex items-center gap-1 text-ink-500">
+                        <span className="text-ink-700">{ticket.module.name}</span>
+                      </span>
+                    </div>
                     {isEditing ? (
                       <input
                         type="text"
@@ -396,15 +494,51 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                       <h2 className="text-xl font-semibold">{ticket.title}</h2>
                     )}
                   </div>
-                  {canEdit && !isEditing && (
-                    <button
-                      type="button"
-                      onClick={() => setIsEditing(true)}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink-200 px-3 py-1.5 text-sm text-ink-700 hover:bg-ink-100"
-                    >
-                      <IconEdit className="h-4 w-4" /> 编辑
-                    </button>
-                  )}
+                  <div className="flex shrink-0 items-center gap-2">
+                    {isEditing ? (
+                      <button
+                        type="button"
+                        onClick={cancelEdit}
+                        className="rounded-lg border border-ink-200 px-3 py-1.5 text-sm hover:bg-ink-100"
+                      >
+                        取消
+                      </button>
+                    ) : (
+                      <>
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => setIsEditing(true)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-ink-200 px-3 py-1.5 text-sm text-ink-700 hover:bg-ink-100"
+                          >
+                            <IconEdit className="h-4 w-4" /> 编辑
+                          </button>
+                        )}
+                        {isRoot && !isEditing && (
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={() => setKebabOpen((v) => !v)}
+                              className="flex h-9 w-9 items-center justify-center rounded-lg border border-ink-200 text-ink-500 hover:bg-ink-100"
+                            >
+                              <IconMenu className="h-4 w-4" />
+                            </button>
+                            {kebabOpen && (
+                              <div className="absolute right-0 top-full z-10 mt-1 w-40 rounded-lg border border-ink-200 bg-white py-1 shadow-lg">
+                                <button
+                                  type="button"
+                                  onClick={() => { setKebabOpen(false); deleteTicket(); }}
+                                  className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-danger hover:bg-ink-50"
+                                >
+                                  <IconTrash className="h-4 w-4" /> 删除单子
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
 
                 <div className="mt-4">
@@ -431,6 +565,31 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                           ))}
                         </div>
                       )}
+                      <div className="flex items-center gap-2 px-3 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => imageInputRef.current?.click()}
+                          className="flex items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-sm text-ink-700 hover:bg-ink-100"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21,15 16,10 5,21" /></svg>
+                          上传图片
+                        </button>
+                      </div>
+                      <input
+                        ref={imageInputRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={(e) => {
+                          const files = e.target.files;
+                          if (!files) return;
+                          for (const file of files) {
+                            insertDescriptionImage(file);
+                          }
+                          e.target.value = "";
+                        }}
+                      />
                       <textarea
                         value={editDescription}
                         onChange={(e) => setEditDescription(e.target.value)}
@@ -457,14 +616,84 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                   )}
                 </div>
 
+                {/* Editing fields — priority / status / assignee / module */}
+                {isEditing && (
+                  <div className="mt-5 space-y-4 rounded-lg border border-ink-100 bg-ink-50 p-4">
+                    {/* Priority */}
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-ink-600">优先级</label>
+                      <div className="flex gap-1">
+                        {([0, 1, 2, 3] as const).map((p) => (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => setLocalPriority(p)}
+                            className={`rounded border px-2.5 py-1 text-xs font-semibold transition-colors ${
+                              localPriority === p
+                                ? p === 0
+                                  ? "border-red-300 bg-red-100 text-red-700"
+                                  : p === 1
+                                    ? "border-amber-300 bg-amber-100 text-amber-700"
+                                    : p === 2
+                                      ? "border-brand-300 bg-brand-50 text-brand-700"
+                                      : "border-ink-300 bg-ink-100 text-ink-600"
+                                : "border-ink-200 bg-white text-ink-500 hover:bg-ink-50"
+                            }`}
+                          >
+                            {PRIORITY_LABEL[p]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Status */}
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-ink-600">状态</label>
+                      <select
+                        value={localStatus ?? ticket.status}
+                        onChange={(e) => setLocalStatus(e.target.value as TicketStatus)}
+                        className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                      >
+                        {allowedStatuses.map((s) => (
+                          <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Assignees */}
+                    {(isRoot || userResps.includes(ticket.module.responsibility.kind as ResponsibilityKind)) && (
+                      <div>
+                        <label className="mb-1.5 block text-xs font-medium text-ink-600">参与人员</label>
+                        <AssigneePicker users={users} value={localAssigneeIds} onChange={setLocalAssigneeIds} />
+                      </div>
+                    )}
+
+                    {/* Module (ROOT only) */}
+                    {isRoot && (
+                      <div>
+                        <label className="mb-1.5 block text-xs font-medium text-ink-600">模块</label>
+                        <select
+                          value={localModuleId}
+                          onChange={(e) => setLocalModuleId(e.target.value)}
+                          className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                        >
+                          {modules.map((m) => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {canEdit && isEditing && (
                   <div className="mt-4 flex gap-2">
-                    <button type="button" onClick={saveTicketDetails} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700">
+                    <button type="button" onClick={saveAll} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700">
                       保存
                     </button>
                     <button
                       type="button"
-                      onClick={() => setIsEditing(false)}
+                      onClick={cancelEdit}
                       className="rounded-lg border border-ink-200 px-4 py-2 text-sm hover:bg-ink-100"
                     >
                       取消
@@ -504,132 +733,54 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
               )}
             </div>
 
-            {/* Right sidebar */}
+            {/* Right sidebar — Activity log */}
             <div className="space-y-5">
               <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
-                <h2 className="mb-3 font-medium">优先级</h2>
-                <div className="mb-3 flex items-center gap-2">
-                  <div className="flex gap-1">
-                    {([0, 1, 2, 3] as const).map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => setLocalPriority(p)}
-                        className={`rounded border px-2 py-1 text-xs font-semibold transition-colors ${
-                          localPriority === p
-                            ? p === 0
-                              ? "bg-red-100 text-red-700 border-red-300"
-                              : p === 1
-                                ? "bg-amber-100 text-amber-700 border-amber-300"
-                                : p === 2
-                                  ? "bg-brand-50 text-brand-700 border-brand-300"
-                                  : "bg-ink-100 text-ink-600 border-ink-300"
-                            : "border-ink-200 bg-white text-ink-500 hover:bg-ink-50"
-                        }`}
-                      >
-                        {PRIORITY_LABEL[p]}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={updatePriority}
-                    className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
-                  >
-                    保存
-                  </button>
-                </div>
-              </section>
-
-              <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
-                <h2 className="mb-3 font-medium">状态</h2>
-                <div className="mb-3 flex items-center gap-2">
-                  <select
-                    value={localStatus ?? ticket.status}
-                    onChange={(e) => setLocalStatus(e.target.value as TicketStatus)}
-                    className="flex-1 rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
-                  >
-                    {allowedStatuses.map((s) => (
-                      <option key={s} value={s}>{STATUS_LABEL[s]}</option>
-                    ))}
-                  </select>
-                  <button type="button" onClick={updateStatus} className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700">
-                    保存
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {ticket.statusHistory.length === 0 ? (
-                    <p className="text-xs text-ink-400">暂无状态变更记录</p>
+                <h2 className="mb-3 flex items-center gap-1.5 font-medium">
+                  <IconClock className="h-4 w-4 text-ink-400" />
+                  操作记录
+                </h2>
+                <div className="space-y-3">
+                  {activityLog.length === 0 ? (
+                    <p className="text-xs text-ink-400">暂无操作记录</p>
                   ) : (
-                    ticket.statusHistory.slice(0, 5).map((item) => (
-                      <div key={item.id} className="flex items-start gap-2 text-xs text-ink-500">
-                        <IconClock className="mt-0.5 h-3.5 w-3.5 text-ink-300" />
-                        <div>
-                          <p><span className="font-medium text-ink-700">{STATUS_LABEL[item.status]}</span> · {item.changedBy.name || item.changedBy.email}</p>
-                          <p className="text-ink-400">{new Date(item.createdAt).toLocaleString()}</p>
+                    activityLog.map((entry, idx) => {
+                      const actorName = entry.changedBy.name || entry.changedBy.email || "系统";
+                      const timeStr = entry.createdAt.toLocaleString("zh-CN", {
+                        month: "2-digit",
+                        day: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      });
+                      let summary = "";
+                      if (entry.type === "created") {
+                        summary = "创建单子";
+                      } else if (entry.type === "status") {
+                        summary = `变更状态为「${STATUS_LABEL[entry.status]}」`;
+                      } else if (entry.type === "assignee") {
+                        summary = `变更指派为「${formatAssigneeList(entry.assignees.map(a => ({ ...a, role: "USER" })))}」`;
+                      } else if (entry.type === "priority") {
+                        summary = `变更优先级为 P${entry.priority}`;
+                      } else if (entry.type === "module") {
+                        summary = `移动模块从「${entry.from}」到「${entry.to}」`;
+                      }
+                      return (
+                        <div key={idx} className="flex items-start gap-2 text-xs text-ink-500">
+                          <IconClock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-300" />
+                          <div>
+                            <p className="text-ink-700">{summary}</p>
+                            <p className="text-ink-400">{actorName} · {timeStr}</p>
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </section>
-
-              <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
-                <h2 className="mb-3 font-medium">参与人员</h2>
-                <div className="mb-3 flex flex-wrap gap-2">
-                  {ticket.assignees.length === 0 ? (
-                    <span className="text-sm text-ink-400">未指派</span>
-                  ) : (
-                    ticket.assignees.map((u) => (
-                      <span key={u.id} className="flex items-center gap-1.5 rounded-full bg-ink-100 py-1 pl-1 pr-2.5 text-xs">
-                        <Avatar name={u.name} />
-                        {u.name || u.email}
-                      </span>
-                    ))
-                  )}
-                </div>
-                {(isRoot || userResps.includes(ticket.module.responsibility.kind as ResponsibilityKind)) && (
-                  <div className="space-y-3">
-                    <AssigneePicker users={users} value={localAssigneeIds} onChange={setLocalAssigneeIds} />
-                    <button type="button" onClick={updateAssignee} className="w-full rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700">
-                      保存指派
-                    </button>
-                  </div>
-                )}
-                {ticket.assigneeHistory.length > 0 && (
-                  <div className="mt-4 border-t border-ink-100 pt-3">
-                    <h3 className="mb-2 text-xs font-medium text-ink-500">指派历史</h3>
-                    <div className="space-y-2">
-                      {ticket.assigneeHistory.slice(0, 4).map((item) => (
-                        <div key={item.id} className="text-xs text-ink-500">
-                          <p className="text-ink-700">{formatAssigneeList(item.assignees)}</p>
-                          <p className="text-ink-400">{item.changedBy.name || item.changedBy.email} · {new Date(item.createdAt).toLocaleString()}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </section>
-
-              {isRoot && (
-                <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
-                  <h2 className="mb-3 font-medium">移动到其他模块</h2>
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={localModuleId}
-                      onChange={(e) => setLocalModuleId(e.target.value)}
-                      className="min-w-0 flex-1 rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
-                    >
-                      {modules.map((m) => (
-                        <option key={m.id} value={m.id}>{m.name}</option>
-                      ))}
-                    </select>
-                    <button type="button" onClick={updateModule} className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700">
-                      移动
-                    </button>
-                  </div>
-                </section>
-              )}
+              <TicketCommentsPanel
+                ticketId={ticket.id}
+                ticketNumericId={ticket.ticketNo.toString()}
+              />
             </div>
           </div>
         </div>

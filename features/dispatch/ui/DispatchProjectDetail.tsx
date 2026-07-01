@@ -20,6 +20,7 @@ import {
   type Ticket,
   type MyTicket,
   type Project,
+  TicketStatus,
   STATUS_LABEL,
   STATUS_STYLE,
   STATUS_ORDER,
@@ -327,17 +328,28 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
     await loadProject();
   }
 
-  async function closeTicket(ticket: MyTicket) {
-    if (!window.confirm(`确定关闭单子 #${ticket.ticketNo} 吗？`)) {
+  async function handleTicketStatus(ticket: MyTicket) {
+    const isClosed = ticket.status === "CLOSED";
+    const action = isClosed ? "取消关闭" : "关闭";
+    const newStatus: TicketStatus = isClosed ? "DEVELOPING" : "CLOSED";
+    const confirmMsg = isClosed
+      ? `确定取消关闭单子 #${ticket.ticketNo} 吗？状态将恢复为开发中。`
+      : `确定关闭单子 #${ticket.ticketNo} 吗？`;
+
+    if (!window.confirm(confirmMsg)) {
       return;
     }
     setMessage("");
-    const res = await fetch(`/api/tickets/${ticket.id}/close`, { method: "POST" });
+    const res = await fetch(`/api/tickets/${ticket.id}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: newStatus }),
+    });
     if (!res.ok) {
-      toast.error("关闭单子失败");
+      toast.error(`${action}单子失败`);
       return;
     }
-    toast.success("单子已关闭");
+    toast.success(`单子已${action}`);
     await loadProject();
   }
 
@@ -642,10 +654,18 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
                               <div className="mt-2 flex items-center gap-3">
                                 <button
                                   type="button"
-                                  onClick={() => closeTicket(ticket)}
+                                  onClick={() => handleTicketStatus(ticket)}
                                   className="inline-flex items-center gap-1 text-xs text-ink-400 hover:text-emerald-600"
                                 >
-                                  <IconX className="h-3.5 w-3.5" /> 关闭单子
+                                  {ticket.status === "CLOSED" ? (
+                                    <>
+                                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg> 取消关闭
+                                    </>
+                                  ) : (
+                                    <>
+                                      <IconX className="h-3.5 w-3.5" /> 关闭单子
+                                    </>
+                                  )}
                                 </button>
                                 <button
                                   type="button"
@@ -762,10 +782,18 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
                                   <div className="mt-2 flex items-center gap-3">
                                     <button
                                       type="button"
-                                      onClick={() => closeTicket(ticket)}
+                                      onClick={() => handleTicketStatus(ticket)}
                                       className="inline-flex items-center gap-1 text-xs text-ink-400 hover:text-emerald-600"
                                     >
-                                      <IconX className="h-3.5 w-3.5" /> 关闭单子
+                                      {ticket.status === "CLOSED" ? (
+                                        <>
+                                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg> 取消关闭
+                                        </>
+                                      ) : (
+                                        <>
+                                          <IconX className="h-3.5 w-3.5" /> 关闭单子
+                                        </>
+                                      )}
                                     </button>
                                     <button
                                       type="button"

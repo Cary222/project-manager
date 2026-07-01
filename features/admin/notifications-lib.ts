@@ -5,7 +5,8 @@ export type NotificationTypeValue =
   | "TICKET_ASSIGNED"
   | "TICKET_DELIVERED"
   | "TICKET_COMPLETED"
-  | "TICKET_STATUS_CHANGED";
+  | "TICKET_STATUS_CHANGED"
+  | "TICKET_MENTIONED";
 
 type NotificationDelegate = {
   create: (...args: unknown[]) => Promise<unknown>;
@@ -127,6 +128,18 @@ export function buildStatusChangedNotification(params: {
   return {
     title: `单子 #${params.ticketNo} 状态更新`,
     content: `${params.actorName} 将「${params.title}」更新为${params.statusLabel}。`,
+  };
+}
+
+export function buildMentionedNotification(params: {
+  ticketNo: number;
+  title: string;
+  actorName: string;
+  excerpt: string;
+}) {
+  return {
+    title: `${params.actorName} 在单子 #${params.ticketNo} 中提到了你`,
+    content: `${params.actorName} 在「${params.title}」中提到了你:${params.excerpt}`,
   };
 }
 

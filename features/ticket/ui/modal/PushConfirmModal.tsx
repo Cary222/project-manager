@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { AssigneePicker } from "@/shared/ui/AssigneePicker";
 import { composeImageMarkdown } from "@/shared/lib/pkm";
-import { fileToDataUrl } from "@/shared/lib/upload";
+import { uploadImage } from "@/shared/lib/upload";
 
 export type PushConfirmModalProps = {
   mode: "program" | "bug";
@@ -65,10 +65,15 @@ export function PushConfirmModal({
   // Bug 单时复用程序单模块，程序单时用当前职责模块
   const availableModules = mode === "bug" ? programModules : responsibility.modules;
 
-  function insertImage(file: File) {
-    fileToDataUrl(file).then((src) => {
-      if (src) setDescriptionImages((prev) => [...prev, { src, name: file.name }]);
-    });
+  async function insertImage(file: File) {
+    try {
+      const { url: relUrl } = await uploadImage(file);
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const absoluteUrl = origin ? `${origin}${relUrl}` : relUrl;
+      setDescriptionImages((prev) => [...prev, { src: absoluteUrl, name: file.name }]);
+    } catch {
+      // 静默失败
+    }
   }
 
   function removeImage(index: number) {

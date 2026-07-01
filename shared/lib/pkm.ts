@@ -63,12 +63,15 @@ export function normalizePkmAttachments(input: unknown) {
 }
 
 /**
- * 从 Markdown 正文中提取内嵌 data URL 图片，返回图片列表和去掉这些图片后的纯正文。
- * 只处理 data:image/ 开头的内嵌图片，外部链接图片不受影响。
+ * 从 Markdown 正文中提取内嵌图片，返回图片列表和去掉这些图片后的纯正文。
+ * 匹配两类：
+ *   - `![alt](data:image/...)` 客户端遗留的 data URL 图片
+ *   - `![alt](/api/upload/<id>)` 服务端上传的图片代理 URL
  */
 export type InlineImage = { src: string; name: string };
 
-const INLINE_IMAGE_PATTERN = /!\[([^\]]*)\]\((data:image\/[^)\s]+)\)/g;
+const INLINE_IMAGE_PATTERN =
+  /!\[([^\]]*)\]\((data:image\/[^)\s]+|\/api\/upload\/[a-z0-9]+)\)/gi;
 
 export function extractInlineImages(markdown: string): {
   images: InlineImage[];

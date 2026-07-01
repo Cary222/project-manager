@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { AssigneePicker } from "@/shared/ui/AssigneePicker";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
 import { composeImageMarkdown, extractInlineImages } from "@/shared/lib/pkm";
-import { fileToDataUrl } from "@/shared/lib/upload";
+import { uploadImage } from "@/shared/lib/upload";
 import { computeDefaultDeadline } from "@/shared/lib/ticket-deadline";
 import {
   createTicketAction,
@@ -158,6 +158,7 @@ export function CreateTicketForm({
     return `${year}-${month}-${day}T${hours}:${minutes}`;
   }
   const isLightboxOpenRef = useRef(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   // Synchronous re-entrancy guard. `submitting` (useState) only blocks clicks after
   // React re-renders, but a fast double-click can fire `handleSubmit` twice in
   // the same event loop. This ref flips synchronously on the first call so the
@@ -198,7 +199,7 @@ export function CreateTicketForm({
     }, 0);
   }
 
-  function compressImage(file: File, maxDim = 1600, quality = 0.82): Promise<string> {
+  function compressImage(file: File, maxDim = 1600, quality = 0.82): Promise<Blob> {
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
       const img = new Image();
@@ -213,13 +214,22 @@ export function CreateTicketForm({
           const ctx = canvas.getContext("2d");
           if (!ctx) {
             URL.revokeObjectURL(url);
-            resolve(URL.createObjectURL(file));
+            resolve(file);
             return;
           }
           ctx.drawImage(img, 0, 0, w, h);
-          const dataUrl = canvas.toDataURL("image/jpeg", quality);
-          URL.revokeObjectURL(url);
-          resolve(dataUrl);
+          canvas.toBlob(
+            (blob) => {
+              URL.revokeObjectURL(url);
+              if (!blob) {
+                resolve(file);
+                return;
+              }
+              resolve(blob);
+            },
+            "image/jpeg",
+            quality,
+          );
         } catch (err) {
           URL.revokeObjectURL(url);
           reject(err);
@@ -227,7 +237,7 @@ export function CreateTicketForm({
       };
       img.onerror = () => {
         URL.revokeObjectURL(url);
-        fileToDataUrl(file).then(resolve).catch(reject);
+        resolve(file);
       };
       img.src = url;
     });
@@ -236,7 +246,16 @@ export function CreateTicketForm({
   async function insertImage(file: File) {
     try {
       const compressed = await compressImage(file);
-      setDescriptionImages((prev) => [...prev, { src: compressed, name: file.name }]);
+      const compressedFile =
+        compressed instanceof File
+          ? compressed
+          : new File([compressed], file.name.replace(/\.(png|webp|gif)$/i, ".jpg"), {
+              type: "image/jpeg",
+            });
+      const { url: relUrl } = await uploadImage(compressedFile);
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const absoluteUrl = origin ? `${origin}${relUrl}` : relUrl;
+      setDescriptionImages((prev) => [...prev, { src: absoluteUrl, name: file.name }]);
     } catch (err) {
       onMessage?.(`图片处理失败: ${err instanceof Error ? err.message : "unknown"}`);
     }
@@ -713,6 +732,29 @@ export function CreateTicketForm({
                 ))}
               </div>
             )}
+            <div className="flex items-center gap-2 px-3 pt-2">
+              <button
+                type="button"
+                onClick={() => imageInputRef.current?.click()}
+                className="flex items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-sm text-ink-700 hover:bg-ink-100"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21,15 16,10 5,21" /></svg>
+                上传图片
+              </button>
+            </div>
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                const files = e.target.files;
+                if (!files) return;
+                for (const file of files) insertImage(file);
+                e.target.value = "";
+              }}
+            />
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -732,20 +774,6 @@ export function CreateTicketForm({
               style={{ minHeight: "120px", resize: "none" }}
             />
           </div>
-        </label>
-
-        <label className="w-fit cursor-pointer rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm hover:bg-ink-100">
-          插入图片
-          <input
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) insertImage(file);
-              e.currentTarget.value = "";
-            }}
-          />
         </label>
 
         <div className="flex gap-2">

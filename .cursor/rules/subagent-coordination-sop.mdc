@@ -120,7 +120,26 @@ Feature3: fullstack-developer → Main 判断 → （需要 Review?）→ code-r
 每个审查 prompt 必含：
 - `## 必读产物路径`：对应 feature 的产物文件
 - `## 范围限定`：硬层 vs 软层（code-reviewer / ai-learning-mentor）
-- `## 报告输出文件`
+- `## 报告输出文件`：按 Rule 10 命名规范，两个审查 prompt 的路径必须不同
+  - `code-reviewer` → `docs/reviews/PR<N>-<feature>-code-reviewer.md`
+  - `ai-learning-mentor` → `docs/reviews/PR<N>-<feature>-ai-mentor.md`
+  - 文件头第一行必须是 `<!-- reviewer: <身份> (<硬层|软层>) -->`
+
+**Stage2 末尾 Main 合并（强制）：**
+
+```text
+两个审查产物就绪
+  ↓
+Main Read 两份报告（不要让子代理做合并）
+  ↓
+Main 写 docs/reports/PR<N>-<feature>-review.md
+  - 顶部注明 merged by Main, <日期>
+  - 硬层 section：贴入 code-reviewer 报告（标注来源）
+  - 软层 section：贴入 ai-learning-mentor 报告（标注来源）
+  - Main 自加 section：交叉验证结论 / Critical 是否已修复
+  ↓
+进入 Stage3
+```
 
 主代理在每个 feature 收到：
 - Dev Final Response
@@ -219,6 +238,33 @@ Smoke Review（code-reviewer）：
 > - 修改需求必须新建 Feature，不允许改原 Feature 的 Prompt
 > - 不同 Agent 拿到不同 Prompt 是混乱的根源
 
+### Rule 10 — 审查产物文件互斥（强制）
+
+> **同一 feature 的多个审查子代理，必须写入不同的报告文件。文件名前缀带身份标签。Main 负责合并。**
+>
+> **为什么这是强制而非推荐**：子代理是独立 chat context（见 Rule 8），无法看到对方产物；写同一个文件 = 后写者整文件覆盖前写者，连"在同一文件标注身份"都无法稳定生效。
+
+**文件命名规范：**
+
+| Agent | 产物文件（路径前缀） | 文件头身份标注 |
+|---|---|---|
+| `code-reviewer` | `docs/reviews/PR<N>-<feature>-code-reviewer.md` | `<!-- reviewer: code-reviewer (硬层) -->` |
+| `ai-learning-mentor` | `docs/reviews/PR<N>-<feature>-ai-mentor.md` | `<!-- reviewer: ai-learning-mentor (软层) -->` |
+| Main（Stage2 末尾合并） | `docs/reports/PR<N>-<feature>-review.md` | 注明 merged by Main |
+
+**强制约束：**
+
+- 两个审查子代理**禁止**写入同一文件路径
+- 文件名前缀必须带身份标签（`-code-reviewer.md` / `-ai-mentor.md`），不得仅靠文件头 `<!-- -->` 标注身份
+- 合并由 Main 在 Stage2 末尾执行，**不派子代理做合并**（合并本身是 Main 的交叉验证环节，正好用上 Main 能看到两份产物的能力）
+- 主代理在 Stage1 / Stage2 派审查 prompt 时，`## 报告输出文件` 必须填上表里具体的两个不同路径——填错路径属于 Main 派发错误，需在派发前自检
+
+**Main 自检 checklist（派审查前）：**
+
+- [ ] `## 报告输出文件` 是否填了两个**不同**的路径？
+- [ ] 路径是否符合 `docs/reviews/PR<N>-<feature>-{code-reviewer|ai-mentor}.md` 规范？
+- [ ] 是否在 prompt 里写明文件头要带的 `<!-- reviewer: ... -->` 注释？
+
 ---
 
 ## 错误模式（禁止）
@@ -263,6 +309,7 @@ Task(ai-learning-mentor) — 等 PR2 完成后做审计
 - [ ] 每个 feature 的文件边界互斥（Stage0 已确认）
 - [ ] 每个子代理 prompt 都包含 `## 必读产物路径` 和 `## 范围限定`
 - [ ] Stage2 Review 触发条件已判断（业务/DB/架构/权限/API 才 Review）
+- [ ] **审查产物路径互斥（Rule 10）**：两个审查子代理写入不同文件，Main 在 Stage2 末尾合并
 - [ ] Stage3 Merge 策略已定（Main 决策），Git 命令派给 fullstack-developer（**遵循 `git-commit-required.mdc`**）
 - [ ] Main 负责决策，不越权执行 Git / 不跳过 Stage / 不改派发后的 Scope
 
@@ -292,6 +339,13 @@ Task(ai-learning-mentor) — 等 PR2 完成后做审计
 - 不要写"等 X 子代理完成后做 Y"——你不知道 X 的状态
 - 如果收到 prompt 时需要等前置产出，请向主代理汇报"缺少前置产物"而不是 idle 等
 - 你只能建议，不能执行流程（Authority Boundary）
+
+## 报告输出文件（仅审查类 agent 必填，且路径由 Main 派发时指定）
+- 路径：[Main 在 prompt 里明确填入的产物文件路径]
+- 格式约束（Rule 10 强制）：
+  - 文件头第一行：`<!-- reviewer: <身份> (<硬层|软层>) -->`
+  - 不得写入其他审查 agent 的产物路径
+  - 不得追加 / 覆盖 / 修改其他审查 agent 产出的内容
 ```
 
 ---
