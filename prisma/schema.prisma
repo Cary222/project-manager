@@ -35,9 +35,11 @@ model User {
   createdTickets         Ticket[]                @relation("TicketCreator")
   ticketAssignments      TicketAssignee[]
   assigneeHistoryChanges TicketAssigneeHistory[] @relation("AssigneeHistoryActor")
+  ticketComments         TicketComment[]         @relation("TicketCommentAuthor")
   statusHistoryChanges   TicketStatusHistory[]   @relation("StatusHistoryActor")
   userOnProjects         UserOnProject[]
   responsibilities       UserResponsibility[]
+  uploadedFiles          UploadedFile[]
   weeklyReports          WeeklyReport[]
 
   @@schema("pm")
@@ -252,11 +254,28 @@ model Ticket {
   project         Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
   assignees       TicketAssignee[]
   assigneeHistory TicketAssigneeHistory[]
+  comments        TicketComment[]
   commits         TicketCommit[]
   repoBindings    TicketRepoBinding[]
   statusHistory   TicketStatusHistory[]
 
   @@index([status, deadline])
+  @@schema("pm")
+}
+
+model TicketComment {
+  id        String   @id @default(cuid())
+  ticketId  String
+  authorId  String
+  content   String
+  /// 用户在评论中用 @ 提到的人(userId 列表)。用于:1)发提及通知;2)防 XSS 渲染只允许在这里列出的用户
+  mentionedUserIds String[] @default([])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author    User     @relation("TicketCommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt(sort: Desc)])
   @@schema("pm")
 }
 
@@ -527,6 +546,22 @@ model WeeklyReportProject {
   @@schema("pm")
 }
 
+/// 用户上传的图片/文件二进制，存 DB 不落本地文件系统。
+/// URL 由 `/api/upload/[id]` 代理返回；这样多实例部署不需要共享磁盘。
+model UploadedFile {
+  id           String   @id @default(cuid())
+  uploaderId   String
+  originalName String
+  mimeType     String
+  size         Int
+  bytes        Bytes
+  createdAt    DateTime @default(now())
+  uploader     User     @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+
+  @@index([uploaderId, createdAt(sort: Desc)])
+  @@schema("pm")
+}
+
 enum UserRole {
   ROOT
   USER
@@ -582,6 +617,7 @@ enum NotificationType {
   TICKET_DELIVERED
   TICKET_COMPLETED
   TICKET_STATUS_CHANGED
+  TICKET_MENTIONED
 
   @@schema("pm")
 }
