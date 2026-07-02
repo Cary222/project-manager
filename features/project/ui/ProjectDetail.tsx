@@ -766,7 +766,7 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
                 const att = item.attachment;
                 const mimeType = att.mimeType ?? "application/octet-stream";
                 const isImage = mimeType.startsWith("image/");
-                const canPreview = isImage || mimeType === "application/pdf" || mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || mimeType === "text/markdown";
+                const canPreview = isImage || mimeType === "application/pdf" || mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || mimeType === "text/markdown" || mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
                 const fileUrl = `/api/upload/${att.fileId}`;
                 const size = att.size ?? 0;
                 const sizeLabel =

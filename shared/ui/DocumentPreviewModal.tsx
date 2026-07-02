@@ -186,6 +186,103 @@ export function DocumentPreviewModal({ file, onClose }: Props) {
       return;
     }
 
+    const isXlsx =
+      file.mimeType ===
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+    if (isXlsx) {
+      fetch(file.url)
+        .then((r) => r.arrayBuffer())
+        .then((buf) =>
+          import("xlsx").then((XLSX) => {
+            try {
+              const workbook = XLSX.read(buf, { type: "array" });
+              const sheetNames = workbook.SheetNames;
+
+              if (sheetNames.length === 0) {
+                setContent(
+                  <div className="rounded-lg border border-ink-200 bg-ink-50 p-4 text-sm text-ink-700">
+                    表格内容为空
+                  </div>,
+                );
+                return;
+              }
+
+              const sheetName = sheetNames[0];
+              const sheet = workbook.Sheets[sheetName];
+              const data = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as unknown as (string | number | null | undefined)[][];
+
+              if (data.length === 0) {
+                setContent(
+                  <div className="rounded-lg border border-ink-200 bg-ink-50 p-4 text-sm text-ink-700">
+                    表格内容为空
+                  </div>,
+                );
+                return;
+              }
+
+              const headers = data[0].map((h) =>
+                String(h ?? ""),
+              );
+              const rows = data.slice(1);
+
+              setContent(
+                <div className="max-h-[70vh] overflow-auto rounded-lg border border-ink-200 bg-white">
+                  <table className="w-full border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-brand-50">
+                        {headers.map((h, i) => (
+                          <th
+                            key={i}
+                            className="border border-ink-200 px-3 py-2 text-left font-semibold text-ink-700"
+                          >
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, ri) => (
+                        <tr key={ri} className={ri % 2 === 0 ? "bg-white" : "bg-ink-50/50"}>
+                          {headers.map((_, ci) => (
+                            <td
+                              key={ci}
+                              className="border border-ink-200 px-3 py-1.5 text-ink-600"
+                            >
+                              {String(row[ci] ?? "")}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {sheetNames.length > 1 && (
+                    <p className="border-t border-ink-200 px-4 py-2 text-xs text-ink-400">
+                      共 {sheetNames.length} 个工作表，当前显示：{sheetName}
+                    </p>
+                  )}
+                </div>,
+              );
+            } catch {
+              setContent(
+                <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+                  表格解析失败，请尝试下载查看
+                </div>,
+              );
+            }
+          }),
+        )
+        .catch((err: unknown) => {
+          console.error("[DocumentPreviewModal] fetch xlsx failed", err);
+          setContent(
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+              文件下载失败，请稍后重试
+            </div>,
+          );
+        });
+      return;
+    }
+
     setContent(
       <div className="flex flex-col items-center gap-3 py-12 text-center">
         <p className="text-sm text-ink-500">暂不支持预览此格式，可下载查看</p>

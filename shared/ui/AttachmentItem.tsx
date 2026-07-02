@@ -36,6 +36,12 @@ function getFileBadge(mimeType: string) {
         MD
       </span>
     );
+  if (mimeType.includes("spreadsheet") || mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    return (
+      <span className="rounded bg-green-50 px-1.5 py-0.5 text-xs font-bold text-green-600">
+        XLSX
+      </span>
+    );
   return (
     <span className="rounded bg-ink-100 px-1.5 py-0.5 text-xs font-medium text-ink-500">
       文件
@@ -50,6 +56,7 @@ function isPreviewable(mimeType: string) {
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "text/markdown",
       "text/x-markdown",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ].includes(mimeType) ||
     mimeType.startsWith("image/")
   );
