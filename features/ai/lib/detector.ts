@@ -3,23 +3,21 @@
  */
 
 const SEARCH_KEYWORDS: { pattern: RegExp; category: string }[] = [
-  // 项目相关
-  { pattern: /项目|工单|ticket|模块|提交|commit|分支|branch|issue|bug|feature/i, category: "project" },
+  // 需要查项目数据的强意图
+  { pattern: /(?:工单|ticket|tickets?|issue|issues?)\s*[#：:]\s*\d+/i, category: "project_id" },
+  { pattern: /(?:项目|模块|组件|功能)\s*(?:名|名称|是|叫)?\s*[的:]?\s*\S+/i, category: "project_name" },
 
-  // 检索动作
-  { pattern: /查找|搜索|查询|看看|查看|展示|显示|列出|罗列|获取|找到|有无|有哪些|多少|几个|什么/i, category: "search" },
+  // 明确检索动作
+  { pattern: /(?:帮我)?(?:找|查|搜|检索|调出|列出|查看)\b/i, category: "search_action" },
 
-  // 文档/代码相关
-  { pattern: /代码|函数|接口|api|文档|说明|注释|注释|readme|wiki|规范|规则/i, category: "technical" },
+  // 进度 / 统计类
+  { pattern: /(?:进度|完成率|统计|汇总|总计|排名|排行|未完成|进行中|逾期)/i, category: "statistics" },
 
-  // 技术文档与需求类
-  { pattern: /需求|设计|指标|参数|规格|要求|视场角|FOV|灵敏度|精度|分辨率|采样率|功耗|续航|防护|接口|协议/i, category: "spec" },
+  // 提交 / 分支 / 代码相关
+  { pattern: /(?:提交|commit|分支|branch|代码审查|pr|pull.request|review)/i, category: "vcs" },
 
-  // 统计相关
-  { pattern: /统计|汇总|合计|总共|总计|总数|排名|排行|进度|状态|完成|未完成|进行中/i, category: "statistics" },
-
-  // 工作流相关
-  { pattern: /任务|task|todo|待办|指派|分配|负责人|owner|review|审批|审核|approve/i, category: "workflow" },
+  // 工作流 / 指派
+  { pattern: /(?:指派|分配|负责人|owner|审批|审核|task|todo|待办)/i, category: "workflow" },
 ];
 
 /**

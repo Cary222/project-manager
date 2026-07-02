@@ -1,4 +1,4 @@
-export type AiMode = "auto" | "search" | "chat";
+export type AiMode = "auto" | "search" | "chat" | "web";
 
 export interface AiModeOption {
   key: AiMode;
@@ -25,5 +25,11 @@ export const AI_MODE_OPTIONS: AiModeOption[] = [
     label: "通用对话",
     icon: "message",
     description: "纯聊天模式，不检索知识库，快速响应",
+  },
+  {
+    key: "web",
+    label: "联网搜索",
+    icon: "globe",
+    description: "联网搜索最新信息，结合知识库回答",
   },
 ];

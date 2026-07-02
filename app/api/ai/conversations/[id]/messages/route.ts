@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { streamText, stepCountIs } from "ai";
 import { requireSession } from "@/shared/lib/permissions";
 import {
   appendMessage,
@@ -12,9 +13,8 @@ import {
   extractSourceReferences,
 } from "@/features/ai/lib/rag";
 import { enqueueSummarizeConversation } from "@/features/ai/lib/background-jobs";
-
-const AGNES_API_URL = "https://apihub.agnes-ai.com/v1/chat/completions";
-const MODEL = "agnes-2.0-flash";
+import { agnesFlash } from "@/features/ai/lib/agnes-provider";
+import { toolsetForMode } from "@/features/ai/tools";
 
 type Message = {
   id: string;
@@ -33,7 +33,7 @@ const messageSchema = z.object({
       })
     )
     .optional(),
-  mode: z.enum(["auto", "search", "chat"]).optional().default("auto"),
+  mode: z.enum(["auto", "search", "chat", "web"]).optional().default("auto"),
   forceSearch: z.boolean().optional().default(false),
 });
 
@@ -51,9 +51,6 @@ function buildSystemPrompt(
   const style = "回答特点：简洁、专业、友好；善用列表和结构化表达；主动提供相关链接和操作建议；遇到不确定的问题，诚实说明。";
   const userContext = `当前用户：${userName}`;
 
-  // Only inject the profile block if the profile has at least one populated
-  // field. Otherwise the LLM would echo "您的画像是 {}" verbatim — which
-  // reads as a bug even though it's technically true.
   const profileSummary = formatProfile(profile);
   const profileBlock = profileSummary
     ? `\n${profileSummary}`
@@ -111,18 +108,19 @@ export async function POST(
       );
     }
 
+    const [userProfile, appendUserMsg] = await Promise.all([
+      getOrCreateProfile(session.user.id),
+      appendMessage(conversationId, "user", message),
+    ]);
+    const profileData = userProfile?.profile ?? {};
+
     const useRag =
       mode === "search" ||
       (mode === "auto" && forceSearch);
 
-    const userProfile = await getOrCreateProfile(session.user.id);
-    const profileData = userProfile?.profile ?? {};
-
-    const context = useRag
-      ? await retrieveContext(message, { limit: 5, userId: session.user.id })
-      : { results: [], contextText: "" };
-
-    const prompt = useRag ? buildRagPrompt(message, context) : message;
+    const ragPromise = useRag
+      ? retrieveContext(message, { limit: 5, userId: session.user.id })
+      : Promise.resolve({ results: [] as Awaited<ReturnType<typeof retrieveContext>>["results"], contextText: "" });
 
     const systemPrompt = buildSystemPrompt(
       session.user.name || session.user.email,
@@ -130,9 +128,7 @@ export async function POST(
       profileData
     );
 
-    const messages: Message[] = [
-      { id: "system", role: "system", content: systemPrompt },
-    ];
+    const messages: Message[] = [];
 
     if (conversationHistory?.length) {
       for (const msg of conversationHistory.slice(-10)) {
@@ -144,143 +140,82 @@ export async function POST(
       }
     }
 
-    messages.push({ id: "current", role: "user", content: prompt });
+    const tools = toolsetForMode(mode);
+    const isRagToolEnabled = tools && "searchKnowledge" in tools;
 
-    const sources = useRag ? extractSourceReferences(context.results) : [];
+    const result = streamText({
+      model: agnesFlash,
+      system: systemPrompt,
+      messages: [...messages, { id: "current", role: "user", content: message }],
+      tools,
+      stopWhen: stepCountIs(2),
+      toolsContext: { viewerUserId: session.user.id } as any,
+      onFinish: async ({ text }) => {
+        const context = await ragPromise;
+        const sources = isRagToolEnabled ? extractSourceReferences(context.results) : [];
+        await appendMessage(conversationId, "assistant", text, sources.length > 0 ? sources : undefined);
+        enqueueSummarizeConversation(conversationId, { force: true });
+      },
+    });
 
     const responseStream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
+        const enqueueData = (obj: object) => {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(obj)}\n\n`)
+          );
+        };
 
         try {
-          await appendMessage(conversationId, "user", message);
-
-          const apiResponse = await fetch(AGNES_API_URL, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: "Bearer " + process.env.OPENAI_API_KEY,
-            },
-            body: JSON.stringify({
-              model: MODEL,
-              messages: messages.map((m) => ({
-                role: m.role,
-                content: m.content,
-              })),
-              stream: true,
-              temperature: 0.7,
-              max_tokens: 2048,
-            }),
+          enqueueData({
+            type: "conversation",
+            id: conversationId,
+            title: conversation.title,
           });
 
-          if (!apiResponse.ok) {
-            void apiResponse.text(); // consume body
-            controller.enqueue(
-              encoder.encode(
-                "data: " +
-                  JSON.stringify({
-                    type: "error",
-                    message: "API error: " + apiResponse.status,
-                  }) +
-                  "\n\n"
-              )
-            );
-            controller.close();
-            return;
-          }
-
-          if (!apiResponse.body) {
-            controller.enqueue(
-              encoder.encode(
-                "data: " +
-                  JSON.stringify({ type: "error", message: "No response body" }) +
-                  "\n\n"
-              )
-            );
-            controller.close();
-            return;
-          }
-
-          controller.enqueue(
-            encoder.encode(
-              "data: " +
-                JSON.stringify({
-                  type: "conversation",
-                  id: conversationId,
-                  title: conversation.title,
-                }) +
-                "\n\n"
-            )
-          );
-
-          const reader = apiResponse.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-          let fullContent = "";
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
-
-            for (const line of lines) {
-              if (line.startsWith("data: ")) {
-                const data = line.slice(6).trim();
-                if (data === "[DONE]") {
-                  continue;
-                }
-                try {
-                  const parsed = JSON.parse(data);
-                  if (
-                    parsed.choices &&
-                    parsed.choices[0] &&
-                    parsed.choices[0].delta &&
-                    parsed.choices[0].delta.content
-                  ) {
-                    const delta = parsed.choices[0].delta.content;
-                    fullContent += delta;
-                    controller.enqueue(
-                      encoder.encode(
-                        "data: " +
-                          JSON.stringify({ type: "text", delta: delta }) +
-                          "\n\n"
-                      )
-                    );
-                  }
-                } catch {
-                  // Skip invalid JSON
-                }
-              }
+          for await (const part of result.fullStream) {
+            switch (part.type) {
+              case "text-delta":
+                enqueueData({ type: "text", delta: part.text });
+                break;
+              case "tool-call":
+                enqueueData({
+                  type: "tool_call",
+                  toolCallId: part.toolCallId,
+                  toolName: part.toolName,
+                  input: part.input,
+                });
+                break;
+              case "tool-result":
+                enqueueData({
+                  type: "tool_result",
+                  toolCallId: part.toolCallId,
+                  toolName: part.toolName,
+                  input: part.input,
+                  output: part.output,
+                });
+                break;
+              case "tool-error":
+                enqueueData({
+                  type: "tool_error",
+                  toolCallId: part.toolCallId,
+                  toolName: part.toolName,
+                  error: part.error instanceof Error ? part.error.message : String(part.error),
+                });
+                break;
+              default:
+                // step-start / step-finish / reasoning / source / finish 等事件暂不推送
+                break;
             }
           }
 
-          await appendMessage(conversationId, "assistant", fullContent, sources.length > 0 ? sources : undefined);
-          enqueueSummarizeConversation(conversationId, { force: true });
-
-          if (sources.length > 0) {
-            controller.enqueue(
-              encoder.encode(
-                "data: " +
-                  JSON.stringify({ type: "sources", sources: sources }) +
-                  "\n\n"
-              )
-            );
-          }
-
+          enqueueData({ type: "done" });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Stream error";
           controller.enqueue(
             encoder.encode(
-              "data: " + JSON.stringify({ type: "done" }) + "\n\n"
-            )
-          );
-        } catch {
-          controller.enqueue(
-            encoder.encode(
-              "data: " +
-                JSON.stringify({ type: "error", message: "Stream error" }) +
-                "\n\n"
+              `data: ${JSON.stringify({ type: "error", message: msg })}\n\n`
             )
           );
         } finally {

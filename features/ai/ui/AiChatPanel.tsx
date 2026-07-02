@@ -8,6 +8,18 @@ import { AI_MODE_OPTIONS, type AiMode } from "@/features/ai/lib/types";
 import { shouldUseRag } from "@/features/ai/lib/detector";
 import { IconCheck, IconChevronDown, IconEdit, IconPlus, IconSparkles, IconX } from "@/shared/ui/icons";
 
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+function formatToolResult(output: unknown): string {
+  if (!output || typeof output !== "object") return "";
+  const o = output as Record<string, unknown>;
+  if (o.error) return `错误: ${o.error}`;
+  if (Array.isArray(o.results) && o.results.length > 0) return `找到 ${o.results.length} 条结果`;
+  if (typeof o.answer === "string" && o.answer) return `已获取摘要`;
+  if (Array.isArray(o.context) && o.context.length > 0) return `检索到 ${o.context.length} 条相关内容`;
+  return "完成";
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface Message {
@@ -399,6 +411,12 @@ export function AiChatPanel({
   // so the second bubble reads "AI 正在根据你的画像主动准备问候…" instead of
   // the generic "思考中".
   const [greetingHint, setGreetingHint] = useState<string | null>(null);
+  const [activeToolCall, setActiveToolCall] = useState<{
+    toolName: string;
+    displayLabel: string;
+    status: "calling" | "done" | "error";
+    message?: string;
+  } | null>(null);
   // Tracks whether the static preset-welcome typewriter is currently running
   // for the active conversation. Used to skip auto-scrolling to the typing
   // indicator while the typewriter is mid-animation.
@@ -778,6 +796,7 @@ export function AiChatPanel({
                 sources = parsed.sources ?? [];
                 setPendingSources(sources);
               } else if (parsed.type === "done") {
+                setActiveToolCall(null);
                 const assistantMessage: Message = {
                   id: `assistant-${Date.now()}`,
                   role: "assistant",
@@ -788,7 +807,32 @@ export function AiChatPanel({
                 setIsLoading(false);
                 setStreamingContent("");
                 setPendingSources([]);
+              } else if (parsed.type === "tool_call") {
+                const toolLabel =
+                  parsed.toolName === "webSearch"
+                    ? "联网搜索"
+                    : parsed.toolName === "searchKnowledge"
+                      ? "知识检索"
+                      : parsed.toolName;
+                setActiveToolCall({
+                  toolName: parsed.toolName,
+                  displayLabel: toolLabel,
+                  status: "calling",
+                });
+              } else if (parsed.type === "tool_result") {
+                if (activeToolCall?.toolName === parsed.toolName) {
+                  setActiveToolCall((prev) =>
+                    prev ? { ...prev, status: "done", message: formatToolResult(parsed.output) } : null
+                  );
+                }
+              } else if (parsed.type === "tool_error") {
+                if (activeToolCall?.toolName === parsed.toolName) {
+                  setActiveToolCall((prev) =>
+                    prev ? { ...prev, status: "error", message: parsed.error } : null
+                  );
+                }
               } else if (parsed.type === "error") {
+                setActiveToolCall(null);
                 throw new Error(parsed.message || "Stream error");
               }
             } catch {
@@ -811,6 +855,7 @@ export function AiChatPanel({
         ]);
         setIsLoading(false);
         setStreamingContent("");
+        setActiveToolCall(null);
       }
     },
     [conversationId, onConversationCreated]
@@ -835,6 +880,7 @@ export function AiChatPanel({
       });
       setIsLoading(false);
       setPendingSources([]);
+      setActiveToolCall(null);
     }
   }, [pendingSources]);
 
@@ -968,6 +1014,31 @@ export function AiChatPanel({
               the generic "思考中". */}
           {isLoading && !streamingContent && (
             <AiTypingBubble text={greetingHint ?? undefined} />
+          )}
+
+          {/* Tool call status indicator */}
+          {activeToolCall && (
+            <div
+              className={`mx-4 mb-2 flex items-center gap-2 rounded-lg px-3 py-2 text-xs ${
+                activeToolCall.status === "error"
+                  ? "bg-danger-50 text-danger-700"
+                  : activeToolCall.status === "done"
+                    ? "bg-success-50 text-success-700"
+                    : "bg-brand-50 text-brand-700"
+              }`}
+            >
+              {activeToolCall.status === "calling" && (
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-brand-500" />
+              )}
+              {activeToolCall.status === "done" && <IconCheck className="h-3 w-3" />}
+              {activeToolCall.status === "error" && <IconX className="h-3 w-3" />}
+              <span>
+                {activeToolCall.status === "calling" && `正在使用 ${activeToolCall.displayLabel}…`}
+                {activeToolCall.status === "done" && `${activeToolCall.displayLabel} 完成`}
+                {activeToolCall.status === "error" && `${activeToolCall.displayLabel} 失败`}
+                {activeToolCall.message && ` — ${activeToolCall.message}`}
+              </span>
+            </div>
           )}
 
           {/* Streaming message */}

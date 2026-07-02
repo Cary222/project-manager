@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { streamText, stepCountIs } from "ai";
 import { requireSession } from "@/shared/lib/permissions";
 import {
   appendMessage,
@@ -6,9 +7,7 @@ import {
   getConversationSummaries,
   getOrCreateProfile,
 } from "@/features/ai/lib/conversation-store";
-
-const AGNES_API_URL = "https://apihub.agnes-ai.com/v1/chat/completions";
-const MODEL = "agnes-2.0-flash";
+import { agnesFlash } from "@/features/ai/lib/agnes-provider";
 
 interface ProfileLike {
   roles?: string[];
@@ -84,8 +83,6 @@ export async function POST(
       );
     }
 
-    // Gather profile + recent summaries for context. Both are best-effort —
-    // the greeting should still work even when both are empty.
     const profileRecord = await getOrCreateProfile(session.user.id);
     const profileText = formatProfile((profileRecord?.profile ?? {}) as ProfileLike);
 
@@ -110,98 +107,37 @@ export async function POST(
       recentTopics.slice(0, 5)
     );
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { data: null, error: "OPENAI_API_KEY not configured" },
-        { status: 500 }
-      );
+    let fullContent = "";
+    try {
+      const result = streamText({
+        model: agnesFlash,
+        system: systemPrompt,
+        messages: [{ role: "user", content: "请基于以上画像生成问候语。" }],
+        stopWhen: stepCountIs(1),
+      });
+
+      for await (const part of result.fullStream) {
+        if (part.type === "text-delta") {
+          fullContent += part.text;
+        }
+      }
+    } catch (err) {
+      console.error("[greeting] stream error:", err);
     }
 
-    const apiResponse = await fetch(AGNES_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: "请基于以上画像生成问候语。" },
-        ],
-        stream: true,
-        temperature: 0.7,
-        max_tokens: 200,
-      }),
-    });
-
-    if (!apiResponse.ok || !apiResponse.body) {
-      // Fallback greeting — deterministic, no LLM required.
-      const fallback = "你好！我是小星，有什么可以帮你的吗？";
-      await appendMessage(conversationId, "assistant", fallback);
-      return new Response(
-        `data: ${JSON.stringify({ type: "text", delta: fallback })}\n\n` +
-          `data: ${JSON.stringify({ type: "done" })}\n\n`,
-        {
-          headers: {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-          },
-        }
-      );
+    const finalContent = fullContent.trim() || "你好！我是小星，有什么可以帮你的吗？";
+    try {
+      await appendMessage(conversationId, "assistant", finalContent);
+    } catch (err) {
+      console.error("[greeting] persist failed:", err);
     }
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
-      async start(controller) {
-        const reader = apiResponse.body!.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let fullContent = "";
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
-            for (const line of lines) {
-              if (!line.startsWith("data: ")) continue;
-              const data = line.slice(6).trim();
-              if (data === "[DONE]") continue;
-              try {
-                const parsed = JSON.parse(data);
-                const delta = parsed?.choices?.[0]?.delta?.content;
-                if (delta) {
-                  fullContent += delta;
-                  controller.enqueue(
-                    encoder.encode(
-                      `data: ${JSON.stringify({ type: "text", delta })}\n\n`
-                    )
-                  );
-                }
-              } catch {
-                // Skip invalid JSON
-              }
-            }
-          }
-        } catch (err) {
-          console.error("[greeting] stream error:", err);
-        }
-
-        // Persist the greeting as the first assistant message of the conversation.
-        // If the LLM produced nothing (rare), save a fallback so the conversation
-        // still has a starting point.
-        const finalContent = fullContent.trim() || "你好！我是小星，有什么可以帮你的吗？";
-        try {
-          await appendMessage(conversationId, "assistant", finalContent);
-        } catch (err) {
-          console.error("[greeting] persist failed:", err);
-        }
-
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "text", delta: finalContent })}\n\n`)
+        );
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`)
         );
