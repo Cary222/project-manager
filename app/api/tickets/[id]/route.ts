@@ -68,7 +68,7 @@ export async function GET(
           },
         },
         creator: {
-          select: { id: true },
+          select: { id: true, name: true, email: true },
         },
         assignees: {
           include: {
@@ -200,6 +200,7 @@ export async function GET(
       ticket: {
         ...ticket,
         creatorId: ticket.creator.id,
+        creator: ticket.creator,
         assignees: ticket.assignees.map((item) => item.user),
         assigneeHistory,
         pushSources: ticket.pushSources,

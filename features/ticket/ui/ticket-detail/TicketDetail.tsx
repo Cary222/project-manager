@@ -382,11 +382,13 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     if (!ticket) return [];
     const entries: EnrichedHistoryEntry[] = [];
 
-    // Creation
+    // Creation — use actual ticket.createdAt and creator, not current time or session user
+    const creatorName = ticket.creator?.name ?? ticket.creator?.email?.split("@")[0] ?? null;
+    const creatorEmail = ticket.creator?.email ?? "";
     entries.push({
       type: "created",
-      changedBy: { name: session?.user?.name ?? null, email: session?.user?.email ?? "" },
-      createdAt: new Date(),
+      changedBy: { name: creatorName, email: creatorEmail },
+      createdAt: new Date(ticket.createdAt),
     });
 
     // Status history
@@ -437,7 +439,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     }
 
     return entries.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-  }, [ticket, session?.user]);
+  }, [ticket]);
 
   if (ticketLoading) return <TicketDetailLoading />;
 

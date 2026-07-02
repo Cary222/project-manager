@@ -64,6 +64,8 @@ export type Ticket = {
   priority: number;
   status: TicketStatus;
   creatorId: string;
+  createdAt: string;
+  creator?: { id: string; name: string | null; email: string };
   project: { id: string; name: string; responsibilities: Responsibility[] };
   assignees: UserBrief[];
   module: {

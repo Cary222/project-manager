@@ -14,9 +14,7 @@ const TicketDetail = NextDynamic(
   () => import("@/features/ticket/ui/ticket-detail/TicketDetail").then((m) => m.TicketDetail),
   {
     loading: () => (
-      <AppShell header={<TicketDetailHeaderSkeleton />}>
         <TicketDetailLoading />
-      </AppShell>
     ),
   }
 );
