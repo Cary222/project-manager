@@ -1,0 +1,22 @@
+[
+  {
+    "date": "2026-07-02",
+    "weekLabel": "2026-W27",
+    "weekday": "周四",
+    "weekStart": "2026/6/29",
+    "weekEnd": "2026/7/6",
+    "totalUsers": 18,
+    "submitted": 1,
+    "rate": 6
+  },
+  {
+    "date": "2026-07-03",
+    "weekLabel": "2026-W27",
+    "weekday": "周五",
+    "weekStart": "2026/6/29",
+    "weekEnd": "2026/7/6",
+    "totalUsers": 18,
+    "submitted": 10,
+    "rate": 56
+  }
+]

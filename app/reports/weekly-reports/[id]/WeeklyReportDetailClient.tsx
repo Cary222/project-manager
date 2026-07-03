@@ -100,6 +100,33 @@ export function WeeklyReportDetailClient({ initialReport, reportId }: Props) {
     }
   }, [mode, initialReport]);
 
+  // Poll aiSummary until it's no longer "generating" (aiSummaryPartial=false).
+  // This handles the case where editing/submitting triggers a new AI summary generation
+  // that runs after a 500ms delay — router.refresh() alone may complete before the DB write.
+  useEffect(() => {
+    if (!report.aiSummaryPartial) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/reports/weekly-reports/${reportId}`, {
+          credentials: "include",
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const latest = data.report;
+          if (!latest.aiSummaryPartial) {
+            setReport(latest);
+            clearInterval(interval);
+          }
+        }
+      } catch {
+        // ignore network errors during polling
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [report.aiSummaryPartial, reportId]);
+
   const attachments = Array.isArray(report.attachments)
     ? (report.attachments as Array<{ name?: string; url?: string; mimeType?: string; size?: number }>)
     : [];

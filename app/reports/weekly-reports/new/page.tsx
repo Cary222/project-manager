@@ -5,6 +5,8 @@ import { BackPageHeader } from "@/shared/ui/headers";
 import { WeeklyReportForm } from "@/features/reports/weekly-reports/ui/WeeklyReportForm";
 import { getWeekRange } from "@/shared/lib/week";
 
+export const dynamic = "force-dynamic";
+
 function formatDateInput(d: Date): string {
   return d.toISOString().split("T")[0];
 }

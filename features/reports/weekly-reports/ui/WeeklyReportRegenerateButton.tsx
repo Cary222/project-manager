@@ -26,7 +26,7 @@ export function WeeklyReportRegenerateButton({ reportId }: Props) {
         credentials: "include",
       });
       if (res.ok) {
-        toast.success("AI 总结已入队，预计 5-30 秒后完成");
+        toast.success("AI 总结重新生成中，稍后刷新页面查看");
         router.refresh();
       } else if (res.status === 401) {
         toast.error("请先登录");

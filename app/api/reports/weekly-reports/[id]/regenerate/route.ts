@@ -6,12 +6,14 @@ import { enqueueSummarizeWeeklyReport } from "@/features/reports/weekly-reports/
 /**
  * POST /api/reports/weekly-reports/[id]/regenerate
  *
- * PR4 实现：手动触发用户画像刷新。
+ * 手动触发周报 AI 总结重新生成。
+ * 调用 enqueueSummarizeWeeklyReport，后者依次完成：
+ *   1. 写 aiSummaryPartial: true → UI 显示"生成中"
+ *   2. 调 LLM 生成新的 aiSummary
+ *   3. 写 aiSummary + aiSummaryPartial: false + aiSummaryAt
+ *   4. 触发 enqueueUpdateProfile 刷新用户画像
  *
- * 实际行为：周报提交/更新后只刷新用户画像，不刷新周报本身的 aiSummary。
- * （weeklyReport 暂时没有 "summary" 字段，只有 aiSummary，PR5+ 再加真正的 AI 总结生成。）
- *
- * 语义保留："重新生成" → 基于最新周报内容重新刷新 AiUserProfile（预计 5-30 秒完成）。
+ * 语义："重新生成" → 基于最新周报内容重新生成 AI 总结并刷新画像。
  */
 export async function POST(
   _request: NextRequest,
@@ -38,7 +40,7 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // 入队用户画像刷新
+  // 入队 AI 总结重新生成
   enqueueSummarizeWeeklyReport(reportId);
 
   return NextResponse.json(
@@ -47,7 +49,7 @@ export async function POST(
       enqueued: true,
       reportId,
       message:
-        "用户画像刷新已入队（实际是基于周报内容更新 AiUserProfile，预计 5-30 秒完成）",
+        "AI 总结重新生成已入队，稍后请刷新页面查看",
     },
     { status: 202 }
   );

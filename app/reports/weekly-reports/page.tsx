@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { listMyWeeklyReports } from "@/features/weekly-reports/lib/weekly-report-store";
 import { WeeklyReportList } from "@/features/reports/weekly-reports/ui/WeeklyReportList";
 
+export const dynamic = "force-dynamic";
+
 export default async function WeeklyReportsPage() {
   const session = await auth();
   if (!session?.user?.id) {

@@ -195,6 +195,8 @@ export function WeeklyReportForm({
           body: JSON.stringify({
             title: title.trim(),
             content: content.trim(),
+            weekStart: weekStart ? toLocalMidnight(weekStart).toISOString() : undefined,
+            weekEnd: weekEnd ? toLocalMidnight(weekEnd).toISOString() : undefined,
             projectIds: Array.from(selectedProjectIds),
             attachments,
           }),

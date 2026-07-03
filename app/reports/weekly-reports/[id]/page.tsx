@@ -5,6 +5,8 @@ import { BackPageHeader } from "@/shared/ui/headers";
 import { getWeeklyReport } from "@/features/weekly-reports/lib/weekly-report-store";
 import { WeeklyReportDetailClient } from "./WeeklyReportDetailClient";
 
+export const dynamic = "force-dynamic";
+
 type Props = { params: Promise<{ id: string }> };
 
 export default async function WeeklyReportDetailPage({ params }: Props) {

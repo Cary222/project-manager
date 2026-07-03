@@ -14,6 +14,8 @@ import {
   ReportsHealthAi,
 } from "@/features/reports/ui";
 
+export const dynamic = "force-dynamic";
+
 export default async function ReportsPage() {
   const session = await auth();
 
