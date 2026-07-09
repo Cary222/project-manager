@@ -18,8 +18,14 @@ export function sha256Hex(input: Buffer | Uint8Array | ArrayBuffer): string {
  * 在浏览器侧用 Web Crypto API 计算文件 hash。
  * 用途：客户端先算 hash 携带给服务端，服务端会重算作为权威值。
  * 仅作快速命中优化（Hint），不作为唯一信任来源。
+ *
+ * 注意：crypto.subtle 仅在安全上下文可用（https:// 或 localhost）。
+ * 非安全上下文下返回 null，跳过 hint 让服务端独自处理。
  */
-export async function sha256File(file: File): Promise<string> {
+export async function sha256File(file: File): Promise<string | null> {
+  if (!crypto?.subtle) {
+    return null;
+  }
   const buffer = await file.arrayBuffer();
   const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
   const hashArray = Array.from(new Uint8Array(hashBuffer));

@@ -57,12 +57,15 @@ export async function uploadFile(file: File): Promise<UploadedFileResult> {
     throw new Error("文件不能为空");
   }
 
-  // 客户端先算 hash 作为 hint（服务端会重算）
+  // 客户端先算 hash 作为 hint（服务端会重算）。非安全上下文下（如普通 http 非 localhost）
+  // 浏览器可能禁用 crypto.subtle，此时跳过 hint，直接让服务端独自处理。
   const clientHash = await sha256File(file);
 
   const form = new FormData();
   form.append("file", file, file.name);
-  form.append("clientHash", clientHash);
+  if (clientHash) {
+    form.append("clientHash", clientHash);
+  }
 
   const res = await fetch("/api/upload", { method: "POST", body: form });
   const body = (await res.json().catch(() => ({}))) as Partial<UploadedFileResult> & {
