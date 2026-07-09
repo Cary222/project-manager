@@ -23,11 +23,17 @@ export function sha256Hex(input: Buffer | Uint8Array | ArrayBuffer): string {
  * 非安全上下文下返回 null，跳过 hint 让服务端独自处理。
  */
 export async function sha256File(file: File): Promise<string | null> {
-  if (!crypto?.subtle) {
+  let subtle;
+  try {
+    subtle = crypto?.subtle;
+  } catch {
+    return null;
+  }
+  if (!subtle) {
     return null;
   }
   const buffer = await file.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+  const hashBuffer = await subtle.digest("SHA-256", buffer);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
