@@ -80,7 +80,7 @@ export async function uploadFile(file: File): Promise<UploadedFileResult> {
     name: body.name ?? file.name,
     mimeType: body.mimeType ?? file.type,
     size: body.size ?? file.size,
-    hash: body.hash ?? clientHash,
+    hash: body.hash ?? clientHash ?? "",
     deduplicated: body.deduplicated,
   };
 }

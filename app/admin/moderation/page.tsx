@@ -68,6 +68,7 @@ const ACTION_COLORS: Record<ModerationAction, string> = {
   UPDATE_TICKET_PROGRESS: "text-cyan-600 bg-cyan-50",
   EDIT_TICKET: "text-indigo-600 bg-indigo-50",
   CHANGE_TICKET_MODULE: "text-violet-600 bg-violet-50",
+  DELETE_USER: "text-rose-600 bg-rose-50",
 };
 
 export default function AdminModerationPage() {
