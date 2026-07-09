@@ -256,10 +256,8 @@ export function CreateTicketForm({
           : new File([compressed], file.name.replace(/\.(png|webp|gif)$/i, ".jpg"), {
               type: "image/jpeg",
             });
-      const { url: relUrl } = await uploadImage(compressedFile);
-      const origin = typeof window !== "undefined" ? window.location.origin : "";
-      const absoluteUrl = origin ? `${origin}${relUrl}` : relUrl;
-      setDescriptionImages((prev) => [...prev, { src: absoluteUrl, name: file.name }]);
+      const { url } = await uploadImage(compressedFile);
+      setDescriptionImages((prev) => [...prev, { src: url, name: file.name }]);
     } catch (err) {
       onMessage?.(`图片处理失败: ${err instanceof Error ? err.message : "unknown"}`);
     }

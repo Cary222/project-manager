@@ -182,10 +182,8 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
 
   async function insertImage(file: File) {
     try {
-      const { url: relUrl } = await uploadImage(file);
-      const origin = typeof window !== "undefined" ? window.location.origin : "";
-      const absoluteUrl = origin ? `${origin}${relUrl}` : relUrl;
-      setContentImages((prev) => [...prev, { src: absoluteUrl, name: file.name }]);
+      const { url } = await uploadImage(file);
+      setContentImages((prev) => [...prev, { src: url, name: file.name }]);
     } catch {
       // 静默失败
     }

@@ -67,10 +67,8 @@ export function PushConfirmModal({
 
   async function insertImage(file: File) {
     try {
-      const { url: relUrl } = await uploadImage(file);
-      const origin = typeof window !== "undefined" ? window.location.origin : "";
-      const absoluteUrl = origin ? `${origin}${relUrl}` : relUrl;
-      setDescriptionImages((prev) => [...prev, { src: absoluteUrl, name: file.name }]);
+      const { url } = await uploadImage(file);
+      setDescriptionImages((prev) => [...prev, { src: url, name: file.name }]);
     } catch {
       // 静默失败
     }
