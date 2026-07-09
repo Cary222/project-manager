@@ -334,6 +334,7 @@ type PATCHBody = {
   assigneeIds?: string[];
   priority?: number;
   moduleId?: string;
+  deadline?: string | null;
 };
 
 const STATUS_VALUES = new Set<string>([
@@ -454,6 +455,9 @@ export async function PATCH(
     if (body.description !== undefined) updateData.description = body.description?.trim() || null;
     if (body.priority !== undefined) updateData.priority = body.priority;
     if (body.moduleId !== undefined) updateData.moduleId = body.moduleId;
+    if (body.deadline !== undefined) {
+      updateData.deadline = body.deadline ? new Date(body.deadline) : null;
+    }
 
     let newModule: { name: string } | null = null;
     if (body.moduleId !== undefined) {

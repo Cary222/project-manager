@@ -62,6 +62,7 @@ export type Ticket = {
   description: string | null;
   progress: number;
   priority: number;
+  deadline: string | null;
   status: TicketStatus;
   creatorId: string;
   createdAt: string;

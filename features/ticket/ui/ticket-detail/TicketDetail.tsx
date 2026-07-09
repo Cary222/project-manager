@@ -188,6 +188,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
   const [localAssigneeIds, setLocalAssigneeIds] = useState<string[]>([]);
   const [localModuleId, setLocalModuleId] = useState<string>("");
   const [localPriority, setLocalPriority] = useState<number>(2);
+  const [localDeadline, setLocalDeadline] = useState<string>("");
   const [programShowBugPushModal, setProgramShowBugPushModal] = useState(false);
   const [previewFile, setPreviewFile] = useState<PreviewableFile | null>(null);
 
@@ -204,6 +205,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     setLocalAssigneeIds(ticket.assignees.map((a) => a.id));
     setLocalModuleId(ticket.module.id);
     setLocalPriority(ticket.priority ?? 2);
+    setLocalDeadline(ticket.deadline ? ticket.deadline.slice(0, 16) : "");
   }, [ticket]);
 
   // Load current user's responsibilities
@@ -259,7 +261,10 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
 
   const modules = useMemo(() => {
     if (!ticket) return [];
-    return ticket.project.responsibilities.flatMap((r) => r.modules);
+    // Only show modules belonging to the same responsibility kind as the current ticket
+    return ticket.project.responsibilities
+      .filter((r) => r.kind === ticket.module.responsibility.kind)
+      .flatMap((r) => r.modules);
   }, [ticket]);
 
   const isAssignee = ticket?.assignees.some((a) => a.id === session?.user?.id) ?? false;
@@ -277,6 +282,11 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     if (localStatus !== ticket.status) body.status = localStatus;
     if (localPriority !== ticket.priority) body.priority = localPriority;
     if (localModuleId !== ticket.module.id) body.moduleId = localModuleId;
+    // deadline: empty string means clear, otherwise ISO string
+    const currentDeadline = ticket.deadline ? ticket.deadline.slice(0, 16) : "";
+    if (localDeadline !== currentDeadline) {
+      body.deadline = localDeadline ? new Date(localDeadline).toISOString() : null;
+    }
     const currentAssigneeIds = ticket.assignees.map((a) => a.id).sort();
     const nextAssigneeIds = [...localAssigneeIds].sort();
     if (JSON.stringify(currentAssigneeIds) !== JSON.stringify(nextAssigneeIds)) {
@@ -310,6 +320,7 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
     setLocalAssigneeIds(ticket.assignees.map((a) => a.id));
     setLocalModuleId(ticket.module.id);
     setLocalPriority(ticket.priority ?? 2);
+    setLocalDeadline(ticket.deadline ? ticket.deadline.slice(0, 16) : "");
     const { plainContent, images } = extractInlineImages(ticket.description || "");
     setEditTitle(ticket.title);
     setEditDescription(plainContent);
@@ -340,10 +351,9 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
 
   async function insertDescriptionImage(file: File) {
     try {
-      const { url: relUrl } = await uploadFile(file);
-      const origin = typeof window !== "undefined" ? window.location.origin : "";
-      const absoluteUrl = origin ? `${origin}${relUrl}` : relUrl;
-      setEditDescriptionImages((prev) => [...prev, { src: absoluteUrl, name: file.name }]);
+      const { url } = await uploadFile(file);
+      // 存相对路径，让远端也能访问
+      setEditDescriptionImages((prev) => [...prev, { src: url, name: file.name }]);
     } catch {
       // 静默失败：编辑面板暂不弹错，避免干扰主流程
     }
@@ -722,6 +732,17 @@ export function TicketDetail({ ticketId }: { ticketId: string }) {
                         </select>
                       </div>
                     )}
+
+                    {/* Deadline */}
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-ink-600">截止日期（可选）</label>
+                      <input
+                        type="datetime-local"
+                        value={localDeadline}
+                        onChange={(e) => setLocalDeadline(e.target.value)}
+                        className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                      />
+                    </div>
                   </div>
                 )}
 
