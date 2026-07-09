@@ -135,8 +135,10 @@ export function WeeklyReportForm({
       }
 
       const data = await res.json();
+      const draftError = data._error ?? null;
       setDraftSummary(data.draft);
       setDraftComputedAt(data.computedAt);
+      setDraftError(draftError);
       toast.success("AI 总结已生成，请查看右侧面板");
     } catch (err) {
       // 网络异常 (DNS / 超时 / 断网) — fetch 抛 TypeError
@@ -428,6 +430,7 @@ export function WeeklyReportForm({
           onInsert={handleInsert}
           onRegenerate={handleDraftRegenerate}
           isRegenerating={draftLoading}
+          error={draftError}
         />
       </div>
     </div>

@@ -258,10 +258,16 @@ export async function getMonthDailyTrend(monthOffset = 0): Promise<DailyTrend[]>
     )),
   ]);
 
-  // 按 createdAt 排序，取出本月所有周报（用于计算每日累积）
+  // 取本月所有周报（用于计算每日累积）
+  // 关键：只统计 weekStart 在本月范围内的周报（按自然月对齐，非 UTC 月边界）
+  // 这样选"本月"时，只显示本月内的周报，不混入上周（如7/3提交属于W27，不属于7月视图）
+  const firstDayOfMonth = new Date(Date.UTC(targetMonth.getUTCFullYear(), targetMonth.getUTCMonth(), 1));
+  const lastDayOfMonth = new Date(Date.UTC(targetMonth.getUTCFullYear(), targetMonth.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+
+  // 按 createdAt 排序，取出本月所有周报
   const monthReports = await prisma.weeklyReport.findMany({
-    where: { createdAt: { gte: daysData[0].start, lte: daysData[validDays - 1].end } },
-    select: { userId: true, createdAt: true },
+    where: { createdAt: { gte: firstDayOfMonth, lte: lastDayOfMonth } },
+    select: { userId: true, createdAt: true, weekStart: true },
     orderBy: { createdAt: "asc" },
   });
 
@@ -269,10 +275,16 @@ export async function getMonthDailyTrend(monthOffset = 0): Promise<DailyTrend[]>
   const seen = new Set<string>();
   for (const r of monthReports) {
     seen.add(r.userId);
+    // 找到 r.createdAt 落在哪一天
     const dayIdx = daysData.findIndex(
       (d) => d.start.getTime() <= r.createdAt.getTime() && r.createdAt.getTime() <= d.end.getTime()
     );
     if (dayIdx === -1) continue;
+    // 只统计 weekStart 在本月范围内的周报（按自然月对齐）
+    const weekStart = new Date(r.weekStart);
+    const isMonthLocal = weekStart.getTime() >= firstDayOfMonth.getTime();
+    if (!isMonthLocal) continue;
+    // 遇过的就不再填
     for (let j = 0; j <= dayIdx; j++) {
       if (cumulative[j] === undefined) {
         cumulative[j] = seen.size;

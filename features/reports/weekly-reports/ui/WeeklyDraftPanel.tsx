@@ -10,6 +10,8 @@ type Props = {
   onInsert: (markdown: string, mode: "append" | "replace") => void;
   onRegenerate: () => void;
   isRegenerating: boolean;
+  /** API-level error message (rate limit, network, HTTP error) */
+  error?: string | null;
 };
 
 function formatDateTime(d: string): string {
@@ -36,7 +38,6 @@ function EditableSection({
 
   function handleSave() {
     const newItems = draft.split("\n").map((s) => s.trim()).filter(Boolean);
-    // Side-effect: parent updates via onInsert; just close editor
     void newItems;
     setEditing(false);
   }
@@ -109,17 +110,20 @@ export function WeeklyDraftPanel({
   onInsert,
   onRegenerate,
   isRegenerating,
+  error,
 }: Props) {
   const [collapsed, setCollapsed] = useState(false);
 
-  if (!draft) return null;
+  // Show panel if there's either draft data or an error to display
+  if (!draft && !error) return null;
 
-  const isEmpty =
+  const isEmpty = !!draft && (
     draft.highlights.length === 0 &&
     draft.tasks.length === 0 &&
     draft.nextPlan.length === 0 &&
-    !draft.rawMarkdown;
-  const hasError = !!draft._error;
+    !draft.rawMarkdown
+  );
+  const hasLLMError = !!draft?._error;
 
   return (
     <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-4 shadow-sm">
@@ -145,13 +149,37 @@ export function WeeklyDraftPanel({
 
       {!collapsed && (
         <>
-          {hasError && (
+          {/* API-level error: rate limit, network, HTTP 5xx */}
+          {error && (
+            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              {error}
+            </div>
+          )}
+
+          {/* LLM-level error: Agnes returned empty/failed */}
+          {hasLLMError && draft && (
             <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
               AI 生成失败：{draft._error}
             </div>
           )}
 
-          {isEmpty && !hasError ? (
+          {/* No draft yet, no error — show prompt to generate */}
+          {!draft && !error && (
+            <div className="py-4 text-center">
+              <p className="mb-3 text-sm text-ink-400">暂无数据，点击下方按钮生成</p>
+              <button
+                type="button"
+                onClick={onRegenerate}
+                disabled={isRegenerating}
+                className="rounded-lg border border-ink-300 bg-white px-4 py-2 text-sm font-medium text-ink-700 shadow-sm transition-colors hover:bg-ink-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isRegenerating ? "生成中…" : "生成 AI 总结"}
+              </button>
+            </div>
+          )}
+
+          {/* Draft exists but all fields empty — show regenerate prompt */}
+          {isEmpty && !hasLLMError && draft && (
             <div className="py-4 text-center">
               <p className="mb-3 text-sm text-ink-400">暂无有效数据</p>
               <button
@@ -170,7 +198,10 @@ export function WeeklyDraftPanel({
                 ) : "重新生成"}
               </button>
             </div>
-          ) : (
+          )}
+
+          {/* Draft exists with content — show editable sections */}
+          {draft && !isEmpty && (
             <>
               <p className="mb-3 text-xs text-ink-400">
                 基于你的数据自动生成，你可以编辑各板块内容后再插入到正文。

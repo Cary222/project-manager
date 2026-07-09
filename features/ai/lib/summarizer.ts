@@ -6,6 +6,11 @@ import { Prisma } from "@prisma/client";
 const AGNES_API_URL = "https://apihub.agnes-ai.com/v1/chat/completions";
 const MODEL = "agnes-2.0-flash";
 
+/** Status codes that warrant a retry with exponential backoff */
+const RETRYABLE_STATUS_CODES = new Set([404, 429, 500, 502, 503, 504]);
+
+const MAX_RETRIES = 2;
+
 export interface ConversationSummary {
   topics: string[];
   keyPoints: string[];
@@ -33,27 +38,54 @@ export async function callAgnes(messages: ChatMessage[]): Promise<string> {
     throw new Error("OPENAI_API_KEY is not set");
   }
 
-  const response = await fetch(AGNES_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      messages,
-      stream: false,
-      temperature: 0.3,
-      max_tokens: 2048,
-    }),
-  });
+  let lastError: Error | null = null;
 
-  if (!response.ok) {
-    throw new Error(`Agnes API error: ${response.status}`);
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delayMs = Math.pow(2, attempt - 1) * 1000;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+
+    try {
+      const response = await fetch(AGNES_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          messages,
+          stream: false,
+          temperature: 0.3,
+          max_tokens: 2048,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return data.choices?.[0]?.message?.content ?? "";
+      }
+
+      // 401/403 — auth problem, never retry
+      if (response.status === 401 || response.status === 403) {
+        throw new Error(`Agnes API error: ${response.status}`);
+      }
+
+      lastError = new Error(`Agnes API error: ${response.status}`);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      const statusMatch = lastError.message.match(/Agnes API error: (\d+)/);
+      const status = statusMatch ? parseInt(statusMatch[1], 10) : 0;
+
+      if (attempt < MAX_RETRIES && status > 0 && RETRYABLE_STATUS_CODES.has(status)) {
+        continue;
+      }
+      throw lastError;
+    }
   }
 
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content ?? "";
+  throw lastError ?? new Error("Agnes API error: unknown");
 }
 
 function extractJsonFromResponse(text: string): string {

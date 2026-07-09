@@ -45,6 +45,7 @@ const ACTION_LABELS: Record<ModerationAction, string> = {
   UPDATE_TICKET_PROGRESS: "修改进度",
   EDIT_TICKET: "编辑单子",
   CHANGE_TICKET_MODULE: "移动模块",
+  DELETE_USER: "删除用户",
 };
 
 const ACTION_COLORS: Record<ModerationAction, string> = {

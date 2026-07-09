@@ -192,7 +192,6 @@ export async function POST(
                   type: "tool_result",
                   toolCallId: part.toolCallId,
                   toolName: part.toolName,
-                  input: part.input,
                   output: part.output,
                 });
                 break;

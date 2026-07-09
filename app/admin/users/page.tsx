@@ -8,6 +8,7 @@ import {
   updateUserRoleAction,
   banUserAction,
   unbanUserAction,
+  deleteUserAction,
   getUserResponsibilitiesAction,
   updateUserResponsibilitiesAction,
   getAllUserResponsibilitiesAction,
@@ -32,7 +33,7 @@ export default function AdminUsersPage() {
   const [msg, setMsg] = useState("");
 
   const [dialog, setDialog] = useState<{
-    type: "role" | "ban" | "unban" | "resp";
+    type: "role" | "ban" | "unban" | "resp" | "delete";
     userId: string;
     userName: string;
   } | null>(null);
@@ -82,6 +83,8 @@ export default function AdminUsersPage() {
       result = await updateUserRoleAction(dialog.userId, dialogValue as UserRole);
     } else if (dialog.type === "ban") {
       result = await banUserAction(dialog.userId, dialogValue || undefined);
+    } else if (dialog.type === "delete") {
+      result = await deleteUserAction(dialog.userId);
     } else {
       result = await unbanUserAction(dialog.userId);
     }
@@ -110,6 +113,10 @@ export default function AdminUsersPage() {
 
   function openUnbanDialog(user: UserSummary) {
     setDialog({ type: "unban", userId: user.id, userName: user.name || user.email });
+  }
+
+  function openDeleteDialog(user: UserSummary) {
+    setDialog({ type: "delete", userId: user.id, userName: user.name || user.email });
   }
 
   async function openRespDialog(user: UserSummary) {
@@ -156,6 +163,10 @@ export default function AdminUsersPage() {
     } else if (type === "unban") {
       title = "解封用户";
       confirmLabel = "确认解封";
+    } else if (type === "delete") {
+      title = "删除用户";
+      confirmLabel = "确认删除";
+      danger = true;
     } else {
       title = "管理职能";
       confirmLabel = "保存";
@@ -194,6 +205,10 @@ export default function AdminUsersPage() {
           ) : type === "unban" ? (
             <p className="mb-4 text-sm text-zinc-600">
               确定要解封「{userName}」吗？该用户将可以重新登录。
+            </p>
+          ) : type === "delete" ? (
+            <p className="mb-4 text-sm text-zinc-600">
+              确定要删除「{userName}」吗？此操作不可恢复，该用户的所有关联数据也将被清除。
             </p>
           ) : (
             <>
@@ -397,6 +412,13 @@ export default function AdminUsersPage() {
                               封禁
                             </button>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => openDeleteDialog(user)}
+                            className="text-xs text-red-400 hover:text-red-600"
+                          >
+                            删除
+                          </button>
                         </div>
                       </td>
                     )}

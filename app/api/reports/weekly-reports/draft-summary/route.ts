@@ -16,7 +16,7 @@
  * 响应：
  * { draft: WeeklyDraftSummary, contextVersion: string, computedAt: string }
  *
- * 限流：同一 userId 30s 内最多 1 次（force=true 跳过限流但记录）
+ * 限流：同一 userId 10s 内最多 1 次（force=true 跳过限流但记录）
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -37,7 +37,7 @@ const requestSchema = z.object({
   force: z.boolean().optional(),
 });
 
-const RATE_LIMIT_MS = 30 * 1000; // 30s
+const RATE_LIMIT_MS = 10 * 1000; // 10s
 
 // In-process rate limit map
 const rateLimitMap = new Map<string, number>();
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
   // Rate limit
   if (!checkRateLimit(userId, !!force)) {
     return NextResponse.json(
-      { error: "请求过于频繁，请 30 秒后再试" },
+      { error: "请求过于频繁，请 10 秒后再试" },
       { status: 429 }
     );
   }
@@ -107,12 +107,21 @@ export async function POST(request: NextRequest) {
       context
     );
 
-    const computedAt = new Date().toISOString();
+    // If LLM call failed, surface the error message in the response so the
+    // frontend can display it clearly instead of a misleading "暂无数据" state.
+    if (draft._error) {
+      return NextResponse.json({
+        draft,
+        contextVersion,
+        computedAt: new Date().toISOString(),
+        _error: draft._error,
+      });
+    }
 
     return NextResponse.json({
       draft,
       contextVersion,
-      computedAt,
+      computedAt: new Date().toISOString(),
     });
   } catch (err) {
     console.error("[draft-summary] POST failed:", err);

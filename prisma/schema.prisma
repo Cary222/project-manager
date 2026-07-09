@@ -653,6 +653,7 @@ enum ModerationAction {
   UPDATE_PROFILE
   UPDATE_PASSWORD
   UPDATE_SYSTEM_SETTINGS
+  DELETE_USER
 
   @@schema("pm")
 }

@@ -249,3 +249,33 @@ export async function getAllUserResponsibilitiesAction(): Promise<
   }
   return result;
 }
+
+export async function deleteUserAction(
+  userId: string
+): Promise<{ success?: boolean; error?: string }> {
+  const session = await requireRoot();
+
+  if (userId === session.user.id) {
+    return { error: "不能删除自己" };
+  }
+
+  const target = await prisma.user.findUnique({ where: { id: userId } });
+  if (!target) return { error: "用户不存在" };
+
+  if (target.role === UserRole.ROOT) {
+    return { error: "不能删除 ROOT 用户" };
+  }
+
+  await prisma.user.delete({ where: { id: userId } });
+
+  await createModerationLog({
+    action: ModerationAction.DELETE_USER,
+    targetId: userId,
+    targetType: "User",
+    actorId: session.user.id,
+    reason: `删除用户 ${target.email}`,
+  });
+
+  revalidatePath("/admin/users");
+  return { success: true };
+}
