@@ -133,6 +133,12 @@ function toUtcEndOfDay(date: Date): Date {
  * 每日周报率 = 截止当天（含）已提交周报的去重人数 / 总人数。
  * 例：周一 3 人提交 → 周一率 3/18；周二又有 2 人提交 → 周二率 5/18。
  */
+/** 获取 UTC 日期所在周的开始日期（周一） */
+function getWeekStart(date: Date): Date {
+  const { weekStart } = getWeekRange(date);
+  return weekStart;
+}
+
 export async function getDailyTrend(days = 7): Promise<DailyTrend[]> {
   const now = new Date();
   const todayUtc = toUtcStartOfDay(now);
@@ -175,35 +181,22 @@ export async function getDailyTrend(days = 7): Promise<DailyTrend[]> {
     orderBy: { createdAt: "asc" },
   });
 
+  // 按天遍历，每一天取月初~该天的所有周报，计算累积用户数
   const cumulative: number[] = [];
   const seen = new Set<string>();
-  for (const r of weekReports) {
-    seen.add(r.userId);
-    // 找 r.createdAt 落在哪一天
-    const dayIdx = daysData.findIndex(
-      (d) => d.start.getTime() <= r.createdAt.getTime() && r.createdAt.getTime() <= d.end.getTime()
-    );
-    if (dayIdx === -1) continue;
-    // 填充该天之前所有天的累积值（遇过的就不再填）
-    for (let j = 0; j <= dayIdx; j++) {
-      if (cumulative[j] === undefined) {
-        cumulative[j] = seen.size;
-      }
-    }
-  }
-  // 未提交过周报的天，累积值 = 0；后续天从上一个有效值延续
-  let lastCumulative = 0;
   for (let i = 0; i < validDays; i++) {
-    if (cumulative[i] !== undefined) {
-      lastCumulative = cumulative[i];
-    } else {
-      cumulative[i] = lastCumulative;
+    // 包含月初到第 i 天的所有周报
+    const reportsUpToDay = weekReports.filter(
+      (r) => r.createdAt.getTime() <= daysData[i].end.getTime()
+    );
+    for (const r of reportsUpToDay) {
+      seen.add(r.userId);
     }
+    cumulative[i] = seen.size;
   }
 
   return daysData.map((d, i) => {
     const computedRate = total > 0 ? Math.round((cumulative[i] / total) * 100) : 0;
-    // backfill 兜底：当日实时计算为 0，但 backfill 有历史数据时使用 backfill
     const dateStr = `${d.start.getUTCFullYear()}-${String(d.start.getUTCMonth() + 1).padStart(2, "0")}-${String(d.start.getUTCDate()).padStart(2, "0")}`;
     const backfill = readBackfill(dateStr);
     const rate = backfill && backfill.rate > 0 && backfill.totalUsers === total
@@ -222,7 +215,8 @@ export async function getDailyTrend(days = 7): Promise<DailyTrend[]> {
 
 /** 按月内每日聚合数据（用于本月视图）
  *
- * 每日周报率 = 截止当天（含）已提交周报的去重人数 / 总人数。
+ * 图表按周分段，每周内按天累积计算周报率，跨周时重新开始。
+ * 效果：本周7天显示每日累积值，跨周后重新从0开始。
  */
 export async function getMonthDailyTrend(monthOffset = 0): Promise<DailyTrend[]> {
   const now = new Date();
@@ -258,65 +252,80 @@ export async function getMonthDailyTrend(monthOffset = 0): Promise<DailyTrend[]>
     )),
   ]);
 
-  // 取本月所有周报（用于计算每日累积）
-  // 关键：只统计 weekStart 在本月范围内的周报（按自然月对齐，非 UTC 月边界）
-  // 这样选"本月"时，只显示本月内的周报，不混入上周（如7/3提交属于W27，不属于7月视图）
-  const firstDayOfMonth = new Date(Date.UTC(targetMonth.getUTCFullYear(), targetMonth.getUTCMonth(), 1));
-  const lastDayOfMonth = new Date(Date.UTC(targetMonth.getUTCFullYear(), targetMonth.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+  // 按周分组
+  const weekBuckets: { weekStart: Date; weekEnd: Date; days: number[] }[] = [];
+  let currentWeekStart: Date | null = null;
+  let currentWeekEnd: Date | null = null;
+  let currentDays: number[] = [];
 
-  // 按 createdAt 排序，取出本月所有周报
-  const monthReports = await prisma.weeklyReport.findMany({
-    where: { createdAt: { gte: firstDayOfMonth, lte: lastDayOfMonth } },
-    select: { userId: true, createdAt: true, weekStart: true },
-    orderBy: { createdAt: "asc" },
-  });
-
-  const cumulative: number[] = [];
-  const seen = new Set<string>();
-  for (const r of monthReports) {
-    seen.add(r.userId);
-    // 找到 r.createdAt 落在哪一天
-    const dayIdx = daysData.findIndex(
-      (d) => d.start.getTime() <= r.createdAt.getTime() && r.createdAt.getTime() <= d.end.getTime()
-    );
-    if (dayIdx === -1) continue;
-    // 只统计 weekStart 在本月范围内的周报（按自然月对齐）
-    const weekStart = new Date(r.weekStart);
-    const isMonthLocal = weekStart.getTime() >= firstDayOfMonth.getTime();
-    if (!isMonthLocal) continue;
-    // 遇过的就不再填
-    for (let j = 0; j <= dayIdx; j++) {
-      if (cumulative[j] === undefined) {
-        cumulative[j] = seen.size;
-      }
-    }
-  }
-  let lastCumulative = 0;
   for (let i = 0; i < validDays; i++) {
-    if (cumulative[i] !== undefined) {
-      lastCumulative = cumulative[i];
-    } else {
-      cumulative[i] = lastCumulative;
+    const d = daysData[i];
+    const weekStart = getWeekStart(d.start);
+    if (currentWeekStart === null) {
+      currentWeekStart = weekStart;
+      currentWeekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000 - 1);
+      currentDays = [];
+    }
+    if (weekStart.getTime() > currentWeekStart.getTime()) {
+      weekBuckets.push({ weekStart: currentWeekStart, weekEnd: currentWeekEnd!, days: currentDays });
+      currentWeekStart = weekStart;
+      currentWeekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000 - 1);
+      currentDays = [];
+    }
+    currentDays.push(i);
+  }
+  if (currentDays.length > 0) {
+    weekBuckets.push({ weekStart: currentWeekStart!, weekEnd: currentWeekEnd!, days: currentDays });
+  }
+
+  // 对每个周 bucket，计算每日累积周报率
+  const result: DailyTrend[] = [];
+  for (const bucket of weekBuckets) {
+    const bucketDays = bucket.days.map((i) => daysData[i]);
+    const bucketValidDays = bucketDays.length;
+
+    // 按 createdAt 取该周内的周报
+    const weekReports = await prisma.weeklyReport.findMany({
+      where: { createdAt: { gte: bucketDays[0].start, lte: bucketDays[bucketValidDays - 1].end } },
+      select: { userId: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
+    });
+
+    // 每日累积
+    // 按天遍历，每一天取月初~该天的所有周报，计算累积用户数
+    const cumulative: number[] = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < bucketValidDays; i++) {
+      // 包含月初到第 i 天的所有周报
+      const reportsUpToDay = weekReports.filter(
+        (r) => r.createdAt.getTime() <= bucketDays[i].end.getTime()
+      );
+      for (const r of reportsUpToDay) {
+        seen.add(r.userId);
+      }
+      cumulative[i] = seen.size;
+    }
+
+    for (let i = 0; i < bucketValidDays; i++) {
+      const idx = bucket.days[i];
+      const computedRate = total > 0 ? Math.round((cumulative[i] / total) * 100) : 0;
+      const dateStr = `${daysData[idx].start.getUTCFullYear()}-${String(daysData[idx].start.getUTCMonth() + 1).padStart(2, "0")}-${String(daysData[idx].start.getUTCDate()).padStart(2, "0")}`;
+      const backfill = readBackfill(dateStr);
+      const rate = backfill && backfill.rate > 0 && backfill.totalUsers === total
+        ? backfill.rate
+        : computedRate;
+      result.push({
+        date: daysData[idx].shortLabel,
+        fullLabel: daysData[idx].fullLabel,
+        tickets: createdCounts[idx],
+        done: doneCounts[idx],
+        reportRate: rate,
+        contribution: doneCounts[idx],
+      });
     }
   }
 
-  return daysData.map((d, i) => {
-    const computedRate = total > 0 ? Math.round((cumulative[i] / total) * 100) : 0;
-    // backfill 兜底：当日实时计算为 0，但 backfill 有历史数据时使用 backfill
-    const dateStr = `${d.start.getUTCFullYear()}-${String(d.start.getUTCMonth() + 1).padStart(2, "0")}-${String(d.start.getUTCDate()).padStart(2, "0")}`;
-    const backfill = readBackfill(dateStr);
-    const rate = backfill && backfill.rate > 0 && backfill.totalUsers === total
-      ? backfill.rate
-      : computedRate;
-    return {
-      date: d.shortLabel,
-      fullLabel: d.fullLabel,
-      tickets: createdCounts[i],
-      done: doneCounts[i],
-      reportRate: rate,
-      contribution: doneCounts[i],
-    };
-  });
+  return result;
 }
 
 // 贡献排名（支持周/月）

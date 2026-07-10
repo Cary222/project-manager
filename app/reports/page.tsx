@@ -9,9 +9,9 @@ import { auth } from "@/lib/auth";
 import {
   ReportsKpiCards,
   ReportsDashboard,
-  ReportsProjectStatus,
   ReportsProjectHealth,
   ReportsHealthAi,
+  WeeklyReportBoard,
 } from "@/features/reports/ui";
 
 export const dynamic = "force-dynamic";
@@ -53,16 +53,16 @@ export default async function ReportsPage() {
         {/* KPI */}
         <ReportsKpiCards kpis={stats.kpis} />
 
-        <div className="grid gap-5 lg:grid-cols-3">
+        {/* 图表 + 周报看板 并列 */}
+        <div className="grid gap-5 lg:grid-cols-2">
           {/* 报表仪表盘（Tab 切换 + 周期选择） */}
           <ReportsDashboard
             weeklyStats={weeklyStats}
             monthlyStats={monthlyStats}
             halfYearStats={halfYearStats}
           />
-
-          {/* 项目状态占比 */}
-          <ReportsProjectStatus status={stats.projectStatus} />
+          {/* 本周周报看板 */}
+          <WeeklyReportBoard weeklyStats={weeklyStats} />
         </div>
 
         <div className="grid gap-5 lg:grid-cols-2">
