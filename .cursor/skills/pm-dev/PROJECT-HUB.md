@@ -8,8 +8,8 @@ description: >-
 
 > **项目启动**：2026-06-04（基于 GitHub 代码实际评估）
 > **仓库**：https://github.com/Cary222/project-manager
-> **最后更新**：2026-06-29（#10144 AI Agent 应用上线）
-> **当前阶段**：AI Agent 对话系统完成，学习理解中
+> **最后更新**：2026-07-09（工单截止日期 + 优先级 + 图片上传 Bug 修复）
+> **当前阶段**：功能迭代中
 
 ---
 
@@ -25,6 +25,10 @@ description: >-
   ├── 工单状态流转（DEVELOPING → READY_FOR_TEST → DONE，写状态历史）
   ├── 工单指派（多指派人，写指派历史）
   ├── Bug 单闭环（新建→指派→设计单/程序单联动，2026-06-10~17）
+  ├── 工单截止日期字段（#10156，2026-07-09）
+  ├── 工单优先级字段（#10146，2026-07-09）
+  ├── 工单备注/讨论面板 + 图片上传全链路（#10034，2026-07-09）
+  ├── 图片上传 Bug 修复（crypto.subtle HTTP 环境，2026-07-09）
   ├── Git 提交自动关联（增量同步游标、多分支追踪、commit 解析、去重展示）
   ├── Git diff 查看（CommitDiffModal 组件）
   ├── PKM 笔记系统（CRUD + 附件上传 + 图片预览 + 公开/私密，2026-06-09）
@@ -38,25 +42,33 @@ description: >-
   ├── Feature-First Design 架构（9 个 feature 模块拆分，2026-06-12）
   ├── SWR 数据获取全面接入（ticket 详情页，2026-06-05~11）
   ├── 管理后台（用户管理、角色管理、审核日志）
+  ├── 管理端删除用户功能（#10085，2026-07-09）
   ├── E2E 测试（Playwright）、单元测试（Vitest）
   ├── 部署脚本（deploy.sh、环境配置）
   ├── Claude Code skill（ai-learning、project-hub、feature-first）
   ├── DOCX 附件文本提取（#10076，python-docx + chunking，2026-06-23）
   ├── PKM 异步索引化（#10044，Worker + Background Jobs，2026-06-26）
   ├── 全局访问记录系统（#10082，events/ track+compute+router+types，2026-06-25）
-  ├── AI Agent 对话系统（#10144，2026-06-28）
+  ├── AI Agent 对话系统（#10144，2026-06-28 / 2026-07-07 增强）
   │     ├── 对话 CRUD（AiConversation + AiChatMessage 两张表）
   │     ├── SSE 流式响应（Agnes API + ReadableStream 转发）
   │     ├── RAG 自动注入（detector 关键词检测 + retrieveContext）
   │     ├── 用户画像自动生成（summarizeConversation → updateUserProfile LLM 链）
+  │     ├── 周报 AI 摘要作为画像来源（PR5，2026-07-07）
+  │     ├── Agnes Tool Calling 接入 + 响应速度优化（2026-07-09）
   │     ├── 后台任务队列（globalThis + 15min 冷却期 + 失败重试）
   │     ├── AI 主动问候（根据画像生成个性化开场白）
   │     └── 7 个 Agent skill（LangGraph、LangChain、RAG 检索、流式响应…）
   ├── 项目详情文档 Tab（#10081，附件上传 + DocumentPreviewModal，2026-06-24）
-  └── 管理端职能管理增强（#10080，2026-06-23）
+  ├── 管理端职能管理增强（#10080，2026-06-23）
+  ├── 周报系统（PR1，2026-06-29）
+  ├── 周报报表真实化（PR2，2026-06-29）
+  ├── 周报本月周报率 Bug 修复（#10085，2026-07-09）
+  └── AI 画像面板（PR3 / PR4 / PR5，2026-06-29 / 2026-07-07）
 
-当前阶段 🔄  AI Agent 对话系统完成（2026-06-28 上线，#10144）
-            用户处于"学习理解中"阶段——重点不是写代码，是深入理解 AI Agent 在发生什么
+当前阶段 🔄  功能迭代中（2026-07-09）
+            新增：工单截止日期、优先级、备注讨论面板、图片上传 Bug 修复
+            增强：Agnes Tool Calling + 周报画像来源
 ```
 
 ---
@@ -149,3 +161,25 @@ features/
 | 2026-06-29 | PR1 周报系统 + PR2 报表真实化  | 详见 [PR1 周报复现](docs/reports/PR1-weekly-reports.md) / [PR2 报表真实化复现](docs/reports/PR2-stats-and-reports.md) |
 | 2026-06-29 | PR3 AI 画像面板（只读）         | 详见 [PR3 AI 画像复现](docs/reports/PR3-ai-profile.md) |
 | 2026-06-29 | PR4 周报→画像入队 + 手动触发   | 详见 [PR4 周报 AI 入队复现](docs/reports/PR4-weekly-report-ai-enqueue.md) |
+| 2026-07-07 | PR5 周报 AI 画像增强           | 周报摘要作为画像来源 + ProfileAiSummary 重构   |
+| 2026-07-09 | Agnes Tool Calling + 响应优化   | #10144 响应速度优化                           |
+| 2026-07-09 | 工单截止日期 + 优先级字段      | #10156 + #10146                                |
+| 2026-07-09 | 工单备注/讨论面板 + 图片上传   | #10034 + crypto.subtle Bug 修复               |
+| 2026-07-09 | 周报本月周报率 Bug 修复        | #10085                                         |
+| 2026-07-09 | 管理端删除用户功能             | #10085                                         |
+
+---
+
+## 踩坑记录
+
+### 图片上传 crypto.subtle Bug（2026-07-09）
+
+**问题**：用户通过 HTTP IP 地址访问时，`crypto.subtle` API 不可用导致图片上传崩溃。
+
+**根因**：`crypto.subtle` 只能在安全上下文（https:// 或 localhost）中使用。
+
+**解法**：
+- `shared/lib/hash.ts`：添加 `crypto?.subtle` 检查，非安全上下文返回 `null`
+- `shared/lib/upload.ts`：只有 `clientHash` 有值时才上传 hint
+
+详见 [debug-log.md](docs/debug-log.md)

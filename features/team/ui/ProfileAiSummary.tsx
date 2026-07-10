@@ -12,7 +12,6 @@ const SECTION_TONE: Record<ProfileKey, string> = {
   roles: "border-violet-200 bg-violet-50 text-violet-700",
   expertise: "border-brand-200 bg-brand-50 text-brand-700",
   interests: "border-amber-200 bg-amber-50 text-amber-700",
-  projects: "border-emerald-200 bg-emerald-50 text-emerald-700",
   recentTopics: "border-ink-200 bg-ink-50 text-ink-700",
 } as const;
 
@@ -20,14 +19,13 @@ const SECTION_LABEL: Record<ProfileKey, string> = {
   roles: "角色",
   expertise: "专长",
   interests: "兴趣领域",
-  projects: "参与项目",
   recentTopics: "最近话题",
 } as const;
 
-type ProfileKey = "roles" | "expertise" | "interests" | "projects" | "recentTopics";
+type ProfileKey = "roles" | "expertise" | "interests" | "recentTopics";
 
 function isEmptyProfile(p: NonNullable<AiProfileSummary["profile"]>): boolean {
-  const fields: ProfileKey[] = ["roles", "expertise", "interests", "projects", "recentTopics"];
+  const fields: ProfileKey[] = ["roles", "expertise", "interests", "recentTopics"];
   return fields.every((key) => {
     const val = p[key];
     return !Array.isArray(val) || val.length === 0;
@@ -81,7 +79,6 @@ export function ProfileAiSummary({ aiProfile, isOwnProfile, userName }: Props) {
     "roles",
     "expertise",
     "interests",
-    "projects",
     "recentTopics",
   ];
 

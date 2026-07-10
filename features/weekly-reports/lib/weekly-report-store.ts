@@ -28,6 +28,33 @@ export async function listMyWeeklyReports(
   return opts?.cursor ? mapped.slice(0, -1) : mapped;
 }
 
+/**
+ * 查询他人周报（只读，不检查 userId 权限）
+ * 用于团队成员页面展示他人周报
+ */
+export async function listUserWeeklyReports(
+  targetUserId: string,
+  opts?: { limit?: number; cursor?: string },
+): Promise<WeeklyReportWithProjects[]> {
+  const reports = await prisma.weeklyReport.findMany({
+    where: { userId: targetUserId },
+    take: (opts?.limit ?? 20) + 1,
+    ...(opts?.cursor ? { skip: 1, cursor: { id: opts.cursor } } : {}),
+    orderBy: { weekStart: "desc" },
+    include: {
+      projects: { include: { project: { select: { id: true, name: true } } } },
+      user: { select: { name: true, email: true } },
+    },
+  });
+
+  const mapped: (WeeklyReportWithProjects & { user?: { name: string | null; email: string } })[] = reports.map((r) => ({
+    ...r,
+    projects: r.projects.map((rp) => ({ id: rp.project.id, name: rp.project.name })),
+  }));
+
+  return opts?.cursor ? mapped.slice(0, -1) as WeeklyReportWithProjects[] : mapped as WeeklyReportWithProjects[];
+}
+
 export async function getWeeklyReport(
   id: string,
   userId: string,
@@ -36,6 +63,25 @@ export async function getWeeklyReport(
     where: { id, userId },
     include: {
       projects: { include: { project: { select: { id: true, name: true } } } },
+    },
+  });
+  if (!report) return null;
+  return {
+    ...report,
+    projects: report.projects.map((rp) => ({ id: rp.project.id, name: rp.project.name })),
+  };
+}
+
+/**
+ * 只读查询周报详情（不检查 userId 权限）
+ * 用于查看他人周报
+ */
+export async function getUserWeeklyReport(id: string): Promise<(WeeklyReportWithProjects & { user?: { name: string | null; email: string } }) | null> {
+  const report = await prisma.weeklyReport.findUnique({
+    where: { id },
+    include: {
+      projects: { include: { project: { select: { id: true, name: true } } } },
+      user: { select: { name: true, email: true } },
     },
   });
   if (!report) return null;

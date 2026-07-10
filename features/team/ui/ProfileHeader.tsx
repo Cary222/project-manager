@@ -1,7 +1,9 @@
+import Link from "next/link";
 import type { UserProfile } from "@/features/profile/lib/profile-actions";
 
 type Props = {
   profile: UserProfile;
+  userId: string;
 };
 
 const ROLE_LABELS: Record<string, string> = {
@@ -10,7 +12,7 @@ const ROLE_LABELS: Record<string, string> = {
   ADMIN: "管理员",
 };
 
-export function ProfileHeader({ profile }: Props) {
+export function ProfileHeader({ profile, userId }: Props) {
   const initial = (profile.name || profile.email || "U").charAt(0).toUpperCase();
 
   return (
@@ -46,12 +48,12 @@ export function ProfileHeader({ profile }: Props) {
         </div>
       )}
 
-      {/* 统计数字 */}
+      {/* 统计数字（可点击跳转） */}
       <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <StatItem label="创建任务" value={profile.stats.totalTickets} />
+        <StatItem label="创建任务" value={profile.stats.totalTickets} href={`/team/${userId}`} />
         <StatItem label="已完成" value={profile.stats.completedTickets} accent />
-        <StatItem label="参与项目" value={profile.stats.activeProjects} />
-        <StatItem label="周报" value={profile.stats.totalReports} />
+        <StatItem label="参与单子" value={profile.stats.activeProjects} href={`/team/${userId}/tickets`} />
+        <StatItem label="周报" value={profile.stats.totalReports} href={`/team/${userId}/reports`} />
       </div>
     </div>
   );
@@ -61,17 +63,29 @@ function StatItem({
   label,
   value,
   accent,
+  href,
 }: {
   label: string;
   value: number;
   accent?: boolean;
+  href?: string;
 }) {
-  return (
-    <div className="rounded-lg border border-ink-100 bg-ink-50/50 px-3 py-2.5 text-center">
+  const content = (
+    <div className="rounded-lg border border-ink-100 bg-ink-50/50 px-3 py-2.5 text-center transition hover:border-brand-200 hover:bg-brand-50/30">
       <p className={`text-2xl font-bold ${accent ? "text-emerald-600" : "text-ink-900"}`}>
         {value}
       </p>
       <p className="mt-0.5 text-xs text-ink-400">{label}</p>
     </div>
   );
+
+  if (href) {
+    return (
+      <Link href={href} className="block">
+        {content}
+      </Link>
+    );
+  }
+
+  return content;
 }

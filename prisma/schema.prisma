@@ -513,6 +513,8 @@ model AiUserProfile {
   userId             String   @id
   profile            Json
   sourceSummaryCount Int      @default(0)
+  version            Int      @default(1)  // 版本号，每次更新递增
+  weekStart          DateTime?           // 当前版本对应的周开始日期
   updatedAt          DateTime @updatedAt
   createdAt          DateTime @default(now())
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)

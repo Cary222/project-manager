@@ -13,9 +13,9 @@ interface ProfileLike {
   roles?: string[];
   interests?: string[];
   expertise?: string[];
-  projects?: string[];
   recentTopics?: string[];
   preferences?: Record<string, unknown>;
+  // NOTE: projects 字段已移除 — 项目信息通过真实数据库获取
 }
 
 function formatProfile(profile: ProfileLike): string {
@@ -29,7 +29,6 @@ function formatProfile(profile: ProfileLike): string {
   push("roles", "角色");
   push("interests", "兴趣");
   push("expertise", "专长");
-  push("projects", "参与项目");
   push("recentTopics", "近期话题");
   if (profile.preferences && typeof profile.preferences === "object") {
     const entries = Object.entries(profile.preferences);

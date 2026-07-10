@@ -42,7 +42,7 @@ export default async function TeamMemberPage({ params }: Props) {
       }
     >
       <div className="space-y-6 pm-fade-in">
-        <ProfileHeader profile={profile} />
+        <ProfileHeader profile={profile} userId={id} />
 
         {/* AI 画像区块（基于对话摘要生成） */}
         <ProfileAiSummary

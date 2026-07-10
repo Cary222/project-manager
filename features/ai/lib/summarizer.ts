@@ -22,9 +22,9 @@ export interface UserProfileData {
   roles: string[];
   interests: string[];
   expertise: string[];
-  projects: string[];
   recentTopics: string[];
   preferences: Record<string, unknown>;
+  // NOTE: projects 字段已移除 — 项目信息通过真实数据库获取，不通过 AI 总结
 }
 
 interface ChatMessage {
@@ -153,15 +153,40 @@ const PROFILE_INSTRUCTION = [
   '  "roles": ["角色1", "角色2", ...],  // 用户的角色，如"前端工程师"',
   '  "interests": ["兴趣1", "兴趣2", ...],  // 用户的兴趣领域',
   '  "expertise": ["专长1", "专长2", ...],  // 用户擅长的技术或专业领域',
-  '  "projects": ["项目1", "项目2", ...],  // 用户参与或关注的的项目名称',
-  '  "recentTopics": ["话题1", "话题2", ...],  // 最近讨论的热门话题',
-  '  "preferences": {}  // 用户的偏好设置，如沟通风格、技术栈偏好等',
+  '  "recentTopics": ["话题1", "话题2", ...],  // 最近讨论的话题',
+  '  "preferences": {}  // 用户的偏好设置',
   "}",
   "",
-  "注意：",
-  "- 必须输出严格合法的 JSON，不要有其他文字",
+  "## 合并规则",
   "- 如果有 previousProfile，请参考并合并更新，而非完全重写",
-  "- 周报摘要中提到的项目名应合并到 projects 字段",
+  "- 保留已有的核心内容，同时添加新的发现",
+  "- 相似或重复的条目请合并去重",
+  // NOTE: projects 字段已移除 — 项目信息通过真实数据库获取，不通过 AI 总结
+].join("\n");
+
+const PROFILE_CLEANUP_INSTRUCTION = [
+  "你是一个用户画像精简助手。请对现有画像进行清扫，去除冗余和重复内容。",
+  "",
+  "## 字段数量限制",
+  "- roles: 最多 3 个，保留最核心的角色",
+  "- interests: 最多 5 个，保留最相关的兴趣",
+  "- expertise: 最多 5 个，保留最重要的专业领域",
+  "- recentTopics: 最多 5 个，优先保留最新的话题",
+  "",
+  "## 输出要求",
+  "请输出以下 JSON 结构（不要有任何其他文字）：",
+  "{",
+  '  "roles": ["角色1", "角色2"],  // 用户角色，最多3个',
+  '  "interests": ["兴趣1", "兴趣2", "兴趣3"],  // 兴趣领域，最多5个',
+  '  "expertise": ["专长1", "专长2", "专长3"],  // 专业领域，最多5个',
+  '  "recentTopics": ["话题1", "话题2", "话题3"],  // 最近话题，最多5个',
+  '  "preferences": {}',
+  "}",
+  "",
+  "## 清扫规则",
+  "- 相似或重复的条目请合并",
+  "- recentTopics 优先保留最新的话题",
+  "- 如果条目超出限制，保留最重要/最相关的",
 ].join("\n");
 
 function buildProfilePrompt(
@@ -319,22 +344,117 @@ export async function updateUserProfile(
     const jsonStr = extractJsonFromResponse(responseText);
     const profile: UserProfileData = JSON.parse(jsonStr);
 
-    await prisma.aiUserProfile.upsert({
-      where: { userId },
-      create: {
-        userId,
-        profile: profile as unknown as Prisma.InputJsonValue,
-        sourceSummaryCount: summaries.length,
-      },
-      update: {
-        profile: profile as unknown as Prisma.InputJsonValue,
-        sourceSummaryCount: summaries.length,
-      },
-    });
+    // 获取当前周的周一
+    const now = new Date();
+    const weekStart = getWeekStart(now);
+    const currentVersion = (existingProfile as { version?: number })?.version ?? 0;
+    const newVersion = currentVersion + 1;
+
+    // 使用 $queryRaw 插入/更新，避免 Prisma 类型缓存问题
+    await prisma.$executeRaw`
+      INSERT INTO "pm"."AiUserProfile" ("userId", profile, "sourceSummaryCount", version, "weekStart", "updatedAt", "createdAt")
+      VALUES (
+        ${userId},
+        ${profile as unknown as Prisma.InputJsonValue},
+        ${summaries.length},
+        ${newVersion},
+        ${weekStart},
+        NOW(),
+        NOW()
+      )
+      ON CONFLICT ("userId") DO UPDATE SET
+        profile = EXCLUDED.profile,
+        "sourceSummaryCount" = EXCLUDED."sourceSummaryCount",
+        version = EXCLUDED.version,
+        "weekStart" = EXCLUDED."weekStart",
+        "updatedAt" = NOW()
+    `;
 
     return profile;
   } catch (error) {
     console.error("[summarizer] Failed to update user profile:", error);
+    return null;
+  }
+}
+
+/**
+ * 获取给定日期所在周的周一（00:00:00）
+ */
+function getWeekStart(date: Date): Date {
+  const d = new Date(date);
+  const day = d.getDay(); // 0 = Sunday, 1 = Monday, ...
+  const diff = day === 0 ? -6 : 1 - day; // 如果是周日则回到上周一
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/**
+ * 每周画像清扫：限制字段数量，去除冗余
+ * 仅在每周清扫时调用，日常对话更新使用 updateUserProfile
+ * 
+ * @param userId 用户ID
+ * @returns 清扫后的画像
+ */
+export async function cleanupUserProfile(
+  userId: string
+): Promise<UserProfileData | null> {
+  const existingProfile = await prisma.aiUserProfile.findUnique({
+    where: { userId },
+  });
+
+  if (!existingProfile) {
+    return null;
+  }
+
+  const currentProfile = existingProfile.profile as unknown as UserProfileData;
+  if (!currentProfile) {
+    return null;
+  }
+
+  // 检查是否有有效字段
+  if (!currentProfile.roles && !currentProfile.interests && !currentProfile.expertise && !currentProfile.recentTopics) {
+    return null;
+  }
+
+  const promptUser = [
+    PROFILE_CLEANUP_INSTRUCTION,
+    "",
+    "## 当前画像",
+    JSON.stringify(currentProfile, null, 2),
+  ].join("\n");
+
+  const promptMessages: ChatMessage[] = [
+    { role: "system", content: PROFILE_CLEANUP_INSTRUCTION },
+    { role: "user", content: promptUser },
+  ];
+
+  try {
+    const responseText = await callAgnes(promptMessages);
+    const jsonStr = extractJsonFromResponse(responseText);
+    const profile: UserProfileData = JSON.parse(jsonStr);
+
+    // 更新画像，设置新的 weekStart
+    const now = new Date();
+    const weekStart = getWeekStart(now);
+    const currentVersion = (existingProfile as { version?: number })?.version ?? 0;
+    const newVersion = currentVersion + 1;
+
+    // 使用 $executeRaw 更新，避免 Prisma 类型缓存问题
+    // 注意：PostgreSQL 列名是 case-sensitive 的，需要用双引号包裹
+    await prisma.$executeRaw`
+      UPDATE "pm"."AiUserProfile"
+      SET "profile" = ${profile as unknown as Prisma.InputJsonValue},
+          "version" = ${newVersion},
+          "weekStart" = ${weekStart},
+          "updatedAt" = NOW()
+      WHERE "userId" = ${userId}
+    `;
+
+    console.log(`[cleanupUserProfile] Cleaned profile for user ${userId}: v${currentVersion} -> v${newVersion}`);
+    return profile;
+  } catch (error) {
+    console.error("[summarizer] Failed to cleanup user profile:", error);
     return null;
   }
 }

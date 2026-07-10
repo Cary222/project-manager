@@ -115,20 +115,24 @@ Agnes 官方文档明确说明 tool calling 支持走的是 Chat Completions 格
 
 ---
 
-### 3.3 searchKnowledge Tool — Context Schema（`features/ai/tools/search-knowledge.ts`）
+### 3.3 searchKnowledge Tool — Module-Scoped Viewer（`features/ai/tools/search-knowledge.ts`）
 
-`ai@7` 中 tool 的 execute 函数接收 context 的方式从 `options.experimental_context` 改为 `options.context`。
+`searchKnowledge` 用 module-scoped viewer 注入（与 `searchStructured` 一致），原因：
+
+- Agnes 不支持 `contextSchema`（坑 7）
+- `toolsContext` 在 union 工具集上类型推断失败（坑 6）
+- `experimental_refineToolInput` 的 key 必须是 `TOOLS` 联合类型中存在的 tool name
+- `onToolCall` 在 `streamText` 的类型签名中不存在
 
 ```startLine:1:features/ai/tools/search-knowledge.ts
 import { tool } from "ai";
 import { z } from "zod";
 import { retrieveContext } from "@/features/ai/lib/rag";
 
-const toolContextSchema = z.object({
-  viewerUserId: z.string().nullable(),
-});
-
-type ToolContext = z.infer<typeof toolContextSchema>;
+let currentViewerUserId: string | null = null;
+export function setSearchKnowledgeViewer(userId: string | null) {
+  currentViewerUserId = userId;
+}
 
 export const searchKnowledge = tool({
   description: "在 ProjectHub 知识库（工单/提交/笔记）语义检索。",
@@ -136,18 +140,14 @@ export const searchKnowledge = tool({
     query: z.string().min(2),
     limit: z.number().int().min(1).max(10).default(5),
   }),
-  contextSchema: toolContextSchema,
-  execute: async ({ query, limit }, options) => {
-    const ctx = (options?.context ?? { viewerUserId: null }) as ToolContext;
+  execute: async ({ query, limit }) => {
     return await retrieveContext(query, {
       limit,
-      userId: ctx.viewerUserId,
+      userId: currentViewerUserId,
     });
   },
 });
 ```
-
-**为什么声明 `contextSchema`**：`ai@7` 要求如果 tool 需要接收 context，必须显式声明 `contextSchema`。如果不声明，传入的 `toolsContext` 不会被验证，但 `InferToolSetContext` 的类型推断会失败，导致 messages route 里 `toolsContext` 参数类型报错。
 
 **`viewerUserId` 的用途**：用于 RAG 检索时的权限过滤，确保用户只能检索到自己有权限看到的工单/提交/笔记。
 
@@ -191,24 +191,46 @@ export const webSearch = tool({
 import { tool, type Tool } from "ai";
 import { webSearch } from "./web-search";
 import { searchKnowledge } from "./search-knowledge";
+import { searchStructured } from "./search-structured";
 
-export { webSearch, searchKnowledge };
+export { webSearch, searchKnowledge, searchStructured };
 
 export type ToolMode = "auto" | "web" | "search" | "chat";
 
-type WebToolSet = { webSearch: typeof webSearch; searchKnowledge: typeof searchKnowledge };
-type SearchToolSet = { searchKnowledge: typeof searchKnowledge };
+type WebToolSet = {
+  webSearch: typeof webSearch;
+  searchKnowledge: typeof searchKnowledge;
+  searchStructured: typeof searchStructured;
+};
+type SearchToolSet = { searchKnowledge: typeof searchKnowledge; searchStructured: typeof searchStructured };
+type StructuredToolSet = { searchStructured: typeof searchStructured };
 
 export function toolsetForMode(
   mode: ToolMode
-): WebToolSet | SearchToolSet | undefined {
-  if (mode === "auto" || mode === "web") return { webSearch, searchKnowledge };
-  if (mode === "search") return { searchKnowledge };
+): WebToolSet | SearchToolSet | StructuredToolSet | undefined {
+  if (mode === "auto" || mode === "web")
+    return { webSearch, searchKnowledge, searchStructured };
+  if (mode === "search") return { searchKnowledge, searchStructured };
   return undefined;
 }
 ```
 
 **为什么用具体类型而不是泛型 `Record<string, Tool>`**：`ai@7` 的 `InferToolSetContext` 对 `Record<string, Tool>` 推断结果为 `never`，导致 `toolsContext` 无法通过类型检查。改用具体工具类型的 union 可以在 `streamText` 泛型展开时保留正确的 context 类型。
+
+### 3.6 searchStructured Tool — 结构化数据查询（`features/ai/tools/search-structured.ts`）
+
+**核心问题**：Agnes 不支持 tool 的 `contextSchema`（坑 7），且 `toolsContext` 在 union 工具集上推断失败（坑 6）。本工具采用 **module-scoped viewer 注入**：route handler 在请求到来时调用 `setSearchStructuredViewer(session.user.id)`，execute 闭包读取模块级变量。
+
+**Route 注入**（`messages/route.ts`）：
+
+```typescript
+import { setSearchStructuredViewer } from "@/features/ai/tools/search-structured";
+setSearchStructuredViewer(session.user.id);
+```
+
+**实现**（`features/ai/tools/search-structured.ts`）：提供 5 种数据类型（ticket/project/user/commit/weekly_report）的精确查询和过滤查询。`queryUser` / `queryWeeklyReport` 的 `id`/`filters.userId` 支持用户 CUID、用户名（精确匹配，case-insensitive）、邮箱前缀三种格式。
+
+**为什么需要 searchStructured 而 searchKnowledge 不够**：`searchKnowledge` 走 `retrieveContext` → `canAccessSearchResult`，对笔记类资源有严格的权限过滤（只能看到自己的私有笔记 + 全公司公开笔记），查不到他人私有笔记。`searchStructured` 直接查 `prisma.user`，绕开了笔记权限过滤，但仍可被 LLM 调用以获取任何用户的基本信息（指派工单、创建工单、周报）。
 
 ---
 
@@ -447,7 +469,7 @@ messages/route.ts
   ├── requireSession()  → 鉴权
   ├── getConversation() → 确认会话存在
   ├── toolsetForMode()  → 根据 mode 返回工具集
-  │   ├── mode="auto/web" → { webSearch, searchKnowledge }
+  │   ├── mode="auto/web" → { webSearch, searchKnowledge, searchStructured }
   │   └── mode="search"  → { searchKnowledge }
   │
   ▼
@@ -467,8 +489,10 @@ streamText({
   ▼
 工具执行
   ├── webSearch.execute() → 调用 Tavily API
-  └── searchKnowledge.execute({ context: { viewerUserId } })
-      → retrieveContext() → 向量数据库检索
+  ├── searchKnowledge.execute({ context: { viewerUserId } })
+  │   → retrieveContext() → 向量数据库检索
+  └── searchStructured.execute({ type, id, filters, viewerUserId, limit })
+      → Prisma 查询 → 格式化文本
   │
   ▼
 fullStream 事件

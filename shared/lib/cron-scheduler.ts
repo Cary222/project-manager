@@ -1,6 +1,8 @@
 /**
  * Cron scheduler for background jobs.
- * Currently runs the overdue ticket scanner every 5 minutes.
+ * Currently runs:
+ * - Overdue ticket scanner every 5 minutes
+ * - Profile cleanup every Monday at 00:00
  *
  * Auto-starts when first imported. For Next.js App Router, this works because
  * the server module is loaded once per process lifetime.
@@ -15,6 +17,7 @@
 import { TicketStatus } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
 import { createModerationLog } from "@/features/admin/moderation";
+import { runProfileCleanup } from "@/features/ai/lib/profile-cleanup";
 
 let __started = false;
 let __intervalId: ReturnType<typeof setInterval> | null = null;
@@ -128,4 +131,91 @@ export function stopOverdueScanner(): void {
 // In Next.js App Router, the server module is loaded once per process lifetime.
 if (process.env.NODE_ENV !== "test") {
   startOverdueScanner();
+  startProfileCleanupScheduler();
+}
+
+// ===== Profile Cleanup Scheduler =====
+
+let __profile_cleanup_started = false;
+let __profile_cleanup_interval: ReturnType<typeof setInterval> | null = null;
+let __last_cleanup_date: string | null = null;
+
+/**
+ * Check if today is Monday
+ */
+function isMonday(): boolean {
+  const day = new Date().getDay();
+  return day === 1; // 1 = Monday
+}
+
+/**
+ * Get date string in YYYY-MM-DD format
+ */
+function getDateString(date: Date = new Date()): string {
+  return date.toISOString().split("T")[0];
+}
+
+/**
+ * Run profile cleanup if it's Monday and hasn't run today
+ */
+async function checkAndRunProfileCleanup(): Promise<void> {
+  const today = getDateString();
+  
+  // Skip if already ran today
+  if (__last_cleanup_date === today) {
+    return;
+  }
+  
+  // Only run on Monday
+  if (!isMonday()) {
+    return;
+  }
+  
+  console.log("[cron-scheduler] Monday detected — running profile cleanup");
+  __last_cleanup_date = today;
+  
+  try {
+    const result = await runProfileCleanup();
+    console.log(`[cron-scheduler] Profile cleanup completed: ${result.cleaned} cleaned, ${result.skipped} skipped, ${result.errors} errors`);
+  } catch (error) {
+    console.error("[cron-scheduler] Profile cleanup failed:", error);
+  }
+}
+
+/**
+ * Start the profile cleanup scheduler
+ * Checks every hour if it's Monday and cleanup is needed
+ */
+export function startProfileCleanupScheduler(): void {
+  if (__profile_cleanup_started) {
+    return;
+  }
+  
+  __profile_cleanup_started = true;
+  
+  // Run immediately on start
+  checkAndRunProfileCleanup().catch((error) => {
+    console.error("[cron-scheduler] Initial profile cleanup check failed:", error);
+  });
+  
+  // Then check every hour
+  __profile_cleanup_interval = setInterval(() => {
+    checkAndRunProfileCleanup().catch((error) => {
+      console.error("[cron-scheduler] Scheduled profile cleanup check failed:", error);
+    });
+  }, 60 * 60 * 1000); // 1 hour
+  
+  console.log("[cron-scheduler] Profile cleanup scheduler started (hourly check on Monday)");
+}
+
+/**
+ * Stop the profile cleanup scheduler (for testing)
+ */
+export function stopProfileCleanupScheduler(): void {
+  if (__profile_cleanup_interval) {
+    clearInterval(__profile_cleanup_interval);
+    __profile_cleanup_interval = null;
+  }
+  __profile_cleanup_started = false;
+  console.log("[cron-scheduler] Profile cleanup scheduler stopped");
 }

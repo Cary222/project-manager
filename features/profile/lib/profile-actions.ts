@@ -94,7 +94,7 @@ export async function getUserProfileAction(userId: string): Promise<UserProfile>
       createdTickets: {
         select: { id: true, ticketNo: true, title: true, status: true, progress: true },
         orderBy: { createdAt: "desc" },
-        take: 10,
+        take: 5,
       },
       userOnProjects: {
         include: {
@@ -130,6 +130,47 @@ export async function getUserProfileAction(userId: string): Promise<UserProfile>
     },
   });
 
+  // 参与的单子数（被指派的单子）
+  const assignedTicketsCount = await prisma.ticket.count({
+    where: {
+      assignees: { some: { userId } },
+    },
+  });
+
+  // 获取该用户被指派的最新工单（按更新时间排序）
+  const assignedTickets = await prisma.ticket.findMany({
+    where: { assignees: { some: { userId } } },
+    orderBy: { updatedAt: "desc" },
+    take: 5,
+    select: { id: true, ticketNo: true, title: true, status: true, progress: true },
+  });
+
+  // 合并：被指派的工单 + 创建的工单，去重后按更新时间排序
+  const recentTicketsMap = new Map<string, UserTicketSummary>();
+  // 先加入被指派的（优先级更高）
+  for (const t of assignedTickets) {
+    recentTicketsMap.set(t.id, {
+      id: t.id,
+      ticketNo: t.ticketNo,
+      title: t.title,
+      status: t.status,
+      progress: t.progress,
+    });
+  }
+  // 再加入创建的（补充不在被指派列表中的）
+  for (const t of user.createdTickets) {
+    if (!recentTicketsMap.has(t.id)) {
+      recentTicketsMap.set(t.id, {
+        id: t.id,
+        ticketNo: t.ticketNo,
+        title: t.title,
+        status: t.status,
+        progress: t.progress,
+      });
+    }
+  }
+  const recentTickets = Array.from(recentTicketsMap.values()).slice(0, 10);
+
   return {
     id: user.id,
     name: user.name,
@@ -138,13 +179,7 @@ export async function getUserProfileAction(userId: string): Promise<UserProfile>
     role: user.role,
     createdAt: user.createdAt,
     skills: user.responsibilities.map((r) => ({ kind: r.kind })),
-    recentTickets: user.createdTickets.map((t) => ({
-      id: t.id,
-      ticketNo: t.ticketNo,
-      title: t.title,
-      status: t.status,
-      progress: t.progress,
-    })),
+    recentTickets,
     projects: user.userOnProjects.map((up) => ({
       id: up.project.id,
       name: up.project.name,
@@ -171,7 +206,7 @@ export async function getUserProfileAction(userId: string): Promise<UserProfile>
     stats: {
       totalTickets: user.createdTickets.length,
       completedTickets,
-      activeProjects: user.userOnProjects.length,
+      activeProjects: assignedTicketsCount,
       totalReports: user.weeklyReports.length,
     },
   };
@@ -195,12 +230,15 @@ export async function getTeamMembersAction(): Promise<TeamMember[]> {
   });
 
   const memberIds = users.map((u) => u.id);
+
+  // 统计每个用户创建的单子数
   const ticketCounts = await prisma.ticket.groupBy({
     by: ["creatorId"],
     _count: { _all: true },
     where: { creatorId: { in: memberIds } },
   });
 
+  // 统计每个用户完成的单子数
   const completedCounts = await prisma.ticket.groupBy({
     by: ["creatorId"],
     _count: { _all: true },
@@ -210,8 +248,16 @@ export async function getTeamMembersAction(): Promise<TeamMember[]> {
     },
   });
 
+  // 统计每个用户参与的单子数（被指派的）
+  const assignedCounts = await prisma.ticketAssignee.groupBy({
+    by: ["userId"],
+    _count: { _all: true },
+    where: { userId: { in: memberIds } },
+  });
+
   const ticketMap = Object.fromEntries(ticketCounts.map((t) => [t.creatorId, t._count._all]));
   const completedMap = Object.fromEntries(completedCounts.map((t) => [t.creatorId, t._count._all]));
+  const assignedMap = Object.fromEntries(assignedCounts.map((t) => [t.userId, t._count._all]));
 
   return users.map((user) => ({
     id: user.id,
@@ -224,7 +270,7 @@ export async function getTeamMembersAction(): Promise<TeamMember[]> {
     stats: {
       totalTickets: ticketMap[user.id] ?? 0,
       completedTickets: completedMap[user.id] ?? 0,
-      activeProjects: user.userOnProjects.length,
+      activeProjects: assignedMap[user.id] ?? 0,
     },
   }));
 }

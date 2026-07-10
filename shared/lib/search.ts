@@ -901,13 +901,29 @@ async function searchKeywordCandidates(options: {
   projectId?: string | null;
   limit: number;
 }) {
+  // Use splitTerms to handle both Chinese 2-gram and English tokenization.
+  // This fixes issues like searching "cary笔记" returning 0 results even though
+  // both "cary" and "笔记" exist in documents.
+  const terms = splitTerms(options.query);
+  if (terms.length === 0) {
+    return [];
+  }
+
+  // Build OR conditions for each term in both title and content
+  const orConditions: Prisma.SearchDocumentWhereInput["OR"] = [];
+  for (const term of terms) {
+    orConditions.push({
+      title: { contains: term, mode: "insensitive" },
+    });
+    orConditions.push({
+      content: { contains: term, mode: "insensitive" },
+    });
+  }
+
   const documents = await prisma.searchDocument.findMany({
     where: {
       projectId: options.projectId ?? undefined,
-      OR: [
-        { title: { contains: options.query, mode: "insensitive" } },
-        { content: { contains: options.query, mode: "insensitive" } },
-      ],
+      OR: orConditions.length > 0 ? orConditions : undefined,
     },
     include: {
       project: { select: { id: true, name: true } },
@@ -928,8 +944,25 @@ async function searchVectorCandidates(options: {
   query: string;
   projectId?: string | null;
   limit: number;
-}) {
-  const vector = await fetchEmbedding(options.query);
+}): Promise<VectorSearchRow[]> {
+  let vector;
+  try {
+    vector = await fetchEmbedding(options.query);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    // 根据错误类型给出不同的提示
+    if (msg.includes("EMBEDDING_API_URL_MISSING")) {
+      console.warn("[search:vector] Embedding service URL not configured, skipping vector search");
+    } else if (msg.includes("EMBEDDING_API_TIMEOUT")) {
+      console.warn("[search:vector] Embedding service timeout (>30s), skipping vector search");
+    } else if (msg.includes("EMBEDDING_API_HTTP")) {
+      console.warn(`[search:vector] Embedding service returned error: ${msg}, skipping vector search`);
+    } else {
+      console.warn(`[search:vector] Embedding failed: ${msg}, skipping vector search`);
+    }
+    return [];
+  }
+
   const literal = vectorToSqlLiteral(vector);
   const rows = await prisma.$queryRaw<VectorSearchRow[]>(Prisma.sql`
     SELECT

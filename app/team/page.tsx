@@ -18,7 +18,7 @@ export default async function TeamPage({ searchParams }: Props) {
   }
 
   const { view } = await searchParams;
-  const currentView = view === "all" ? "all" : "projects";
+  const currentView = view === "projects" ? "projects" : "all";
 
   const [profile, members] = await Promise.all([
     getUserProfileAction(session.user.id),
@@ -35,22 +35,22 @@ export default async function TeamPage({ searchParams }: Props) {
           <a
             href="/team"
             className={`rounded-md px-4 py-1.5 text-sm font-medium transition ${
-              currentView === "projects"
-                ? "bg-brand-50 text-brand-700"
-                : "text-ink-500 hover:bg-ink-50 hover:text-ink-700"
-            }`}
-          >
-            按项目
-          </a>
-          <a
-            href="/team?view=all"
-            className={`rounded-md px-4 py-1.5 text-sm font-medium transition ${
               currentView === "all"
                 ? "bg-brand-50 text-brand-700"
                 : "text-ink-500 hover:bg-ink-50 hover:text-ink-700"
             }`}
           >
             全部成员
+          </a>
+          <a
+            href="/team?view=projects"
+            className={`rounded-md px-4 py-1.5 text-sm font-medium transition ${
+              currentView === "projects"
+                ? "bg-brand-50 text-brand-700"
+                : "text-ink-500 hover:bg-ink-50 hover:text-ink-700"
+            }`}
+          >
+            按项目
           </a>
         </div>
 

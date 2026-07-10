@@ -382,12 +382,6 @@ export default function AdminUsersPage() {
                     {isRoot && (
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-2">
-                          <Link
-                            href={`/admin/users/${user.id}`}
-                            className="text-xs text-blue-600 hover:text-blue-700"
-                          >
-                            查看单子
-                          </Link>
                           <button
                             type="button"
                             onClick={() => openRoleDialog(user)}

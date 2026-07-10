@@ -49,9 +49,9 @@ interface AiUserProfile {
   roles?: string[];
   interests?: string[];
   expertise?: string[];
-  projects?: string[];
   recentTopics?: string[];
   preferences?: Record<string, string>;
+  // NOTE: projects 字段已移除 — 项目信息通过真实数据库获取
 }
 
 interface UserProfilePanelProps {
@@ -232,7 +232,6 @@ function UserProfilePanel({
     profile.roles?.length ||
     profile.interests?.length ||
     profile.expertise?.length ||
-    profile.projects?.length ||
     profile.recentTopics?.length ||
     Object.keys(profile.preferences ?? {}).length > 0;
 
@@ -313,11 +312,6 @@ function UserProfilePanel({
                 value={draft.expertise}
                 onChange={(next) => updateField("expertise", next)}
               />
-              <EditableProfileField
-                label="项目"
-                value={draft.projects}
-                onChange={(next) => updateField("projects", next)}
-              />
               <div className="col-span-2">
                 <EditableProfileField
                   label="近期话题"
@@ -331,7 +325,6 @@ function UserProfilePanel({
               <ProfileField label="角色" value={profile.roles} />
               <ProfileField label="兴趣" value={profile.interests} />
               <ProfileField label="专业领域" value={profile.expertise} />
-              <ProfileField label="项目" value={profile.projects} />
               <div className="col-span-2">
                 <ProfileField label="近期话题" value={profile.recentTopics} />
               </div>
@@ -790,6 +783,7 @@ export function AiChatPanel({
                   onConversationCreated?.(parsed.id);
                 }
               } else if (parsed.type === "text") {
+                console.log("[AI] text delta:", parsed.delta);
                 fullContent += parsed.delta;
                 setStreamingContent(fullContent);
               } else if (parsed.type === "sources") {
@@ -808,6 +802,7 @@ export function AiChatPanel({
                 setStreamingContent("");
                 setPendingSources([]);
               } else if (parsed.type === "tool_call") {
+                console.log("[AI] tool_call received:", parsed);
                 const toolLabel =
                   parsed.toolName === "webSearch"
                     ? "联网搜索"
@@ -819,7 +814,11 @@ export function AiChatPanel({
                   displayLabel: toolLabel,
                   status: "calling",
                 });
+                console.log("[AI] setActiveToolCall:", parsed.toolName);
               } else if (parsed.type === "tool_result") {
+                console.log("[AI] tool_result received:", parsed);
+                console.log("[AI] activeToolCall:", activeToolCall);
+                console.log("[AI] match?", activeToolCall?.toolName, "===", parsed.toolName);
                 if (activeToolCall?.toolName === parsed.toolName) {
                   setActiveToolCall((prev) =>
                     prev ? { ...prev, status: "done", message: formatToolResult(parsed.output) } : null

@@ -9,7 +9,7 @@ import type { WeeklyReportWithProjects } from "@/features/weekly-reports/lib/wee
 import { AttachmentItem, type PreviewableFile } from "@/shared/ui/AttachmentItem";
 import { DocumentPreviewModal } from "@/shared/ui/DocumentPreviewModal";
 
-type Props = { initialReport: WeeklyReportWithProjects; reportId: string };
+type Props = { initialReport: WeeklyReportWithProjects; reportId: string; isOwnReport?: boolean };
 
 type Mode = "view" | "edit";
 
@@ -88,7 +88,7 @@ function AiSummaryPanel({
   );
 }
 
-export function WeeklyReportDetailClient({ initialReport, reportId }: Props) {
+export function WeeklyReportDetailClient({ initialReport, reportId, isOwnReport = true }: Props) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("view");
   const [report, setReport] = useState(initialReport);
@@ -138,25 +138,34 @@ export function WeeklyReportDetailClient({ initialReport, reportId }: Props) {
       )}
       {/* Header — 右侧模式相关按钮，返回由 BackPageHeader 承担 */}
       <div className="mb-6 flex items-start justify-end gap-2">
-        {mode === "view" ? (
-          <>
+        {/* 只有自己的周报才显示编辑按钮 */}
+        {isOwnReport && (
+          mode === "view" ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setMode("edit")}
+                className="rounded-lg border border-ink-300 bg-white px-4 py-2 text-sm font-medium text-ink-700 transition-colors hover:bg-ink-100 focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:outline-none"
+              >
+                编辑
+              </button>
+              <WeeklyReportRegenerateButton reportId={reportId} />
+            </>
+          ) : (
             <button
               type="button"
-              onClick={() => setMode("edit")}
+              onClick={() => setMode("view")}
               className="rounded-lg border border-ink-300 bg-white px-4 py-2 text-sm font-medium text-ink-700 transition-colors hover:bg-ink-100 focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:outline-none"
             >
-              编辑
+              取消编辑
             </button>
-            <WeeklyReportRegenerateButton reportId={reportId} />
-          </>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setMode("view")}
-            className="rounded-lg border border-ink-300 bg-white px-4 py-2 text-sm font-medium text-ink-700 transition-colors hover:bg-ink-100 focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:outline-none"
-          >
-            取消编辑
-          </button>
+          )
+        )}
+        {/* 非自己的周报显示提示 */}
+        {!isOwnReport && (
+          <span className="rounded-lg bg-ink-100 px-4 py-2 text-sm text-ink-500">
+            仅可查看
+          </span>
         )}
       </div>
 
