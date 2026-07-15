@@ -1,180 +1,82 @@
 ---
-description: 子代理协作 SOP — Main 是协调者也是执行者，子代理 Skill 是专业提示词合集
-globs: .cursor/agents/**/*.md
+description: Cursor 3.11+ 子代理协作 SOP；Main 负责策略、边界、验收与决策
 alwaysApply: true
 ---
 
 # 子代理协作 SOP
 
-## 一句话原则
+## 核心原则
 
-> Main 拆任务、定边界、做决策，也是执行者；Subagent 只在需要隔离上下文或复杂任务时才派。
-> 产物落盘是可靠完工信号；transcript 是辅助参考。
+> Main 选择执行策略、确认边界并验收结果，也是执行者。Cursor 可自动拆分任务，但不能替 Main 决定依赖、范围和质量门。
+> 子代理完成通知触发汇合；`git diff`、产物文件和质量命令决定是否验收通过。
 
----
+## 执行模式
 
-## Main 执行模式
-
-Main 不只是协调者，也是万能执行者。两种执行方式：
-
-| 方式 | 何时用 |
+| 方式 | 适用条件 |
 |---|---|
-| **直接执行** | 小任务（≤3 文件）、review 报告、Stage0 分析、文档整理 |
-| **派 Task** | 复杂 feature 实施、需要隔离上下文、多 feature 并行 |
+| **Main 直接执行** | 小任务（≤3 文件）、分析、报告、文档整理 |
+| **派 Task** | 复杂实施、需要专门能力或上下文隔离 |
+| **`/multitask`** | 两个以上无前置依赖、文件边界互斥的子任务 |
 
-**直接执行流程**：读对应专精的子代理 skill → Main 作为该身份执行 → 产物落工作区。
-
-**Main 主动干活原则**：等子代理期间，Main 直接执行不依赖该子代理产物的任务，不 idle。
-
-### 并行派发汇合策略
-
-并行派发多个子代理时：
-
-1. **派发后立即继续** — Main 不等子代理回报，继续执行其他不依赖这些子代理的任务
-2. **定期检查工作区** — 按完工信号三结合（产物文件 > git status > transcript）判断每个子代理是否完成
-3. **全部齐全后合并** — 所有产物齐全才执行合并，不依赖子代理主动回报
-4. **禁止**：在并行派发后"等待所有子代理"然后什么都不做
-
----
+- `/multitask` 不限单 feature 或多 feature；API、UI、schema 等独立子任务也可并行。
+- Cursor 可以提出拆分，Main 必须确认依赖、负责文件和共享文件；不满足并行条件就顺序执行。
+- 纯研究或方案讨论可建议用户使用 Side Chat，结论明确后再回主线执行。
 
 ## 模式判断
 
-| 模式 | 条件 | 流程 |
+| 模式 | 条件 | 默认流程 |
 |---|---|---|
-| **Mode C** | ≤3 文件、无跨 feature 依赖 | 直接执行 or 派 fullstack-developer → git diff 验收 → User Decide |
-| **Mode M** | 单 feature、业务逻辑 | 派 fullstack-developer → 双审查 → Main 合并 → User Decide |
-| **Mode L** | 多 feature | Stage0 拆分 → 每个走 Mode M → Stage3 合并 |
+| **Mode C** | ≤3 文件、低风险、无跨模块依赖 | Main 直接执行 → 验收 |
+| **Mode M** | 单 feature、含业务逻辑 | 顺序或 `/multitask` → Review → 修复 → 验收 |
+| **Mode L** | 多 feature 或跨模块改动 | Main 确认拆分 → 顺序或 `/multitask` → 集成 Review → 验收 |
 
----
+## Stage 0 — Analysis
 
-## Stage0 — Task Analysis（Main 直接执行）
+1. 读取项目相关 skill 和现有实现，判断 Mode、风险与质量门。
+2. 标明任务依赖、负责文件和共享文件；同一文件同时只归一个执行者。
+3. UI 需求在此识别类型并指定项目 UI skill；本项目使用 `pretty-ui`。
+4. 仅在存在架构取舍、跨模块契约或高风险方案时做 Advisor Review；输出 `APPROVED`、`CHANGES_REQUIRED` 或 `BLOCKED`。
 
-1. 读 `pm-dev/PROJECT-HUB.md` / `feature-first` skill 摸项目现状
-2. 判断走哪个 Mode
-3. 识别 feature 边界：可并行 vs 必须串行
-4. 列出共享文件
-5. **文件边界互斥**：每个文件同时只属于一个 Feature
+输出简短的任务拆分与执行策略。
 
-输出 `## 任务拆分摘要`。
+## Stage 1 — Execution
 
----
+1. Main 选择顺序执行、单个 Task 或 `/multitask`。
+2. UI 实施前读取项目 UI skill；需要精确页面上下文时，建议用户进入 Design Mode 圈选元素后再开发。
+3. 并行期间，Main 只做不依赖子代理、且不修改其负责文件的工作；优先准备 Review、文档、分析或下一阶段 Planning。
+4. 以完成通知触发汇合，以 `git diff`、约定产物和质量命令验收。transcript 仅用于异常诊断，不轮询等待。
 
-## Stage1 — Advisor Review
+## Stage 2 — Review And Fix
 
-**方式**：直接执行（读 ai-learning-mentor skill）或派 Task。
+1. 所有实现完成并验收后才能启动 Review；禁止 reviewer 与被审查的实现同时运行。
+2. 业务逻辑、数据库、架构、权限或 API 改动必须审查；纯文案、注释或样式可跳过。
+3. 硬层与软层双审查确有需要时可并行，但分别写入：
+   - `docs/reviews/PR<N>-<feature>-code-reviewer.md`
+   - `docs/reviews/PR<N>-<feature>-ai-mentor.md`
+4. Main 汇总结论；Critical 必须修复并重新运行质量门。
+5. Mode L 完成后做一次集成 Smoke Review，只检查跨模块一致性。
 
-**固定三档输出**：
-- `APPROVED` → 进入 Stage2
-- `CHANGES_REQUIRED` → Main 调整方案，最多 2 次
-- `BLOCKED` → 重新设计
+## Stage 3 — User Decide
 
----
+1. Main 向用户提供改动摘要、验证结果、审查结论和剩余风险；不可跳过。
+2. 需要复现文档时使用 `dev-to-doc-recap` skill。
+3. 用户明确要求提交后，按 `git-commit-required.mdc` 和 `git-commit-assistant` skill 执行；不得擅自 commit 或 push。
 
-## Stage2 — Feature Fan-out
+## 核心约束
 
-每个 feature 走：
+- **依赖决定前后台**：后续步骤依赖结果时前台执行；互相独立且 Main 有其他工作时才异步并行。
+- **Authority Boundary**：子代理只执行或建议，不替 Main 跳过阶段、扩大范围或决定 Git 操作。
+- **Immutable Scope**：派发后不得修改任务范围；新增需求另建任务。
+- **文件互斥**：并行执行者不得修改同一文件；双审查产物路径必须不同。
+- **异常恢复**：完成通知与工作区不一致时读一次 transcript；仍异常才重新派发，并附上已知问题和预期产物。
 
-```
-派 fullstack-developer（Foreground）
-  ↓
-双审查（code-reviewer + ai-learning-mentor，Foreground，各写不同文件）
-  ↓
-Main 合并两份审查报告
-  ↓
-Critical 修复 → 直接执行或派 fullstack-developer → tsc 必须绿
-```
+## Main 自检
 
-**审查产物文件互斥（强制）**：
-
-| Agent | 产物文件 | 文件头 |
-|---|---|---|
-| `code-reviewer` | `docs/reviews/PR<N>-<feature>-code-reviewer.md` | `<!-- reviewer: code-reviewer (硬层) -->` |
-| `ai-learning-mentor` | `docs/reviews/PR<N>-<feature>-ai-mentor.md` | `<!-- reviewer: ai-learning-mentor (软层) -->` |
-
-Main 在 Stage2 末尾合并为 `docs/reports/PR<N>-<feature>-review.md`，标注 merged by Main。
-
-**Review 触发条件**：业务逻辑 / 数据库 / 架构 / 权限 / API → 必须；README / 注释 / 样式 / 纯文案 → 跳过。
-
----
-
-## Stage3 — Merge + Smoke Review
-
-- Main 决策合并策略（rebase / merge / squash）
-- **Git 操作只由 fullstack-developer 执行**，遵循 `git-commit-required.mdc`
-- Smoke Review（直接执行 code-reviewer）：只检查整体一致性
-
----
-
-## Stage4 — Document（按需）
-
-- 用 `dev-to-doc-recap` skill 生成复现文档
-
----
-
-## Stage5 — User Decide → Commit
-
-- Main 把 PR 摘要 + 审查报告给用户，**不可跳过**
-- 用户决定后派 fullstack-developer 执行 git commit（按 `git-commit-required.mdc`）
-
----
-
-## 完工信号（三结合判断）
-
-判断子代理 / stage 是否完工：
-
-1. **产物文件**（首选）：`git status` / `git diff` / `Glob docs/**/*.md`
-2. **git status**（次选）：子代理修改的文件是否出现
-3. **transcript**（辅助，仅用于异常诊断）：读 `agent-transcripts/<id>.jsonl` 最后一条 assistant 消息
-
-三结合都查不到产物 → 子代理可能卡住，按 Rule 3 异常恢复处理。
-
----
-
-## 核心 Rules
-
-**Rule 1 — 默认 Foreground**
-- 所有派 Task 默认 `run_in_background: false`
-- 仅当任务结果不是后续前置条件时，才用 Background
-
-**Rule 2 — 子代理只发 Main**
-- Subagent Final Response 只发给主代理
-- 跨子代理时序由 Main 在 prompt 里写明产物路径
-
-**Rule 3 — 异常恢复**
-- Foreground 正常流程会拿到 Final Response
-- 仅在产物文件 / git status 无法确认时，读 transcript 一次诊断
-- 仍异常 → 重新派发（Foreground），prompt 加"上轮产物路径 + 已知问题"
-- **禁止**：多次轮询 transcript / Resume 已完工 Task / 按文件大小判断完工
-
-**Rule 4 — Authority Boundary**
-- Subagent 只能建议，不能执行流程
-- 禁止跳过 Stage / 替 Main 决定 / 操作 Git
-
-**Rule 5 — Immutable Input**
-- 派发后的 Feature Scope 不可修改
-- 新增 / 修改需求必须新建 Feature
-
-**Rule 6 — 审查产物互斥**
-- 同 feature 多审查 agent 写入不同文件，Main 合并
-
----
-
-## 禁止模式
-
-- ❌ 子代理写"等 X 完成后做 Y"
-- ❌ Main idle 等子代理，不主动干活
-- ❌ 仅用 transcript 大小轮询等待（辅助诊断可以，轮询等待不行）
-- ❌ Subagent 替 Main 决定流程
-- ❌ 派发后改 Feature Scope
-
----
-
-## Main 自检 checklist
-
-- [ ] 走哪个 Mode（Mode C / M / L）
-- [ ] 每个 feature 文件边界互斥
-- [ ] 子代理 prompt 含：任务范围 + 必读路径 + 必跑命令 + 禁止项 + 汇报格式
-- [ ] 双审查产物路径不同（Rule 6）
-- [ ] Git 操作派 fullstack-developer（遵循 git-commit-required.mdc）
-- [ ] Main 在等待期间直接执行其他任务，不 idle
-- [ ] 并行派发后有汇合策略（Main 定期检查，不等子代理回报）
+- [ ] Mode、风险和质量门已确定
+- [ ] 顺序或 `/multitask` 的选择有明确依据
+- [ ] 并行任务无前置依赖，负责文件互斥
+- [ ] UI 实施已加载对应项目 UI skill
+- [ ] 子代理 prompt 包含范围、必读路径、必跑命令、禁止项和汇报格式
+- [ ] 实现已汇合并验收后才启动 Review
+- [ ] Main 等待期间未修改子代理负责文件
+- [ ] 用户已看到摘要与审查结论，再决定是否提交

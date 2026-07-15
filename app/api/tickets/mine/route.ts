@@ -18,6 +18,7 @@ export async function GET() {
         ticketNo: true,
         title: true,
         status: true,
+        priority: true,
         project: {
           select: { id: true, name: true },
         },

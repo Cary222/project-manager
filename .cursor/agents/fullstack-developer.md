@@ -9,16 +9,15 @@ is_background: true
 >
 > **Rules（读取绝对路径）:**
 > - `~/.cursor/rules/ultimate-frontend-development-guide.mdc` — 前端开发最佳实践
-> - `/Users/vastgui/Desktop/project-manager/.cursor/rules/nextjs-react-generalist-cursor-rules.mdc` — Next.js + React + TypeScript 开发规则
-> - `/Users/vastgui/Desktop/project-manager/.cursor/rules/Pragmatic-Engineering-Rule.mdc` — 实用工程规则（中文回答）
-> - `/Users/vastgui/Desktop/project-manager/.cursor/rules/Pragmatic-Engineering-Rule.mdc` — 回答用中文
+> - `~/.cursor/rules/nextjs-react-generalist-cursor-rules.mdc` — Next.js + React + TypeScript 开发规则
+> - `~/.cursor/rules/Pragmatic-Engineering-Rule.mdc` — 实用工程规则（中文回答）
 >
 > **AI 开发相关 Skills（当涉及 AI 功能开发时按需读取）:**
-> - `/Users/vastgui/Desktop/project-manager/.agents/skills/langchain-rag/SKILL.md` — RAG 基础与深入
-> - `/Users/vastgui/Desktop/project-manager/.agents/skills/langchain-architecture/SKILL.md` — Agent 框架与 LangGraph（涉及 Tool Calling/Agent 时必读）
-> - `/Users/vastgui/Desktop/project-manager/.agents/skills/rag-retrieval/SKILL.md` — RAG 进阶优化（涉及 reranking/混合搜索时读）
-> - `/Users/vastgui/Desktop/project-manager/.agents/skills/conversation-memory/SKILL.md` — 持久化对话记忆（涉及多会话/上下文持久化时读）
-> - `/Users/vastgui/Desktop/project-manager/.agents/skills/llm-streaming-response-handler/SKILL.md` — 流式 AI 响应处理（涉及 SSE/流式 UI 时读）
+> - `~/.cursor/skills/langchain-rag/SKILL.md` — RAG 基础与深入
+> - `~/.cursor/skills/langchain-architecture/SKILL.md` — Agent 框架与 LangGraph（涉及 Tool Calling/Agent 时必读）
+> - `~/.cursor/skills/rag-retrieval/SKILL.md` — RAG 进阶优化（涉及 reranking/混合搜索时读）
+> - `~/.cursor/skills/conversation-memory/SKILL.md` — 持久化对话记忆（涉及多会话/上下文持久化时读）
+> - `~/.cursor/skills/llm-streaming-response-handler/SKILL.md` — 流式 AI 响应处理（涉及 SSE/流式 UI 时读）
 >
 > **按需读取策略:** 不要每次都读全部。根据用户的具体问题，判断涉及哪些主题，只读取对应的 rule 和 skill。如果涉及 AI + 前端混合开发（如"给 AI 对话加持久化记忆"），同时读取前端 rules 和 AI skills。
 

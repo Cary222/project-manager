@@ -9,20 +9,20 @@ is_background: true
 > **每次对话前必读规则和 Skills（按需加载）:**
 >
 > **必读 SKILL（每次对话前必须读）:**
-> - `/Users/vastgui/.cursor/skills/learning-progress-tracker/SKILL.md` — 用户真实学习档案（知识地图/已完成路线/详细笔记）。**每次对话前必须读取**，结合用户当前学习进度给出个性化回答。
+> - `~/.cursor/skills/learning-progress-tracker/SKILL.md` — 用户真实学习档案（知识地图/已完成路线/详细笔记）。**每次对话前必须读取**，结合用户当前学习进度给出个性化回答。
 >
 > **Rules（读取绝对路径）:**
 > - `~/.cursor/rules/ultimate-frontend-development-guide.mdc` — 前端开发最佳实践（如果涉及 UI/React/Next.js）
-> - `/Users/vastgui/Desktop/project-manager/.cursor/rules/nextjs-react-generalist-cursor-rules.mdc` — Next.js + React 开发规则
-> - `/Users/vastgui/Desktop/project-manager/.cursor/rules/Pragmatic-Engineering-Rule.mdc` — 实用工程规则（回答用中文）
+> - `~/.cursor/rules/nextjs-react-generalist-cursor-rules.mdc` — Next.js + React 开发规则
+> - `~/.cursor/rules/Pragmatic-Engineering-Rule.mdc` — 实用工程规则（回答用中文）
 >
-> **Skills（读取绝对路径）:**
-> - `/Users/vastgui/Desktop/project-manager/.agents/skills/langchain-rag/SKILL.md` — RAG 基础与深入（涉及 RAG 基础时读）
-> - `/Users/vastgui/Desktop/project-manager/.agents/skills/langchain-architecture/SKILL.md` — Agent 框架与 LangGraph（涉及 Agent/Tool Calling 时读）
-> - `/Users/vastgui/Desktop/project-manager/.agents/skills/rag-retrieval/SKILL.md` — RAG 进阶（涉及 reranking/混合搜索/查询改写时读）
-> - `/Users/vastgui/Desktop/project-manager/.agents/skills/conversation-memory/SKILL.md` — 持久化对话记忆（涉及多会话/上下文时读）
-> - `/Users/vastgui/Desktop/project-manager/.agents/skills/dive-into-langgraph/SKILL.md` — LangGraph 1.0 中文教程（深度学习 LangGraph 时读）
-> - `/Users/vastgui/Desktop/project-manager/.agents/skills/llm-streaming-response-handler/SKILL.md` — 流式 AI 响应处理（涉及 SSE/流式 UI 时读）
+> **AI 开发相关 Skills（按需读取）:**
+> - `~/.cursor/skills/langchain-rag/SKILL.md` — RAG 基础与深入（涉及 RAG 基础时读）
+> - `~/.cursor/skills/langchain-architecture/SKILL.md` — Agent 框架与 LangGraph（涉及 Agent/Tool Calling 时读）
+> - `~/.cursor/skills/rag-retrieval/SKILL.md` — RAG 进阶（涉及 reranking/混合搜索/查询改写时读）
+> - `~/.cursor/skills/conversation-memory/SKILL.md` — 持久化对话记忆（涉及多会话/上下文时读）
+> - `~/.cursor/skills/dive-into-langgraph/SKILL.md` — LangGraph 1.0 中文教程（深度学习 LangGraph 时读）
+> - `~/.cursor/skills/llm-streaming-response-handler/SKILL.md` — 流式 AI 响应处理（涉及 SSE/流式 UI 时读）
 >
 > **按需读取策略:** 不要每次都读全部。根据用户的具体问题，判断涉及哪些主题，只读取对应的 rule 和 skill。如果问题涉及多个主题，按需读取多个。
 
@@ -31,7 +31,7 @@ is_background: true
 ## 用户档案（每次对话前必读）
 
 > **重要:** 用户档案完整内容在 `learning-progress-tracker` skill 中。
-> **每次对话前必须先读取** `/Users/vastgui/.cursor/skills/learning-progress-tracker/SKILL.md`，
+> **每次对话前必须先读取** `~/.cursor/skills/learning-progress-tracker/SKILL.md`，
 > 获取用户的真实学习档案、知识地图、已完成路线、详细笔记和当前阶段。
 > **所有回答必须基于该档案**，不得凭空编造用户的已掌握内容或项目进展。
 
@@ -57,7 +57,7 @@ is_background: true
 ## 项目上下文（每次对话前必读）
 
 > **重要:** ProjectHub 项目的实际进度在 `project-hub` skill 中。
-> **每次对话前必须读取** `/Users/vastgui/Desktop/project-manager/.cursor/skills/pm-dev/PROJECT-HUB.md`，
+> 当用户提及 ProjectHub 项目时，读取对应的 `PROJECT-HUB.md` 获取项目进度。，
 > 获取项目当前阶段、已完成模块、数据模型、Feature 架构、下一步操作、迭代记录。
 > **所有涉及 ProjectHub 的回答必须基于该文档**，不得凭空编造功能存在或缺失。
 
@@ -198,15 +198,15 @@ is_background: true
 ## Skill 参考
 
 **必读（每次对话前）：**
-- `/Users/vastgui/.cursor/skills/learning-progress-tracker/SKILL.md` — 用户完整学习档案（learning-progress-tracker skill）
+- `~/.cursor/skills/learning-progress-tracker/SKILL.md` — 用户完整学习档案（learning-progress-tracker skill）
 
 **AI 开发 Skills（按需读取）：**
-- `/Users/vastgui/Desktop/project-manager/.agents/skills/langchain-rag/SKILL.md` — RAG 基础与深入（高级优化）
-- `/Users/vastgui/Desktop/project-manager/.agents/skills/langchain-architecture/SKILL.md` — Agent 框架 + LangGraph + 记忆系统
-- `/Users/vastgui/Desktop/project-manager/.agents/skills/rag-retrieval/SKILL.md` — RAG 进阶 30 条规则（reranking/混合搜索/HyDE）
-- `/Users/vastgui/Desktop/project-manager/.agents/skills/conversation-memory/SKILL.md` — 多会话持久化记忆
-- `/Users/vastgui/Desktop/project-manager/.agents/skills/dive-into-langgraph/SKILL.md` — LangGraph 1.0 中文教程（含 10 篇参考文档）
-- `/Users/vastgui/Desktop/project-manager/.agents/skills/llm-streaming-response-handler/SKILL.md` — 流式 AI 响应处理（SSE/打字机效果）
+- `~/.cursor/skills/langchain-rag/SKILL.md` — RAG 基础与深入（高级优化）
+- `~/.cursor/skills/langchain-architecture/SKILL.md` — Agent 框架 + LangGraph + 记忆系统
+- `~/.cursor/skills/rag-retrieval/SKILL.md` — RAG 进阶 30 条规则（reranking/混合搜索/HyDE）
+- `~/.cursor/skills/conversation-memory/SKILL.md` — 多会话持久化记忆
+- `~/.cursor/skills/dive-into-langgraph/SKILL.md` — LangGraph 1.0 中文教程（含 10 篇参考文档）
+- `~/.cursor/skills/llm-streaming-response-handler/SKILL.md` — 流式 AI 响应处理（SSE/打字机效果）
 
 **ProjectHub 开发辅助：**
 - `pm-dev` — ProjectHub 开发辅助

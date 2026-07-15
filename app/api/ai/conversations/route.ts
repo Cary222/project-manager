@@ -11,11 +11,20 @@ const createSchema = z.object({
   firstMessage: z.string().optional(),
 });
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const session = await requireSession();
-    const conversations = await listConversations(session.user.id);
-    return NextResponse.json({ data: conversations, error: null });
+    const { searchParams } = new URL(request.url);
+    const limit = Number.parseInt(searchParams.get("limit") ?? "50", 10);
+    const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 100) : 50;
+    const conversations = await listConversations(session.user.id, safeLimit);
+    const serialized = conversations.map((c) => ({
+      ...c,
+      createdAt: c.createdAt.toISOString(),
+      updatedAt: c.updatedAt.toISOString(),
+      lastMessageAt: c.lastMessageAt.toISOString(),
+    }));
+    return NextResponse.json({ data: serialized, error: null });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "unknown";
     const status = msg === "UNAUTHORIZED" ? 401 : 500;

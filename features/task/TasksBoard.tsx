@@ -1,109 +1,31 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { IconSearch } from "@/shared/ui/icons";
 import { fetchJson } from "@/shared/api/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/shared/api/swr-config";
 import { type TicketStatus, type MyTicket } from "@/entities/ticket/model/types";
+import {
+  COLUMNS,
+  KIND_LABEL,
+  TicketColumnsGrid,
+  TicketColumnsSkeleton,
+  type TicketItem,
+} from "@/features/task/ui/TicketColumn";
 
-const COLUMNS: { key: TicketStatus; label: string; accent: string; head: string }[] =
-  [
-    {
-      key: "DEVELOPING",
-      label: "开发中",
-      accent: "border-t-brand-500",
-      head: "text-brand-700 bg-brand-50",
-    },
-    {
-      key: "READY_FOR_TEST",
-      label: "待测试",
-      accent: "border-t-warning",
-      head: "text-amber-700 bg-amber-50",
-    },
-    {
-      key: "DELIVERED",
-      label: "已交付",
-      accent: "border-t-purple",
-      head: "text-violet-700 bg-violet-50",
-    },
-    {
-      key: "DONE",
-      label: "已完成",
-      accent: "border-t-success",
-      head: "text-emerald-700 bg-emerald-50",
-    },
-    {
-      key: "OVERDUE",
-      label: "已逾期",
-      accent: "border-t-red-500",
-      head: "text-red-700 bg-red-50",
-    },
-    {
-      key: "CLOSED",
-      label: "已关闭",
-      accent: "border-t-ink-400",
-      head: "text-ink-600 bg-ink-100",
-    },
-  ];
-
-function PriorityBadge({ priority }: { priority: number }) {
-  const styles: Record<number, string> = {
-    0: "bg-danger text-white border-danger",
-    1: "bg-warning text-white border-warning",
-    2: "bg-brand-50 text-brand-700 border-brand-200",
-    3: "bg-ink-100 text-ink-500 border-ink-200",
-  };
-  const labels: Record<number, string> = { 0: "P0", 1: "P1", 2: "P2", 3: "P3" };
+function TasksBoardHeader() {
   return (
-    <span className={`inline-block rounded border px-1 py-0.5 text-[10px] font-semibold ${styles[priority] ?? styles[2]}`}>
-      {labels[priority] ?? "P2"}
-    </span>
-  );
-}
-
-const KIND_LABEL: Record<"PROGRAM" | "DESIGN", string> = {
-  PROGRAM: "程序",
-  DESIGN: "设计",
-};
-
-function TasksColumnsSkeleton() {
-  return (
-    <div className="grid gap-4 lg:grid-cols-4">
-      {COLUMNS.map((col) => (
-        <section
-          key={col.key}
-          className={`rounded-xl border border-ink-200 border-t-4 ${col.accent} bg-white p-3 shadow-soft`}
-        >
-          <div className="mb-3 flex items-center justify-between px-1">
-            <span className={`rounded-full px-2.5 py-0.5 text-sm font-medium ${col.head}`}>
-              {col.label}
-            </span>
-            <div className="h-4 w-6 animate-pulse rounded bg-ink-100" />
-          </div>
-          <div className="space-y-2">
-            {Array.from({ length: 3 }).map((_, index) => (
-              <div
-                key={`${col.key}-${index}`}
-                className="rounded-lg border border-ink-100 bg-white p-3 shadow-soft"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="h-3 w-12 animate-pulse rounded bg-ink-100" />
-                  <div className="h-5 w-10 animate-pulse rounded bg-ink-100" />
-                </div>
-                <div className="mt-2 h-4 w-4/5 animate-pulse rounded bg-ink-100" />
-                <div className="mt-2 h-3 w-2/3 animate-pulse rounded bg-ink-100" />
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
+    <div>
+      <h1 className="text-lg font-semibold leading-tight">任务看板</h1>
+      <p className="text-xs text-ink-400">Task Board · 指派给我的任务</p>
     </div>
   );
 }
 
-function TasksColumns({ query }: { query: string }) {
+export function TasksBoard() {
+  const [query, setQuery] = useState("");
+
   const { data, error, isLoading } = useSWR<{ tickets: MyTicket[] }>(
     "/api/tickets/mine",
     fetchJson,
@@ -123,7 +45,7 @@ function TasksColumns({ query }: { query: string }) {
   }, [tickets, query]);
 
   const grouped = useMemo(() => {
-    const map: Record<TicketStatus, MyTicket[]> = {
+    const map: Record<TicketStatus, TicketItem[]> = {
       DEVELOPING: [],
       READY_FOR_TEST: [],
       DELIVERED: [],
@@ -146,79 +68,6 @@ function TasksColumns({ query }: { query: string }) {
     );
   }
 
-  if (isLoading) {
-    return <TasksColumnsSkeleton />;
-  }
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-4">
-      {COLUMNS.map((col) => {
-        const items = grouped[col.key];
-        return (
-          <section
-            key={col.key}
-            className={`rounded-xl border border-ink-200 border-t-4 ${col.accent} bg-white p-3 shadow-soft`}
-          >
-            <div className="mb-3 flex items-center justify-between px-1">
-              <span className={`rounded-full px-2.5 py-0.5 text-sm font-medium ${col.head}`}>
-                {col.label}
-              </span>
-              <span className="text-sm text-ink-400">{items.length}</span>
-            </div>
-            <div className="space-y-2">
-              {items.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-ink-200 py-8 text-center text-xs text-ink-400">
-                  暂无任务
-                </p>
-              ) : (
-                items.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/tickets/${t.id}`}
-                    className="block rounded-lg border border-ink-100 bg-white p-3 shadow-soft transition hover:border-brand-200 hover:shadow-base"
-                  >
-                    <div className="flex items-center gap-2">
-                      <PriorityBadge priority={t.priority} />
-                      <span className="font-mono text-xs text-ink-400">#{t.ticketNo}</span>
-                      <span className="rounded bg-ink-100 px-1.5 py-0.5 text-[11px] text-ink-500">
-                        {KIND_LABEL[t.module.responsibility.kind]}
-                      </span>
-                    </div>
-                    <p
-                      className={`mt-1.5 text-sm font-medium ${
-                        t.status === "DONE"
-                          ? "text-ink-400 line-through"
-                          : "text-ink-900"
-                      }`}
-                    >
-                      {t.title}
-                    </p>
-                    <p className="mt-2 truncate text-xs text-ink-400">
-                      {t.project.name} · {t.module.name}
-                    </p>
-                  </Link>
-                ))
-              )}
-            </div>
-          </section>
-        );
-      })}
-    </div>
-  );
-}
-
-function TasksBoardHeader() {
-  return (
-    <div>
-      <h1 className="text-lg font-semibold leading-tight">任务看板</h1>
-      <p className="text-xs text-ink-400">Task Board · 指派给我的任务</p>
-    </div>
-  );
-}
-
-export function TasksBoard() {
-  const [query, setQuery] = useState("");
-
   return (
     <div className="space-y-5 pm-fade-in">
       <div className="relative w-full max-w-sm">
@@ -231,7 +80,11 @@ export function TasksBoard() {
         />
       </div>
 
-      <TasksColumns query={query} />
+      {isLoading ? (
+        <TicketColumnsSkeleton />
+      ) : (
+        <TicketColumnsGrid grouped={grouped} />
+      )}
     </div>
   );
 }
@@ -253,7 +106,7 @@ export function TasksBoardLoading() {
         <div className="h-[42px] w-full animate-pulse rounded-lg border border-ink-200 bg-white" />
       </div>
 
-      <TasksColumnsSkeleton />
+      <TicketColumnsSkeleton />
     </div>
   );
 }

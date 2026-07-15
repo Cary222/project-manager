@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import useSWR from "swr";
-import { formatAssigneeNames } from "@/shared/ui/AssigneePicker";
+import { formatAssigneeNames } from "@/features/ticket/ui/AssigneePicker";
 import { CreateTicketForm } from "@/features/ticket/create";
 import type { TicketCreateResponsibility, TicketCreateUser } from "@/entities/ticket/model/types";
 import { useSession } from "next-auth/react";
@@ -13,9 +13,9 @@ import { STALE_SWR_OPTIONS } from "@/shared/api/swr-config";
 import { KIND_LABEL, Module } from "@/entities/ticket/model/types";
 import { getMyResponsibilitiesAction } from "@/features/admin/admin";
 import { ResponsibilityKind } from "@prisma/client";
-import { TaskStatsCards } from "@/shared/ui/TaskStatsCards";
 import { useRecentVisits } from "@/shared/lib/visits-context";
 import { useToast } from "@/shared/lib/use-toast";
+import { PriorityBadge } from "@/shared/ui/PriorityBadge";
 import {
   type Ticket,
   type MyTicket,
@@ -103,24 +103,6 @@ function DispatchProjectDetailContentSkeleton() {
 
 export function DispatchProjectDetailLoading() {
   return <DispatchProjectDetailContentSkeleton />;
-}
-
-function PriorityBadge({ priority }: { priority: number }) {
-  return (
-    <span
-      className={`inline-block rounded border px-1 py-0.5 text-[10px] font-semibold ${
-        priority === 0
-          ? "bg-red-100 text-red-700 border-red-300"
-          : priority === 1
-            ? "bg-amber-100 text-amber-700 border-amber-300"
-            : priority === 2
-              ? "bg-brand-50 text-brand-700 border-brand-200"
-              : "bg-ink-100 text-ink-500 border-ink-200"
-      }`}
-    >
-      {priority === 0 ? "P0" : priority === 1 ? "P1" : priority === 2 ? "P2" : "P3"}
-    </span>
-  );
 }
 
 export function DispatchProjectDetail({ projectId }: { projectId: string }) {
@@ -460,8 +442,6 @@ export function DispatchProjectDetail({ projectId }: { projectId: string }) {
 
       <div className="space-y-6 pm-fade-in">
         {/* 概览统计 */}
-        <TaskStatsCards stats={stats} />
-
         {message ? (
           <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
             {message}

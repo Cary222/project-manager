@@ -1,11 +1,11 @@
 ---
-description: 强制 agent 在执行 git commit / git push / git add 之前,先 Read /Users/vastgui/.cursor/skills/git-commit-assistant/SKILL.md 并完整执行其 9 步流程。任何 agent 协助的提交都必须遵循不可降级的三条纪律:必问工单单号(用户原话未含 #XXXXX 时)、必带 agent 标识(末尾追加 Co-authored-by: Cursor <cursoragent@cursor.com>)、双远端禁止默认推 github(默认 origin 局域网裸仓)。
+description: 强制 agent 在执行 git commit / git push / git add 之前,先 Read ~/.cursor/skills/git-commit-assistant/SKILL.md 并完整执行其 9 步流程。任何 agent 协助的提交都必须遵循不可降级的三条纪律:必问工单单号(用户原话未含 #XXXXX 时)、必带 agent 标识(末尾追加 Co-authored-by: Cursor <cursoragent@cursor.com>)、双远端禁止默认推 github(默认 origin 局域网裸仓)。
 globs: "**/*"
 ---
 
 # Git Commit Required Rule (Cursor Agent 强制纪律)
 
-> 本规则是 `/Users/vastgui/.cursor/skills/git-commit-assistant/SKILL.md` 的 **Cursor rules 层钩子**。
+> 本规则是 `~/.cursor/skills/git-commit-assistant/SKILL.md` 的 **Cursor rules 层钩子**。
 > 作用:让 agent 在触发提交动作前必加载该 skill,而不是靠 agent "自觉"。
 
 ## 触发条件(任一满足即生效)
@@ -47,7 +47,7 @@ agent 在以下任一情况,**第一件事必须是 `Read` git-commit-assistant 
 
 ## agent 必须按顺序执行的 9 步
 
-完整步骤见 `/Users/vastgui/.cursor/skills/git-commit-assistant/SKILL.md`,简要概览:
+完整步骤见 `~/.cursor/skills/git-commit-assistant/SKILL.md`,简要概览:
 
 | Step | 动作 | 关键纪律 |
 |------|------|---------|
@@ -84,9 +84,9 @@ agent 在以下任一情况,**第一件事必须是 `Read` git-commit-assistant 
 
 ## 关联 Skill
 
-- 完整纪律:`/Users/vastgui/.cursor/skills/git-commit-assistant/SKILL.md`(9 步完整流程)
-- 提交前留档:`/Users/vastgui/Desktop/project-manager/.cursor/skills/dev-to-doc-recap/SKILL.md`
-- 提交后运维:`/Users/vastgui/Desktop/project-manager/.cursor/skills/pm-ops/SKILL.md`
+- 完整纪律:`~/.cursor/skills/git-commit-assistant/SKILL.md`（9 步完整流程）
+- 提交前留档:`~/.cursor/skills/dev-to-doc-recap/SKILL.md`
+- 提交后运维:`~/.cursor/skills/pm-ops/SKILL.md`
 
 ## 元规则
 

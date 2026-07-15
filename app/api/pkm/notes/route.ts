@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
 import { requireSession } from "@/shared/lib/permissions";
@@ -21,9 +21,12 @@ function normalizeTags(tags: unknown) {
   );
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const session = await requireSession();
+    const { searchParams } = new URL(request.url);
+    const raw = Number(searchParams.get("take") ?? "10");
+    const take = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 100) : 10;
     const notes = await prisma.pkmNote.findMany({
       where: { userId: session.user.id },
       include: {
@@ -35,6 +38,7 @@ export async function GET() {
         },
       },
       orderBy: { updatedAt: "desc" },
+      take,
     });
 
     return NextResponse.json(
