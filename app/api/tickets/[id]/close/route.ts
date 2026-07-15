@@ -6,7 +6,7 @@ import { createModerationLog } from "@/features/admin/moderation";
 import { syncTicketSearchDocument } from "@/shared/lib/search";
 
 // Auto-start the overdue scanner when this module is first loaded
-void import("@/shared/lib/cron-scheduler").catch(() => {});
+void import("@/worker/lib/cron-scheduler").catch(() => {});
 
 export async function POST(
   _request: Request,

@@ -76,4 +76,32 @@ export function isValidWeekRange(weekStart: Date, weekEnd: Date): boolean {
   return diff >= WEEK_MS && diff <= WEEK_MS + 86_400_000;
 }
 
+/**
+ * 根据相对周偏移量返回对应周范围。
+ * offset = 0 → 本周；offset = 1 → 上周；offset = N → N 周前。
+ * 允许任意整数（正数表示过去周，0 表示本周，负数表示未来周）。
+ */
+export function getWeekRangeByOffset(offset: number, now: Date = new Date()): { weekStart: Date; weekEnd: Date; offset: number } {
+  const shifted = new Date(now.getTime() - offset * WEEK_MS);
+  const { weekStart, weekEnd } = getWeekRange(shifted);
+  return { weekStart, weekEnd, offset };
+}
+
+/**
+ * 根据周开始日期返回友好的中文标题。
+ * - 本周 → 本周周报
+ * - 上周 → 上周周报
+ * - 更早的周 → 第 N 周周报（N = ISO 周编号）
+ */
+export function getWeekReportTitle(weekStart: Date, now: Date = new Date()): string {
+  const currentRange = getWeekRange(now);
+  if (weekStart.getTime() === currentRange.weekStart.getTime()) return "本周周报";
+
+  const lastRange = getWeekRange(new Date(now.getTime() - WEEK_MS));
+  if (weekStart.getTime() === lastRange.weekStart.getTime()) return "上周周报";
+
+  const { week } = getIsoWeek(weekStart);
+  return `第${week}周周报`;
+}
+
 // 手测

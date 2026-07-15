@@ -16,7 +16,7 @@ import {
 import { syncTicketSearchDocument } from "@/shared/lib/search";
 
 // Auto-start the overdue scanner when this module is first loaded
-void import("@/shared/lib/cron-scheduler").catch(() => {});
+void import("@/worker/lib/cron-scheduler").catch(() => {});
 
 export async function POST(request: Request) {
   try {

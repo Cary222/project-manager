@@ -69,16 +69,10 @@ function formatBytes(bytes: number) {
 }
 
 interface Props {
-  /** PR10 FileAttachment 格式：{ fileId }，name/mimeType/size 可选 */
   attachment: FileAttachment;
   onPreview?: (file: PreviewableFile) => void;
 }
 
-/**
- * 附件渲染组件（PR10）。
- * 格式：{ fileId, name?, mimeType?, size? }
- * 预览/下载：/api/upload/<fileId>
- */
 export function AttachmentItem({ attachment, onPreview }: Props) {
   const mimeType = attachment.mimeType ?? "application/octet-stream";
   const fileName = attachment.name ?? "未知文件";

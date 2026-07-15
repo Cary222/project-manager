@@ -4,7 +4,7 @@ import { useRef } from "react";
 import { AttachmentItem } from "@/shared/ui/AttachmentItem";
 import { PKM_ATTACHMENT_MAX_COUNT, PKM_ATTACHMENT_MAX_SIZE, type FileAttachment } from "@/shared/lib/pkm";
 import { uploadFile, formatBytes } from "@/shared/lib/upload";
-import type { PreviewableFile } from "@/shared/ui/AttachmentItem";
+import type { PreviewableFile } from "@/shared/ui/DocumentPreviewModal";
 
 export type { PreviewableFile };
 
@@ -16,7 +16,6 @@ export interface AttachmentEditorProps {
   onError?: (msg: string) => void;
   renderPreview?: (file: PreviewableFile) => void;
   onImageSelect?: (file: File) => void;
-  /** 紧凑模式：使用简单的文件条样式（类似评论附件） */
   compact?: boolean;
 }
 
@@ -67,7 +66,6 @@ export function AttachmentEditor(props: AttachmentEditorProps) {
     onChange(attachments.filter((_, i) => i !== index));
   }
 
-  // 紧凑模式：简单的文件条样式
   if (compact) {
     return (
       <div className="flex flex-wrap gap-2">

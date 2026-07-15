@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AssigneePicker } from "@/shared/ui/AssigneePicker";
+import { AssigneePicker } from "@/features/ticket/ui/AssigneePicker";
 import { composeImageMarkdown } from "@/shared/lib/pkm";
 import { uploadImage } from "@/shared/lib/upload";
 

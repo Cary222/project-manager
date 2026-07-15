@@ -5,7 +5,7 @@
  */
 
 import { TicketStatus } from "@prisma/client";
-import { getWeekRange } from "./week";
+import { getWeekRange } from "@/shared/lib/week";
 
 /**
  * Compute default deadline for a new ticket.

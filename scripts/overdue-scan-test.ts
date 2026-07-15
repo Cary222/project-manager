@@ -14,7 +14,7 @@
  */
 
 import { prisma } from "@/shared/db/client";
-import { runOverdueScan, stopOverdueScanner } from "@/shared/lib/cron-scheduler";
+import { runOverdueScan, stopOverdueScanner } from "@/worker/lib/cron-scheduler";
 import { TicketStatus } from "@prisma/client";
 
 function pass(name: string) { console.log(`  ✓ ${name}`); }

@@ -6,7 +6,7 @@ import { IconArrowLeft, IconKnowledge, IconTag } from "@/shared/ui/icons";
 import { prisma } from "@/shared/db/client";
 import { type FileAttachment } from "@/shared/lib/pkm";
 import { requireSession } from "@/shared/lib/permissions";
-import { NoteAttachments } from "@/shared/ui/NoteAttachments";
+import { NoteAttachments } from "@/features/knowledge/ui/NoteAttachments";
 import { NoteDetailRecord } from "./NoteDetailRecord";
 
 export type NoteDetailProps = {

@@ -11,11 +11,9 @@ const ALLOWED_DATA_PREFIX = /^data:image\/(png|jpe?g|gif|webp|svg\+xml);/i;
 function safeUrlTransform(url: string): string {
   if (!url) return "";
   const trimmed = url.trim();
-  // 相对路径（/api/upload/<id>、/foo/bar 等）一律放行
   if (trimmed.startsWith("/") || trimmed.startsWith("#") || trimmed.startsWith("?")) {
     return trimmed;
   }
-  // protocol-relative (//example.com/...) — 同源/跨域都视作 https 处理
   if (trimmed.startsWith("//")) {
     return `https:${trimmed}`;
   }
@@ -25,12 +23,10 @@ function safeUrlTransform(url: string): string {
   try {
     const parsed = new URL(trimmed);
     if (!ALLOWED_URL_PROTOCOLS.includes(parsed.protocol)) {
-      // javascript:/vbscript:/file: 等都被拒
       return "";
     }
     return trimmed;
   } catch {
-    // 不是合法 URL，当作相对路径放行（react-markdown 内部会拼接）
     return trimmed;
   }
 }
@@ -77,11 +73,6 @@ type MarkdownContentProps = {
   content: string;
   collapsible?: boolean;
   collapsedHeight?: number;
-  /**
-   * mention 用户映射：key 是 email（小写），value 是 `{ id, name }`。
-   * 用于把 markdown 里的 `@[name](email)` 渲染成跳转到 `/team/<id>` 的链接，
-   * 而不是 react-markdown 默认的 `<a href="email">`。
-   */
   mentionMap?: Record<string, { id: string; name: string }>;
 };
 
@@ -153,7 +144,6 @@ export function MarkdownContent({ content, collapsible = false, collapsedHeight 
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => {
-                      // 单击图片时打开 lightbox 而不是新标签；右键仍然能复制/在新标签打开
                       e.preventDefault();
                       openLightbox(srcStr, altStr);
                     }}
@@ -172,7 +162,6 @@ export function MarkdownContent({ content, collapsible = false, collapsedHeight 
                 const hrefStr = typeof href === "string" ? href : "";
                 if (!hrefStr) return <>{children}</>;
 
-                // mention 语法 @[name](email) → 跳个人主页
                 if (mentionMap && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(hrefStr)) {
                   const mapped = mentionMap[hrefStr.toLowerCase()];
                   if (mapped) {
@@ -188,7 +177,6 @@ export function MarkdownContent({ content, collapsible = false, collapsedHeight 
                   }
                 }
 
-                // 纯文本 email（react-markdown 因 remark-gfm 把它识别为 autolink）→ mailto
                 if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(hrefStr)) {
                   return (
                     <a

@@ -17,7 +17,7 @@ import { syncTicketSearchDocument } from "@/shared/lib/search";
 import type { FileAttachment } from "@/shared/lib/pkm";
 
 // Auto-start the overdue scanner when this module is first loaded
-void import("@/shared/lib/cron-scheduler").catch(() => {});
+void import("@/worker/lib/cron-scheduler").catch(() => {});
 
 export type CreateTicketInput = {
   projectId: string;

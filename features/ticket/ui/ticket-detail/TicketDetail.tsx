@@ -7,7 +7,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
 import { MarkdownContent } from "@/shared/ui/MarkdownContent";
-import { AssigneePicker } from "@/shared/ui/AssigneePicker";
+import { AssigneePicker } from "@/features/ticket/ui/AssigneePicker";
 import { DocumentPreviewModal, type PreviewableFile } from "@/shared/ui/DocumentPreviewModal";
 import { formatAssigneeList } from "@/entities/ticket/lib/ticket-assignees";
 import { composeImageMarkdown, extractInlineImages } from "@/shared/lib/pkm";

@@ -8,19 +8,16 @@ import { IconSearch, IconSettings, IconTask, IconTeam, IconEdit, IconMenu, IconR
 import { BackLink, SimplePageHeader, HeaderSkeleton } from "@/shared/ui/headers";
 import { type FileAttachment } from "@/shared/lib/pkm";
 import { AttachmentItem, type PreviewableFile } from "@/shared/ui/AttachmentItem";
+import { PriorityBadge } from "@/shared/ui/PriorityBadge";
 import { DocumentPreviewModal } from "@/shared/ui/DocumentPreviewModal";
 import { uploadAttachmentAsNote } from "@/shared/lib/upload";
-import { FileUploader } from "@/shared/ui/FileUploader";
+import { FileUploader } from "@/features/project/ui/FileUploader";
 import { DispatchProjectDetail } from "@/features/dispatch/ui/DispatchProjectDetail";
-import { TaskStatsCards, type TaskStats } from "@/shared/ui/TaskStatsCards";
 import { useToast } from "@/shared/lib/use-toast";
 import { useRecentVisits } from "@/shared/lib/visits-context";
 import { ProjectMemberTab } from "@/features/project/ui/ProjectMemberTab";
-import {
-  KIND_LABEL,
-  type TicketStatus,
-  type MyTicket,
-} from "@/entities/ticket/model/types";
+import { type TicketStatus, type MyTicket } from "@/entities/ticket/model/types";
+import { TicketColumnsGrid, TicketColumnsSkeleton } from "@/features/task/ui/TicketColumn";
 import { isRoot } from "@/shared/lib/permissions-client";
 
 // ---- Types ----
@@ -81,15 +78,6 @@ export type ProjectWithStatus = {
 
 // ---- Kanban column config ----
 
-const COLUMNS: { key: TicketStatus; label: string; accent: string; head: string }[] = [
-  { key: "DEVELOPING", label: "开发中", accent: "border-t-brand-500", head: "text-brand-700 bg-brand-50" },
-  { key: "READY_FOR_TEST", label: "待测试", accent: "border-t-amber-500", head: "text-amber-700 bg-amber-50" },
-  { key: "DELIVERED", label: "已交付", accent: "border-t-purple", head: "text-violet-700 bg-violet-50" },
-  { key: "DONE", label: "已完成", accent: "border-t-emerald-500", head: "text-emerald-700 bg-emerald-50" },
-  { key: "OVERDUE", label: "已逾期", accent: "border-t-red-500", head: "text-red-700 bg-red-50" },
-  { key: "CLOSED", label: "已关闭", accent: "border-t-ink-400", head: "text-ink-600 bg-ink-100" },
-];
-
 const STATUS_STYLE: Record<string, string> = {
   ACTIVE: "bg-brand-50 text-brand-700",
   MAINTENANCE: "bg-amber-50 text-amber-700",
@@ -121,57 +109,10 @@ function formatRelativeTime(date: Date): string {
 // ---- Skeletons ----
 
 function KanbanSkeleton() {
-  return (
-    <div className="grid gap-4 lg:grid-cols-4">
-      {COLUMNS.map((col) => (
-        <section
-          key={col.key}
-          className={`rounded-xl border border-ink-200 border-t-4 ${col.accent} bg-white p-3 shadow-soft`}
-        >
-          <div className="mb-3 flex items-center justify-between px-1">
-            <div className="h-5 w-16 rounded-full bg-ink-100" />
-            <div className="h-4 w-6 rounded bg-ink-100" />
-          </div>
-          <div className="space-y-2">
-            {[0, 1, 2].map((idx) => (
-              <div
-                key={`sk-${idx}`}
-                className="rounded-lg border border-ink-100 bg-white p-3 shadow-soft"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="h-3 w-12 rounded bg-ink-100" />
-                  <div className="h-5 w-10 rounded bg-ink-100" />
-                </div>
-                <div className="mt-2 h-4 w-4/5 rounded bg-ink-100" />
-                <div className="mt-2 h-3 w-2/3 rounded bg-ink-100" />
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
-    </div>
-  );
+  return <TicketColumnsSkeleton />;
 }
 
 // ---- Kanban columns ----
-
-function PriorityBadge({ priority }: { priority: number }) {
-  return (
-    <span
-      className={`inline-block rounded border px-1.5 py-0.5 text-[10px] font-semibold ${
-        priority === 0
-          ? "bg-red-100 text-red-700 border-red-300"
-          : priority === 1
-            ? "bg-amber-100 text-amber-700 border-amber-300"
-            : priority === 2
-              ? "bg-brand-50 text-brand-700 border-brand-200"
-              : "bg-ink-100 text-ink-500 border-ink-200"
-      }`}
-    >
-      {priority === 0 ? "P0" : priority === 1 ? "P1" : priority === 2 ? "P2" : "P3"}
-    </span>
-  );
-}
 
 function KanbanColumns({ tickets, query, sortByPriority }: { tickets: ProjectTicket[]; query: string; sortByPriority?: boolean }) {
   const filtered = useMemo(() => {
@@ -205,59 +146,7 @@ function KanbanColumns({ tickets, query, sortByPriority }: { tickets: ProjectTic
     return map;
   }, [filtered, sortByPriority]);
 
-  return (
-    <div className="grid gap-4 lg:grid-cols-4">
-      {COLUMNS.map((col) => {
-        const items = grouped[col.key];
-        return (
-          <section
-            key={col.key}
-            className={`rounded-xl border border-ink-200 border-t-4 ${col.accent} bg-white p-3 shadow-soft`}
-          >
-            <div className="mb-3 flex items-center justify-between px-1">
-              <span className={`rounded-full px-2.5 py-0.5 text-sm font-medium ${col.head}`}>
-                {col.label}
-              </span>
-              <span className="text-sm text-ink-400">{items.length}</span>
-            </div>
-            <div className="space-y-2">
-              {items.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-ink-200 py-8 text-center text-xs text-ink-400">
-                  暂无任务
-                </p>
-              ) : (
-                items.map((t) => (
-                  <Link
-                    key={t.id}
-                    href={`/tickets/${t.id}`}
-                    className="block rounded-lg border border-ink-100 bg-white p-3 shadow-soft transition hover:border-brand-200 hover:shadow-base"
-                  >
-                    <div className="flex items-center gap-2">
-                      <PriorityBadge priority={t.priority} />
-                      <span className="font-mono text-xs text-ink-400">#{t.ticketNo}</span>
-                      <span className="rounded bg-ink-100 px-1.5 py-0.5 text-[11px] text-ink-500">
-                        {KIND_LABEL[t.module.responsibility.kind]}
-                      </span>
-                    </div>
-                    <p
-                      className={`mt-1.5 text-sm font-medium ${
-                        t.status === "DONE" ? "text-ink-400 line-through" : "text-ink-900"
-                      }`}
-                    >
-                      {t.title}
-                    </p>
-                    <p className="mt-2 truncate text-xs text-ink-400">
-                      {t.project.name} · {t.module.name}
-                    </p>
-                  </Link>
-                ))
-              )}
-            </div>
-          </section>
-        );
-      })}
-    </div>
-  );
+  return <TicketColumnsGrid grouped={grouped as Record<TicketStatus, import("@/features/task/ui/TicketColumn").TicketItem[]>} />;
 }
 
 // ---- Task tab content ----
@@ -270,19 +159,9 @@ type TaskTabProps = {
 function TaskTab({ tickets, taskCounts }: TaskTabProps) {
   const [query, setQuery] = useState("");
   const [sortByPriority, setSortByPriority] = useState(false);
-  const stats: TaskStats = {
-    total: taskCounts.total,
-    dev: taskCounts.developing,
-    test: taskCounts.test,
-    delivered: taskCounts.delivered,
-    done: taskCounts.done,
-    rate: taskCounts.total === 0 ? 0 : Math.round((taskCounts.done / taskCounts.total) * 100),
-  };
 
   return (
     <div className="space-y-5">
-      <TaskStatsCards stats={stats} />
-
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="relative w-full max-w-sm">
           <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
