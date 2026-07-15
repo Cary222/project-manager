@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { WeeklyReportForm } from "@/features/reports/weekly-reports/ui/WeeklyReportForm";
 import { WeeklyReportRegenerateButton } from "@/features/reports/weekly-reports/ui/WeeklyReportRegenerateButton";
-import { escapeAiSummary } from "@/shared/lib/xss";
+import { escapeAiSummary } from "@/features/reports/lib/xss";
 import type { WeeklyReportWithProjects } from "@/features/weekly-reports/lib/weekly-report-store";
 import { AttachmentItem, type PreviewableFile } from "@/shared/ui/AttachmentItem";
 import { DocumentPreviewModal } from "@/shared/ui/DocumentPreviewModal";

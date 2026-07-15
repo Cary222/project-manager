@@ -31,6 +31,9 @@ interface WeekReportsResponse {
   reports: WeekReport[];
   weekStart: string;
   weekEnd: string;
+  weekOffset: number;
+  submitted: WeekReportUser[];
+  missing: WeekReportUser[];
   total: number;
 }
 
@@ -120,13 +123,14 @@ function SkeletonCard() {
 }
 
 interface WeeklyReportsListProps {
+  weekOffset: number;
   weekStart: Date;
   weekEnd: Date;
 }
 
-export function WeeklyReportsList({ weekStart, weekEnd }: WeeklyReportsListProps) {
+export function WeeklyReportsList({ weekOffset, weekStart, weekEnd }: WeeklyReportsListProps) {
   const { data, error, isLoading } = useSWR<WeekReportsResponse>(
-    "/api/reports/weekly-reports/week",
+    `/api/reports/weekly-reports/week?weekOffset=${weekOffset}`,
     fetchJson,
     { refreshInterval: 30000 }
   );
@@ -168,7 +172,9 @@ export function WeeklyReportsList({ weekStart, weekEnd }: WeeklyReportsListProps
         </div>
       ) : (
         <div className="rounded-lg border border-dashed border-ink-200 bg-ink-50 p-6 text-center">
-          <p className="text-sm text-ink-400">本周暂无周报提交</p>
+          <p className="text-sm text-ink-400">
+            {weekOffset === 0 ? "本周" : weekOffset === 1 ? "上周" : `${weekLabel}`}暂无周报提交
+          </p>
         </div>
       )}
     </div>

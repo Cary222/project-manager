@@ -1,10 +1,33 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { formatWeekLabel } from "@/shared/lib/week";
+import { useEffect, useRef, useState } from "react";
+import useSWR from "swr";
+import {
+  formatWeekLabel,
+  getWeekRangeByOffset,
+  getWeekReportTitle,
+} from "@/shared/lib/week";
+import { fetchJson } from "@/shared/api/fetch-json";
 import { WeeklyReportsList } from "./WeeklyReportsList";
 import type { WeeklyStats } from "@/features/reports/lib/reports-store";
+
+interface WeekReportUser {
+  id: string;
+  name: string | null;
+  email: string;
+  image: string | null;
+}
+
+interface WeekBoardResponse {
+  reports: unknown[];
+  weekStart: string;
+  weekEnd: string;
+  weekOffset: number;
+  submitted: WeekReportUser[];
+  missing: WeekReportUser[];
+  total: number;
+}
 
 function Avatar({ src, name, email }: { src: string | null; name: string | null; email: string }) {
   const initial = (name ?? email).slice(0, 1).toUpperCase();
@@ -21,15 +44,115 @@ interface WeeklyReportBoardProps {
   weeklyStats: WeeklyStats;
 }
 
+/** 切换周的下拉：上/下一周 + 直接跳回本周 + 显示当前选中的标题 */
+function WeekSwitcher({
+  weekOffset,
+  weekLabel,
+  onChange,
+}: {
+  weekOffset: number;
+  weekLabel: string;
+  onChange: (next: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!containerRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const canGoNext = weekOffset > 0;
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-600 transition-colors hover:bg-brand-100"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="切换周"
+      >
+        <span>{weekLabel}</span>
+        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4M16 15l-4 4-4-4" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-20 mt-1.5 w-56 rounded-lg border border-ink-200 bg-white p-1 shadow-lg pm-fade-in">
+          <div className="flex items-center justify-between px-2 py-1.5 text-xs text-ink-500">
+            <button
+              type="button"
+              onClick={() => onChange(weekOffset + 1)}
+              className="flex items-center gap-1 rounded px-2 py-1 text-ink-600 transition-colors hover:bg-ink-100"
+            >
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+              上一周
+            </button>
+            <span className="text-[10px] text-ink-400">{weekLabel}</span>
+            <button
+              type="button"
+              onClick={() => onChange(Math.max(0, weekOffset - 1))}
+              disabled={!canGoNext}
+              className="flex items-center gap-1 rounded px-2 py-1 text-ink-600 transition-colors hover:bg-ink-100 disabled:cursor-not-allowed disabled:text-ink-300 disabled:hover:bg-transparent"
+            >
+              下一周
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
+          <div className="my-1 h-px bg-ink-200" />
+          <button
+            type="button"
+            onClick={() => {
+              onChange(0);
+              setOpen(false);
+            }}
+            disabled={weekOffset === 0}
+            className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-ink-700 transition-colors hover:bg-ink-100 disabled:cursor-not-allowed disabled:text-ink-400 disabled:hover:bg-transparent"
+          >
+            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+            </svg>
+            返回本周
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function WeeklyReportBoard({ weeklyStats }: WeeklyReportBoardProps) {
+  const [weekOffset, setWeekOffset] = useState(0);
   const [listExpanded, setListExpanded] = useState(false);
-  const { submitted, missing } = weeklyStats.thisWeekReports;
+
+  // 客户端按 offset 算出目标周的范围
+  const { weekStart, weekEnd } = getWeekRangeByOffset(weekOffset);
+  const weekLabel = formatWeekLabel(weekStart, weekEnd);
+  const reportTitle = getWeekReportTitle(weekStart);
+
+  // 拉取目标周的提交/未提交 + 周报列表
+  const { data, isLoading } = useSWR<WeekBoardResponse>(
+    `/api/reports/weekly-reports/week?weekOffset=${weekOffset}`,
+    fetchJson,
+    { refreshInterval: 30000, keepPreviousData: true }
+  );
+
+  // 首屏（offset = 0）使用 SSR 数据，避免闪烁；其他周用 SWR 拉到的数据
+  const initialUsers = weeklyStats.thisWeekReports;
+  const submitted = weekOffset === 0 && !data ? initialUsers.submitted : (data?.submitted ?? initialUsers.submitted);
+  const missing   = weekOffset === 0 && !data ? initialUsers.missing   : (data?.missing   ?? initialUsers.missing);
   const total = submitted.length + missing.length;
   const currentRate = total > 0 ? Math.round((submitted.length / total) * 100) : 0;
-  const weekLabel = formatWeekLabel(
-    new Date(weeklyStats.thisWeekReports.weekStart),
-    new Date(weeklyStats.thisWeekReports.weekEnd)
-  );
 
   return (
     <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
@@ -37,10 +160,20 @@ export function WeeklyReportBoard({ weeklyStats }: WeeklyReportBoardProps) {
       <div className="mb-4 flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-medium text-ink-700">本周周报</h3>
-            <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-600">
-              {weekLabel}
-            </span>
+            <h3 className="text-sm font-medium text-ink-700">{reportTitle}</h3>
+            <WeekSwitcher
+              weekOffset={weekOffset}
+              weekLabel={weekLabel}
+              onChange={setWeekOffset}
+            />
+            {weekOffset > 0 && (
+              <span className="rounded-full bg-ink-100 px-2 py-0.5 text-[10px] text-ink-500">
+                历史周
+              </span>
+            )}
+            {isLoading && weekOffset > 0 && (
+              <span className="text-[10px] text-ink-400">加载中…</span>
+            )}
           </div>
           <div className="mt-1 flex items-baseline gap-2">
             <span className="text-3xl font-bold text-ink-900">{submitted.length}</span>
@@ -64,12 +197,14 @@ export function WeeklyReportBoard({ weeklyStats }: WeeklyReportBoardProps) {
             </svg>
             {listExpanded ? "收起" : "查看周报"}
           </button>
-          <Link
-            href="/reports/weekly-reports"
-            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-700 focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:outline-none"
-          >
-            提交周报
-          </Link>
+          {weekOffset === 0 && (
+            <Link
+              href="/reports/weekly-reports"
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-700 focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:outline-none"
+            >
+              提交周报
+            </Link>
+          )}
         </div>
       </div>
 
@@ -77,8 +212,9 @@ export function WeeklyReportBoard({ weeklyStats }: WeeklyReportBoardProps) {
       {listExpanded && (
         <div className="mb-4 rounded-lg border border-ink-200 bg-ink-50 p-3 pm-fade-in">
           <WeeklyReportsList
-            weekStart={new Date(weeklyStats.thisWeekReports.weekStart)}
-            weekEnd={new Date(weeklyStats.thisWeekReports.weekEnd)}
+            weekOffset={weekOffset}
+            weekStart={weekStart}
+            weekEnd={weekEnd}
           />
         </div>
       )}

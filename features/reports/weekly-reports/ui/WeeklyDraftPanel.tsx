@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { escapeAiSummary } from "@/shared/lib/xss";
+import { escapeAiSummary } from "@/features/reports/lib/xss";
 import type { WeeklyDraftSummary } from "@/features/reports/weekly-reports/lib/draft-summary";
 
 type Props = {
