@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { WeeklyReportForm } from "@/features/reports/weekly-reports/ui/WeeklyReportForm";
 import { WeeklyReportRegenerateButton } from "@/features/reports/weekly-reports/ui/WeeklyReportRegenerateButton";
-import { escapeAiSummary } from "@/features/reports/lib/xss";
+import { MarkdownContent } from "@/shared/ui/MarkdownContent";
 import type { WeeklyReportWithProjects } from "@/features/weekly-reports/lib/weekly-report-store";
 import { AttachmentItem, type PreviewableFile } from "@/shared/ui/AttachmentItem";
 import { DocumentPreviewModal } from "@/shared/ui/DocumentPreviewModal";
@@ -76,14 +76,9 @@ function AiSummaryPanel({
           <div className="h-3 w-5/6 rounded bg-ink-200 animate-pulse" />
           <div className="h-3 w-4/6 rounded bg-ink-200 animate-pulse" />
         </div>
-      ) : (
-        <div
-          className="prose prose-sm prose-ink max-w-none whitespace-pre-wrap text-sm leading-relaxed text-ink-700"
-          dangerouslySetInnerHTML={{
-            __html: escapeAiSummary(aiSummary),
-          }}
-        />
-      )}
+      ) : aiSummary ? (
+        <MarkdownContent content={aiSummary} />
+      ) : null}
     </div>
   );
 }
@@ -218,10 +213,8 @@ export function WeeklyReportDetailClient({ initialReport, reportId, isOwnReport 
           <hr className="mb-6 border-ink-200" />
 
           {/* Content */}
-          <div className="mb-6">
-            <pre className="whitespace-pre-wrap text-sm leading-relaxed text-ink-700">
-              {report.content}
-            </pre>
+          <div className="mb-6 rounded-xl border border-ink-200 bg-white p-5 shadow-sm">
+            <MarkdownContent content={report.content} collapsible collapsedHeight={480} />
           </div>
 
           {/* Attachments */}

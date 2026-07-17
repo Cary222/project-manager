@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { escapeAiSummary } from "@/features/reports/lib/xss";
+import { MarkdownContent } from "@/shared/ui/MarkdownContent";
 import type { WeeklyDraftSummary } from "@/features/reports/weekly-reports/lib/draft-summary";
 
 type Props = {
@@ -245,12 +245,9 @@ export function WeeklyDraftPanel({
                     </svg>
                     <span className="text-sm font-semibold text-ink-700">预览</span>
                   </div>
-                  <div
-                    className="rounded-xl border border-ink-200 bg-white p-4 text-xs leading-relaxed text-ink-700"
-                    dangerouslySetInnerHTML={{
-                      __html: escapeAiSummary(draft.rawMarkdown),
-                    }}
-                  />
+                  <div className="rounded-xl border border-ink-200 bg-white p-4">
+                    <MarkdownContent content={draft.rawMarkdown} />
+                  </div>
                 </div>
               )}
 
