@@ -17,7 +17,7 @@ export default auth((req) => {
   homeUrl.pathname = "/";
   homeUrl.search = "";
 
-  if (isApiAuth || isRegisterApi || isKnowledgeApi) return NextResponse.next();
+  if (isApiAuth || isRegisterApi || isKnowledgeApi || pathname.startsWith("/api/ai/geo")) return NextResponse.next();
 
   if (!isLoggedIn && !isLoginPage) {
     return NextResponse.redirect(loginUrl);

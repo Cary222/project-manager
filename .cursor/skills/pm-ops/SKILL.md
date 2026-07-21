@@ -49,19 +49,25 @@ Git 提交同步固定扫描：
 
 独立于主应用的向量化服务，使用 FastAPI + BGE-M3。
 
-### 重启
+### 重启（systemd 托管）
 
 ```bash
-ps aux | grep "uvicorn.*5000" | grep -v grep
-# 找到 PID 后
-kill <PID>
-cd /home/hxy/work/personal/project-manager/embedding
-nohup python3 -m uvicorn api:app --host 0.0.0.0 --port 5000 --reload-dir /home/hxy/work/personal/project-manager/embedding > /tmp/embedding.log 2>&1 &
+# 状态
+systemctl --user status embedding-api.service
+
+# 重启
+systemctl --user restart embedding-api.service
+
+# 日志
+journalctl --user -u embedding-api.service -f
 ```
 
 ### 验证
 
 ```bash
-curl http://localhost:5000/
+curl http://localhost:5000/health
+curl http://localhost:5000/dimension
 curl -X POST http://localhost:5000/embed -H "Content-Type: application/json" -d '{"text": "hello"}'
 ```
+
+> 注意：embedding-api.service 已由 systemd 管理（`Restart=always`），崩溃自动重启，无需手动拉起。

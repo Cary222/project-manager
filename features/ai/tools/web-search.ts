@@ -10,7 +10,7 @@ export const webSearch = tool({
   }),
   execute: async ({ query, maxResults }) => {
     const apiKey = process.env.TAVILY_API_KEY;
-    if (!apiKey) return { error: "TAVILY_API_KEY not set" };
+    if (!apiKey) throw new Error("TAVILY_API_KEY not set");
     const client = tavily({ apiKey });
     const res = await client.search(query, { searchDepth: "basic", maxResults });
     return {

@@ -402,3 +402,257 @@ SELECT id, title, "sourceType", "sourceId", (embedding IS NOT NULL) AS has_vec
 FROM pm."SearchDocument"
 WHERE metadata IS NULL;
 ```
+
+---
+
+## 本次问题（三）：笔记 embedding 历史缺失导致向量搜索无结果（2026-07-21）
+
+**问题现象**：用户问"BLE_UUID_SUMMARY 笔记是什么内容"，AI 回答"系统中不存在标题为 BLE_UUID_SUMMARY 的笔记"，但该笔记确实存在（keyword 搜索能召回）。
+
+**AI 回答原文**：
+> "Cary，经检索，系统中不存在标题为 'BLE_UUID_SUMMARY' 的笔记。"
+
+**排查链路**（从外到内）：
+
+```
+用户问 "BLE_UUID_SUMMARY 笔记是什么内容"
+  → shouldUseRag() = true（消息含"内容"）
+  → retrieveContext() → searchDocuments()
+  → keywordCandidates: 有 1 条 BLE_UUID_SUMMARY（keywordScore=9）
+  → vectorCandidates: 0 条 ← embedding 历史缺失
+  → mergeCandidates(): 笔记 + 4 个 commit 竞争
+    → commit semantic=0.46 → score=4.63
+    → 笔记 keyword=9 但 semantic=0 → score=11.0
+    → 笔记排第一，但 semantic=0（无向量分）
+  → 排序结果含笔记（keyword=9）
+  → searchKnowledge tool 返回含笔记的结果给 LLM
+  → ❓ LLM 仍回答"未找到"
+```
+
+**注意**：searchDocuments 确实返回了笔记（keyword=9），但 AI 回答"未找到"的原因需要进一步确认——可能是 LangGraph 流程中 tool 结果没有正确注入 LLM 上下文，或 `detectIntent` 的 `routeByMode` 没有正确路由到 `searchKnowledge`（mode=chat 时跳过 RAG）。
+
+### 诊断步骤
+
+**Step 1 — 确认 embedding 是否缺失**：
+
+```bash
+# 本地跑 CLI 搜索（带 viewer）
+cd /Users/vastgui/Desktop/project-manager
+source .env.local
+npm run search:search "BLE_UUID_SUMMARY" -- --limit=5
+
+# 如果出现 semantic=0.00 说明 embedding 历史缺失
+━━━ 笔记 (1 条) ━━
+  [11.00] keyword=9 semantic=0.00 | BLE_UUID_SUMMARY userId=cmpuz9zt isPublic=true
+```
+
+**Step 2 — 确认 embedding 状态（精确）**：
+
+```bash
+npm run search:inspect
+# 找 BLE_UUID_SUMMARY 那行
+# emb=false → embedding 历史缺失
+```
+
+**Step 3 — 补 embedding（热修复）**：
+
+```bash
+# 通过 reindex 补 embedding
+npm run search:reindex -- <noteId>
+# 或搜笔记标题获取 noteId
+npm run search:search "BLE_UUID_SUMMARY" | grep "cmr"
+# 然后
+npm run search:reindex -- cmrmymqtu00b7jlw9pjv67r2r
+```
+
+**Step 4 — 验证修复**：
+
+```bash
+npm run search:search "BLE_UUID_SUMMARY" -- --limit=5
+# 期望：semantic > 0（如 semantic=0.68）
+━━━ 笔记 (2 条) ━━
+  [17.84] keyword=9 semantic=0.68 | BLE_UUID_SUMMARY
+```
+
+### 根因
+
+笔记在创建时（或某次更新时）触发了 `syncPkmNoteSearchDocument`，但当时的 embedding 服务调用失败，导致 `content` 写入 `SearchDocument` 成功而 `embedding` 列为 NULL。后续 `upsertSearchDocument` 检测到 content hash 未变，跳过了 embedding 写入。
+
+> 参考：[向量搜索-静默失败修复.md](./向量搜索-静默失败修复.md) 记录的旧版静默失败问题，修复后 `syncPkmNoteSearchDocument` 仍可能因网络抖动/超时导致 embedding 缺失。
+
+### IndexJob 表状态
+
+远程 `IndexJob` 表记录了完整的索引历史：
+
+```sql
+-- SSH 到远程查
+ssh hxy@192.168.1.14
+psql "postgresql://community:community@localhost:5432/community?options=-c%20search_path%3Dpm,public" -t -c "
+SELECT * FROM \"IndexJob\" ORDER BY \"createdAt\" DESC LIMIT 10;"
+```
+
+**关键发现**：
+- `PKM_NOTE` `BLE_UUID_SUMMARY` → `COMPLETED`（2026-07-16 + 2026-07-21 两次均成功）
+- `FILE_ASSET` 多个 → `FAILED`（`fetch failed` / `UNSUPPORTED_MIME: .docx`）
+
+**Worker 正常运行**，但历史上某些笔记创建时 embedding 写入失败未被捕获。
+
+### Worker 失败分析
+
+| 失败类型 | 数量 | 具体错误 | 原因 |
+|----------|------|----------|------|
+| `fetch failed` | 3 | `FILE_ASSET` 索引 | Worker 连不上文件 URL（可能是内网路径不可达） |
+| `UNSUPPORTED_MIME: .docx` | 4 | `FILE_ASSET` 索引 | WPS 保存的 `.docx`（`application/vnd.openxmlformats-officedocument.wordprocessingml.document`）被 `python-docx` 拒绝 |
+
+> WPS 的 `.docx` 和标准 Office 的 `.docx` MIME type 相同，但内部 XML 结构有差异，`python-docx` 不兼容。参考 [DOCX_EXTRACT.md](./DOCX_EXTRACT.md)。
+
+### 预防措施
+
+1. **定期巡检缺失 embedding 的笔记**：
+
+```sql
+-- 发现所有 embedding 为 NULL 的 PKM 笔记 SearchDocument
+SELECT d.id, d.title, d."sourceId", d."updatedAt"::text
+FROM "SearchDocument" d
+WHERE d."sourceType" = 'PKM_NOTE'
+  AND d."embedding" IS NULL
+ORDER BY d."updatedAt" DESC;
+```
+
+2. **批量补 embedding**：
+
+```bash
+cd /Users/vastgui/Desktop/project-manager
+source .env.local
+# 找出所有无 embedding 的 PKM 笔记 noteId，逐个补
+npm run search:embed
+```
+
+3. **长期方案**：完成 [PKM异步索引改造-详细计划.md](./PKM异步索引改造-详细计划.md) 中的异步索引改造，笔记保存 API 不再同步等待 embedding 写入，Worker 负责异步补全，失败自动重试。
+
+### 相关文件
+
+- 搜索核心：`shared/lib/search.ts`
+- 诊断 CLI：`scripts/vector-search/search-admin.ts`
+- 向量调用：`shared/lib/embedding.ts`
+- 后台作业：`shared/lib/jobs.ts`
+- 异步索引计划：[PKM异步索引改造-详细计划.md](./PKM异步索引改造-详细计划.md)
+
+---
+
+## 附录：embedding 历史缺失的完整根因分析
+
+### 三类来源
+
+远程 DB 现状：
+
+```sql
+SELECT d."sourceType", COUNT(*) AS null_count
+FROM "SearchDocument" d
+WHERE d."embedding" IS NULL
+GROUP BY d."sourceType"
+ORDER BY COUNT(*) DESC;
+```
+
+```
+ COMMIT     | 127   ← git-sync commit 时 embedding 服务抖动
+ TICKET     |  23   ← 同步 ticket 时 embedding 服务抖动
+ PKM_NOTE   |  17   ← 笔记创建时 embedding 服务抖动
+```
+
+> `BLE_UUID_SUMMARY`（`PKM_NOTE`）属于第三类。
+
+### 根因链路
+
+**旧版链路（`syncPkmNoteSearchDocument` 改造前）**：
+
+```
+用户创建笔记
+  → syncPkmNoteSearchDocument()
+    → upsertSearchDocument(record)
+      → upsert content (title/url/content/metadata)
+      → upsertSearchDocument 内部调 ensureSearchDocumentEmbedding()
+        → fetchEmbeddingsBatch() → ❌ embedding 服务抖动/超时
+        → 抛出异常
+    → ❌ 被 syncPkmNoteSearchDocument 的 catch 捕获
+    → fallback: return prisma.searchDocument.findFirst(saved)
+    → ✅ 返回已保存的 document（content 有，embedding=NULL）
+  → ✅ NextResponse 返回 200（用户感知笔记创建成功）
+  → ❌ SearchDocument.embedding = NULL（静默失败）
+```
+
+**后续 reindex 为何没有补上**：
+
+```
+npm run search:reindex -- <noteId>
+  → syncPkmNoteSearchDocument()
+    → upsertSearchDocument(chunk, idx, true)  ← skipEmbedding=true，写 content
+    → upsertSearchDocument 内部调 ensureSearchDocumentEmbedding()
+      → content hash 未变（相同 content）→ hasReusableEmbedding() 返回 true
+      → ✅ 跳过 embedding 写入（误判为"已有有效向量"）
+    → ❌ embedding 永远是 NULL，不会重新生成
+```
+
+**`hasReusableEmbedding` 判断逻辑**：
+
+```typescript
+// shared/lib/search.ts
+function hasReusableEmbedding(
+  metadata: CoercedMetadata,
+  newHash: string,
+  hasEmbedding: boolean,
+): boolean {
+  // 如果 metadata 里存了 hash 且相同 → 内容没变，跳过
+  if (metadata._embeddingHash && metadata._embeddingHash === newHash && hasEmbedding) {
+    return true;  // ← BLE_UUID_SUMMARY 在第一版写入时 hash 就在 metadata 里
+  }
+  return false;
+}
+```
+
+关键：`metadata._embeddingHash` 在第一次 `upsertSearchDocument` 时就写入了（content 写入前就计算了 hash）。即使 embedding 写入失败，hash 已经在 metadata 里。后续 reindex 时 hash 没变，`hasEmbedding=true`（数据库里 embedding 是 NULL 但 `hasEmbedding` 是在 upsert 时从 DB 读出来的）——等等，`hasEmbedding` 是 `embedding IS NOT NULL`，所以 `hasEmbedding=false`，那么这个条件不会触发。
+
+实际重放：`ensureSearchDocumentEmbedding` 读取 DB：`embedding IS NOT NULL = false`（因为 NULL），所以 `hasReusableEmbedding` 返回 `false`，然后 `fetchEmbeddingsBatch` 再次失败，抛出异常，被 `syncPkmNoteSearchDocument` 的 catch 吞掉，继续返回已保存的 chunk（embedding=NULL）。
+
+### 为什么 commit/ticket 有 150 条没有 embedding
+
+git-sync 和 ticket 更新触发同步索引时，embedding 服务抖动会导致内容入库但向量为空。`syncCommitSearchDocument` 的 catch 直接返回 `null`，不记录错误到 DB，事后无法追踪是"没进索引"还是"进了但缺向量"。
+
+### 预防方案（优先级排序）
+
+| 优先级 | 方案 | 实施成本 | 效果 |
+|--------|------|----------|------|
+| **P0** | 立即跑 `npm run search:embed` 补全 150 条缺失向量 | 低（CLI） | 消除当前存量 |
+| **P1** | `npm run search:embed` 加入 deploy hook / cron | 低 | 防增量 |
+| **P2** | 异步索引改造（`IndexJob` + Worker）| 高（见详细计划） | 根治：笔记保存不等 embedding 写入 |
+| **P3** | `upsertSearchDocument` 写入 `_embeddingHash` 前先检查 embedding 是否真的写入成功 | 中 | 防止 hash 已写但向量缺失的静默失败 |
+
+**P0 — 立即执行**：
+
+```bash
+cd /Users/vastgui/Desktop/project-manager
+source .env.local
+npm run search:embed
+```
+
+输出应显示 "补 embedding" 进度。完成后验证：
+
+```bash
+npm run search:status
+# 期望：PKM_NOTE 的 emb=false 行数归零
+```
+
+**P1 — 自动化巡检**：
+
+在 `.cursor/skills/pm-ops/SKILL.md` 或 cron 里加入：
+
+```bash
+# 每天凌晨 3 点巡检 + 补 embedding
+0 3 * * * cd /home/hxy/work/personal/project-manager && \
+  source .env.production && \
+  npm run search:embed >> /var/log/search-embed.log 2>&1
+```
+
+**P2 — 根治（异步索引改造）**：
+
+详见 [PKM异步索引改造-详细计划.md](./PKM异步索引改造-详细计划.md)。核心改动：笔记保存 API 只写 content + 入 IndexJob queue，不等 embedding；Worker 异步处理，失败自动重试（指数退避），IndexJob 表记录完整生命周期。

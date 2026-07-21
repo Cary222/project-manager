@@ -38,6 +38,8 @@
   "dependencies": {
     "@ai-sdk/openai": "^4.0.5",
     "@auth/prisma-adapter": "^2.11.2",
+    "@langchain/core": "^1.2.3",
+    "@langchain/langgraph": "^1.4.8",
     "@prisma/client": "^6.19.3",
     "@tavily/core": "^0.7.6",
     "ai": "^7.0.11",
