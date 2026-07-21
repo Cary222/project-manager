@@ -2,13 +2,29 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AiChatInput } from "./AiChatInput";
-import { AiMessageBubble, type SourceReference } from "./AiMessageBubble";
+import { AiMessageBubble } from "./AiMessageBubble";
+import { type SourceReference } from "./AiSourcesList";
 import { AiTypingBubble } from "./AiTypingBubble";
 import { AI_MODE_OPTIONS, type AiMode } from "@/features/ai/lib/types";
-import { shouldUseRag } from "@/features/ai/lib/detector";
+import { shouldUseRag, shouldUseWebSearch } from "@/features/ai/lib/detector";
 import { IconCheck, IconChevronDown, IconEdit, IconPlus, IconSparkles, IconX } from "@/shared/ui/icons";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * 通过服务端 IP 定位获取城市名（不依赖浏览器 geolocation）
+ * 优先用于 web 搜索场景，返回代理/VPN 出口 IP 对应的城市
+ */
+async function getClientCity(): Promise<string | null> {
+  try {
+    const res = await fetch("/api/ai/geo", { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { city: string | null };
+    return data.city ?? null;
+  } catch {
+    return null;
+  }
+}
 
 function formatToolResult(output: unknown): string {
   if (!output || typeof output !== "object") return "";
@@ -731,6 +747,7 @@ export function AiChatPanel({
 
         const mode = aiModeRef.current;
         const useSearch = mode === "search" || (mode === "auto" && shouldUseRag(message));
+        const useWebSearch = mode === "auto" && shouldUseWebSearch(message);
 
         // Determine endpoint and body
         let url: string;
@@ -738,10 +755,17 @@ export function AiChatPanel({
 
         if (conversationId) {
           url = `/api/ai/conversations/${conversationId}/messages`;
-          body = { message, conversationHistory, mode, forceSearch: useSearch };
+          body = { message, conversationHistory, mode, forceSearch: useSearch, useWebSearch };
         } else {
           url = "/api/ai/conversations";
-          body = { firstMessage: message, conversationHistory, mode, forceSearch: useSearch };
+          body = { firstMessage: message, conversationHistory, mode, forceSearch: useSearch, useWebSearch };
+        }
+
+        // 获取客户端城市名（用于天气等实时数据搜索）
+        // 无论 intent 分类结果如何，auto/web 模式都尝试获取 VPN 出口 IP 对应的城市
+        if (mode === "auto" || mode === "web") {
+          const city = await getClientCity();
+          if (city) body.clientCity = city;
         }
 
         const response = await fetch(url, {

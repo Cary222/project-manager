@@ -1,16 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import { IconSparkles } from "@/shared/ui/icons";
-
-export interface SourceReference {
-  index: number;
-  title: string;
-  url: string;
-  type: "ticket" | "commit" | "note";
-}
+import { AiSourcesList, type SourceReference } from "./AiSourcesList";
 
 interface AiMessageBubbleProps {
   role: "user" | "assistant";
@@ -28,25 +21,13 @@ interface AiMessageBubbleProps {
 const TYPEWRITER_MIN_MS_PER_CHAR = 18;
 const TYPEWRITER_MAX_MS_PER_CHAR = 55;
 
-// Deduplicate sources by URL. The RAG retrieval returns each chunk of a note
-// independently (so the LLM can pick the right slice), but to the user a
-// three-chunk note should look like one source, not three.
-// The first occurrence wins, since the backend serves them in score order.
-function dedupeSourcesByUrl(sources: SourceReference[]): SourceReference[] {
-  const seen = new Set<string>();
-  return sources.filter((source) => {
-    if (seen.has(source.url)) return false;
-    seen.add(source.url);
-    return true;
-  });
-}
-
 export function AiMessageBubble({ role, content, sources, isStreaming }: AiMessageBubbleProps) {
   const isUser = role === "user";
-  const dedupedSources = sources ? dedupeSourcesByUrl(sources) : undefined;
+
   // User messages always render the full content. Assistant messages start
   // empty and are revealed by the typewriter loop below.
   const [displayed, setDisplayed] = useState(isUser ? content : "");
+
   // Keep latest content/streaming flags in refs so the typewriter loop reads
   // fresh values without restarting on every SSE chunk. This eliminates
   // flicker caused by useEffect re-running per chunk.
@@ -54,6 +35,7 @@ export function AiMessageBubble({ role, content, sources, isStreaming }: AiMessa
   const streamingRef = useRef(isStreaming);
   const displayedRef = useRef(displayed);
   const rafRef = useRef<number | null>(null);
+
   // Track arrival rate of SSE chars so we can adapt the reveal speed.
   // lastChunkLength = chars that arrived in the most recent SSE burst;
   // lastChunkAt     = timestamp of that burst.
@@ -90,9 +72,7 @@ export function AiMessageBubble({ role, content, sources, isStreaming }: AiMessa
       return;
     }
 
-    // Start the typewriter loop only once per streaming session. The loop
-    // self-schedules via rAF and reads contentRef/displayedRef to know what
-    // to render next, so new SSE chunks don't restart the animation.
+    // Start the typewriter loop only once per streaming session.
     if (rafRef.current !== null) return;
 
     let lastFrameAt = performance.now();
@@ -102,31 +82,20 @@ export function AiMessageBubble({ role, content, sources, isStreaming }: AiMessa
       const current = displayedRef.current;
 
       if (current.length >= target.length) {
-        // Caught up. Park until new content arrives.
         rafRef.current = null;
         return;
       }
 
-      // How many characters are we currently behind the SSE front?
       const backlog = target.length - current.length;
-
-      // Adaptive speed:
-      //  - If we have a recent SSE burst sample, type just fast enough to
-      //    drain the backlog in roughly one frame (≈16ms at 60fps). That
-      //    keeps the cursor glued to the SSE front without sudden jumps.
-      //  - Otherwise (SSE was quiet for a while), fall back to the constant
-      //    MIN rate so the user still sees progress while the LLM thinks.
       const now = performance.now();
       const frameDelta = now - lastFrameAt;
       lastFrameAt = now;
 
-      // Estimate current SSE rate from the most recent chunk.
-      // chunkMs = how long it took the server to produce those chars.
+      // Adaptive speed based on SSE arrival rate
       const chunkLen = lastChunkLengthRef.current;
       const chunkAt = lastChunkAtRef.current;
       let msPerChar = TYPEWRITER_MAX_MS_PER_CHAR;
       if (chunkLen > 0 && chunkAt > 0 && now - chunkAt < 1000) {
-        // Assume the server delivered those chars in a typical ~80ms burst.
         const assumedBurstMs = 80;
         msPerChar = Math.max(
           TYPEWRITER_MIN_MS_PER_CHAR,
@@ -134,8 +103,6 @@ export function AiMessageBubble({ role, content, sources, isStreaming }: AiMessa
         );
       }
 
-      // Reveal enough characters to keep up, but never more than the backlog.
-      // frameDelta / msPerChar ≈ how many chars fit in this frame.
       const step = Math.max(1, Math.min(backlog, Math.round(frameDelta / msPerChar)));
       const nextLength = current.length + step;
       const nextText = target.slice(0, nextLength);
@@ -163,15 +130,20 @@ export function AiMessageBubble({ role, content, sources, isStreaming }: AiMessa
 
   return (
     <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
+      {/* Avatar */}
       <div
         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
-          isUser ? "bg-brand-600 text-white" : "bg-gradient-to-br from-brand-400 via-brand-600 to-brand-700 text-white shadow-sm"
+          isUser
+            ? "bg-brand-600 text-white"
+            : "bg-gradient-to-br from-brand-400 via-brand-600 to-brand-700 text-white shadow-sm"
         }`}
       >
         {isUser ? "U" : <IconSparkles width={16} height={16} />}
       </div>
 
+      {/* Bubble column */}
       <div className={`max-w-[75%] ${isUser ? "items-end" : "items-start"} flex flex-col`}>
+        {/* Chat bubble */}
         <div
           className={`rounded-2xl px-4 py-2.5 ${
             isUser
@@ -182,16 +154,13 @@ export function AiMessageBubble({ role, content, sources, isStreaming }: AiMessa
           {isUser ? (
             <p className="text-sm leading-relaxed whitespace-pre-wrap">{content}</p>
           ) : (
-            // Reserve the full height for the final content while streaming so
-            // characters that wrap to a new line never push the layout down.
             <div className="relative">
-              <div
-                aria-hidden="true"
-                className="invisible prose prose-sm max-w-none prose-p:my-1 prose-p:leading-relaxed prose-headings:my-2 prose-headings:font-semibold prose-strong:font-semibold"
-              >
+              {/* Ghost layer — reserves height for final content */}
+              <div aria-hidden="true" className="invisible prose prose-sm max-w-none prose-p:my-1 prose-p:leading-relaxed">
                 <ReactMarkdown>{content}</ReactMarkdown>
               </div>
-              <div className="absolute inset-0 prose prose-sm max-w-none prose-p:my-1 prose-p:leading-relaxed prose-headings:my-2 prose-headings:font-semibold prose-strong:font-semibold">
+              {/* Active layer — typewriter reveal */}
+              <div className="absolute inset-0 prose prose-sm max-w-none prose-p:my-1 prose-p:leading-relaxed">
                 <ReactMarkdown>{displayed}</ReactMarkdown>
                 {showCursor && (
                   <span className="ml-0.5 inline-block h-4 w-1.5 translate-y-0.5 animate-pulse bg-brand-600 align-middle" />
@@ -201,25 +170,10 @@ export function AiMessageBubble({ role, content, sources, isStreaming }: AiMessa
           )}
         </div>
 
-        {!isUser && dedupedSources && dedupedSources.length > 0 && (
-          <div className="mt-2 rounded-xl border border-ink-200 bg-white p-3 shadow-sm">
-            <p className="mb-2 text-xs font-medium text-ink-500">参考来源</p>
-            <div className="space-y-1.5">
-              {dedupedSources.map((source) => (
-                <Link
-                  key={source.url}
-                  href={source.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-xs text-brand-600 transition hover:text-brand-700"
-                >
-                  <span className="flex h-4 w-4 items-center justify-center rounded bg-ink-100 text-[10px] font-medium text-ink-500">
-                    {source.index}
-                  </span>
-                  <span className="truncate">{source.title}</span>
-                </Link>
-              ))}
-            </div>
+        {/* Reference sources — only render after streaming is done to avoid partial flash */}
+        {!isUser && !isStreaming && sources && sources.length > 0 && (
+          <div className="mt-2">
+            <AiSourcesList sources={sources} />
           </div>
         )}
 
