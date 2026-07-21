@@ -3,7 +3,7 @@ import { TicketStatus, ModerationAction } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
 import { requireRoot } from "@/shared/lib/permissions";
 import { createModerationLog } from "@/features/admin/moderation";
-import { syncTicketSearchDocument } from "@/shared/lib/search";
+import { enqueueIndexJob } from "@/shared/lib/jobs";
 
 // Auto-start the overdue scanner when this module is first loaded
 void import("@/worker/lib/cron-scheduler").catch(() => {});
@@ -61,7 +61,7 @@ export async function POST(
       return updated;
     });
 
-    await syncTicketSearchDocument(ticket.id);
+    await enqueueIndexJob({ targetType: "TICKET", targetId: ticket.id });
 
     await createModerationLog({
       action: ModerationAction.UPDATE_TICKET_STATUS,

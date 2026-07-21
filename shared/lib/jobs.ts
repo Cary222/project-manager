@@ -26,7 +26,8 @@ export function getBackoffDelayMs(nextAttempt: number): number {
 export type IndexJobTarget =
   | { targetType: "PKM_NOTE"; targetId: string }
   | { targetType: "FILE_ASSET"; targetId: string }
-  | { targetType: "TICKET"; targetId: string };
+  | { targetType: "TICKET"; targetId: string }
+  | { targetType: "COMMIT"; targetId: string };
 
 export async function enqueueIndexJob(target: IndexJobTarget): Promise<string> {
   await prisma.indexJob.deleteMany({

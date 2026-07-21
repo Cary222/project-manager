@@ -4,11 +4,8 @@ import { prisma } from "@/shared/db/client";
 import { getCommitBranches } from "@/lib/git-sync/branches";
 import { parseTicketCommitSubject } from "@/entities/ticket/lib/parse-commit";
 import { listManagedRepos } from "@/lib/git-sync/repos";
-import {
-  buildSearchableCommitDocument,
-  backfillSearchDocuments,
-  syncCommitSearchDocument,
-} from "@/shared/lib/search";
+import { backfillSearchDocuments } from "@/shared/lib/search";
+import { enqueueIndexJob } from "@/shared/lib/jobs";
 
 const execFileAsync = promisify(execFile);
 const SCAN_LIMIT = 500;
@@ -130,7 +127,7 @@ export async function syncRepoCommits(repoPath: string) {
       },
     });
     if (linkedCommit) {
-      await syncCommitSearchDocument(linkedCommit.id);
+      await enqueueIndexJob({ targetType: "COMMIT", targetId: linkedCommit.id });
     }
     linked += 1;
   }

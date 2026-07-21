@@ -10,7 +10,7 @@ import {
   createManyNotifications,
   listRootUserIds,
 } from "@/features/admin/notifications-lib";
-import { syncTicketSearchDocument } from "@/shared/lib/search";
+import { enqueueIndexJob } from "@/shared/lib/jobs";
 
 // Auto-start the overdue scanner when this module is first loaded
 void import("@/worker/lib/cron-scheduler").catch(() => {});
@@ -148,7 +148,7 @@ export async function PATCH(
       });
       return updated;
     });
-    await syncTicketSearchDocument(current.id);
+    await enqueueIndexJob({ targetType: "TICKET", targetId: current.id });
 
     const actorName = session.user.name || session.user.email || "成员";
 

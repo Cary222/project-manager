@@ -711,6 +711,7 @@ enum IndexJobTargetType {
   PKM_NOTE
   FILE_ASSET
   TICKET
+  COMMIT
 
   @@schema("pm")
 }

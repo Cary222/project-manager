@@ -22,7 +22,7 @@
  */
 import { loadEnvConfig } from "@next/env";
 import { prisma } from "@/shared/db/client";
-import { syncPkmNoteSearchDocumentFull } from "@/shared/lib/search";
+import { syncPkmNoteSearchDocumentFull, syncTicketSearchDocument, syncCommitSearchDocument } from "@/shared/lib/search";
 import { processFileAssetJob } from "@/shared/lib/document";
 import { claimNextJob, getBackoffDelayMs, recoverStaleJobs } from "@/shared/lib/jobs";
 
@@ -68,15 +68,29 @@ async function processNextJob(): Promise<boolean> {
         `${LOG_PREFIX} job ${job.id} FILE_ASSET indexing completed`,
       );
     } else if (job.targetType === "TICKET") {
-      // Feature 2 实现 ticket indexing
-      console.warn(`[worker] job ${job.id} TICKET indexing not implemented yet`);
-      await prisma.indexJob.update({
-        where: { id: job.id },
-        data: {
-          status: "COMPLETED",
-          error: "not_implemented",
-        },
-      });
+      const ticketId = job.targetId;
+      try {
+        await syncTicketSearchDocument(ticketId);
+        await prisma.indexJob.update({
+          where: { id: job.id },
+          data: { status: "COMPLETED", error: null },
+        });
+        console.log(`${LOG_PREFIX} job ${job.id} TICKET ${ticketId} completed`);
+      } catch (error) {
+        await handleJobError(job, error);
+      }
+    } else if (job.targetType === "COMMIT") {
+      const commitId = job.targetId;
+      try {
+        await syncCommitSearchDocument(commitId);
+        await prisma.indexJob.update({
+          where: { id: job.id },
+          data: { status: "COMPLETED", error: null },
+        });
+        console.log(`${LOG_PREFIX} job ${job.id} COMMIT ${commitId} completed`);
+      } catch (error) {
+        await handleJobError(job, error);
+      }
     }
 
     return true;

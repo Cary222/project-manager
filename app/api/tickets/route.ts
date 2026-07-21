@@ -13,7 +13,7 @@ import {
   buildAssignedNotification,
   createManyNotifications,
 } from "@/features/admin/notifications-lib";
-import { syncTicketSearchDocument } from "@/shared/lib/search";
+import { enqueueIndexJob } from "@/shared/lib/jobs";
 
 // Auto-start the overdue scanner when this module is first loaded
 void import("@/worker/lib/cron-scheduler").catch(() => {});
@@ -103,7 +103,7 @@ export async function POST(request: Request) {
     });
 
     await syncTicketCounterAfterCreate(ticket.ticketNo);
-    await syncTicketSearchDocument(ticket.id);
+    await enqueueIndexJob({ targetType: "TICKET", targetId: ticket.id });
 
     if (assigneeIds.length > 0) {
       const actorName = session.user.name || session.user.email || "管理员";

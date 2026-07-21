@@ -12,7 +12,7 @@ import {
 import { requireRoot, requireSession, requireDesignResponsibility } from "@/shared/lib/permissions";
 import { createModerationLog } from "@/features/admin/moderation";
 import { syncTicketCounterAfterDelete } from "@/entities/ticket/lib/ticket-counter";
-import { syncTicketSearchDocument } from "@/shared/lib/search";
+import { enqueueIndexJob } from "@/shared/lib/jobs";
 import {
   buildAssignedNotification,
   buildCompletedNotification,
@@ -309,7 +309,7 @@ export async function PUT(
         description: body.description !== undefined ? (body.description.trim() || null) : undefined,
       },
     });
-    await syncTicketSearchDocument(ticket.id);
+    await enqueueIndexJob({ targetType: "TICKET", targetId: ticket.id });
 
     await createModerationLog({
       action: ModerationAction.EDIT_TICKET,
@@ -658,7 +658,7 @@ export async function PATCH(
       });
     }
 
-    await syncTicketSearchDocument(current.id);
+    await enqueueIndexJob({ targetType: "TICKET", targetId: current.id });
 
     // Fetch full ticket with all includes (same pattern as GET)
     const updated = await prisma.ticket.findUnique({

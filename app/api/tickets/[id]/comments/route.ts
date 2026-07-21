@@ -5,7 +5,7 @@ import { requireSession } from "@/shared/lib/permissions";
 import {
   buildMentionedNotification,
 } from "@/features/admin/notifications-lib";
-import { syncTicketSearchDocument } from "@/shared/lib/search";
+import { enqueueIndexJob } from "@/shared/lib/jobs";
 import { extractFileAttachmentsFromLegacy } from "@/shared/lib/pkm";
 import { recordFileReference } from "@/shared/lib/file-reference";
 
@@ -207,7 +207,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       return comment;
     });
 
-    await syncTicketSearchDocument(ticket.id);
+    await enqueueIndexJob({ targetType: "TICKET", targetId: ticket.id });
 
     // 给被 @ 的人发通知(去重,不发给作者自己),用 createMany 避免 N+1
     const recipientIds = [

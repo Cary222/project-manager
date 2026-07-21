@@ -14,7 +14,7 @@ import {
   createManyNotifications,
   listRootUserIds,
 } from "@/features/admin/notifications-lib";
-import { syncTicketSearchDocument } from "@/shared/lib/search";
+import { enqueueIndexJob } from "@/shared/lib/jobs";
 
 export async function PATCH(
   request: Request,
@@ -78,7 +78,7 @@ export async function PATCH(
         },
       });
     });
-    await syncTicketSearchDocument(current.id);
+    await enqueueIndexJob({ targetType: "TICKET", targetId: current.id });
 
     const newAssignees = await prisma.user.findMany({
       where: { id: { in: nextAssigneeIds } },

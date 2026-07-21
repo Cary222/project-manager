@@ -662,12 +662,7 @@ export async function syncTicketSearchDocument(ticketId: string) {
   }
 
   const record = buildSearchableTicketDocument(ticket);
-  try {
-    return await upsertSearchDocument(record);
-  } catch (error) {
-    console.error(`[search:syncTicket] embedding failed for ticket ${ticketId}:`, error instanceof Error ? error.message : String(error));
-    return null;
-  }
+  return await upsertSearchDocument(record);
 }
 
 export async function syncCommitSearchDocument(commitId: string) {
@@ -695,12 +690,7 @@ export async function syncCommitSearchDocument(commitId: string) {
   }
 
   const record = buildSearchableCommitDocument(commit);
-  try {
-    return await upsertSearchDocument(record);
-  } catch (error) {
-    console.error(`[search:syncCommit] embedding failed for commit ${commitId}:`, error instanceof Error ? error.message : String(error));
-    return null;
-  }
+  return await upsertSearchDocument(record);
 }
 
 export async function syncPkmNoteSearchDocument(

@@ -3,7 +3,7 @@ import { prisma } from "@/shared/db/client";
 import { requireRoot } from "@/shared/lib/permissions";
 import { createModerationLog } from "@/features/admin/moderation";
 import { ModerationAction } from "@prisma/client";
-import { syncTicketSearchDocument } from "@/shared/lib/search";
+import { enqueueIndexJob } from "@/shared/lib/jobs";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -48,7 +48,7 @@ export async function PATCH(request: Request, { params }: Params) {
       where: { id: ticket.id },
       data: { moduleId: body.moduleId },
     });
-    await syncTicketSearchDocument(ticket.id);
+    await enqueueIndexJob({ targetType: "TICKET", targetId: ticket.id });
 
     await createModerationLog({
       action: ModerationAction.CHANGE_TICKET_MODULE,
