@@ -12,6 +12,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
 import { splitIntoChunks } from "@/shared/lib/chunk";
 import { fetchEmbeddingsBatch } from "@/shared/lib/embedding";
+import type { FileReferenceSourceType } from "@/shared/lib/file-reference";
 
 /**
  * 将 number[] 向量转换为 PostgreSQL vector 字面量。
@@ -19,6 +20,60 @@ import { fetchEmbeddingsBatch } from "@/shared/lib/embedding";
  */
 function vectorToSqlLiteral(vector: number[]): string {
   return `[${vector.join(",")}]`;
+}
+
+/**
+ * 通过 FileReference 链反查 projectId。
+ *
+ * 查询路径（按 sourceType）：
+ * - PKM_NOTE       → PkmNote.projectId
+ * - TICKET        → Ticket.projectId
+ * - TICKET_COMMENT → TicketComment.ticket → Ticket.projectId
+ * - PROJECT       → sourceId 本身就是 projectId（目前无上传入口使用）
+ *
+ * @requires 新增 sourceType 时同步更新此 switch，否则默认返回 null
+ * @requires 取第一条引用（当前业务场景下文件通常只被一个上下文引用）
+ *          如未来需要支持多引用，此处逻辑需改为取首个非 null projectId 或报错
+ *
+ * 异常安全：查不到时返回 null，不阻塞处理。
+ */
+async function resolveProjectIdFromFileAsset(
+  fileAssetId: string,
+): Promise<string | null> {
+  const ref = await prisma.fileReference.findFirst({
+    where: { fileAssetId, deletedAt: null },
+    select: { sourceType: true, sourceId: true },
+    orderBy: { createdAt: "asc" },
+  });
+  if (!ref) return null;
+
+  switch (ref.sourceType as FileReferenceSourceType) {
+    case "PKM_NOTE": {
+      const note = await prisma.pkmNote.findUnique({
+        where: { id: ref.sourceId },
+        select: { projectId: true },
+      });
+      return note?.projectId ?? null;
+    }
+    case "TICKET": {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ref.sourceId },
+        select: { projectId: true },
+      });
+      return ticket?.projectId ?? null;
+    }
+    case "TICKET_COMMENT": {
+      const comment = await prisma.ticketComment.findUnique({
+        where: { id: ref.sourceId },
+        select: { ticket: { select: { projectId: true } } },
+      });
+      return comment?.ticket.projectId ?? null;
+    }
+    case "PROJECT":
+      return ref.sourceId;
+    default:
+      return null;
+  }
 }
 
 /**
@@ -40,8 +95,8 @@ async function upsertSearchDocumentEmbedding(
 
 /**
  * 从 FileAsset 提取文本。
- * 分支：图片（OCR）/ PDF / plain text
- * 后续 PR 处理：DOCX, PPTX 等复杂格式
+ * 支持 MIME 类型：PDF、图片(OCR)、Office文档(DOCX/PPTX/XLSX)、纯文本
+ * 调用 embedding 服务的 /extract-text 端点（JSON body，含 data URL）
  */
 export async function extractDocumentText(
   fileAsset: { id: string; mimeType: string; bytes: Buffer },
@@ -50,50 +105,122 @@ export async function extractDocumentText(
   pageCount?: number;
   metadata?: Record<string, unknown>;
 }> {
-  if (fileAsset.mimeType.startsWith("image/")) {
-    return extractImageText(fileAsset);
-  }
-  if (fileAsset.mimeType === "application/pdf") {
-    return extractPdfText(fileAsset);
-  }
+  // 纯文本类型直接解码
   if (
     fileAsset.mimeType === "text/markdown" ||
     fileAsset.mimeType === "text/plain"
   ) {
     return { text: fileAsset.bytes.toString("utf-8") };
   }
-  throw new Error(`UNSUPPORTED_MIME: ${fileAsset.mimeType}`);
+
+  // 其余类型走 embedding 服务的 /extract-text（JSON body + data URL）
+  return extractTextViaService(fileAsset);
 }
 
-async function extractImageText(
-  fileAsset: { bytes: Buffer },
-): Promise<{ text: string; metadata?: Record<string, unknown> }> {
-  const baseUrl = process.env.EMBEDDING_SERVICE_URL?.trim() ?? "http://localhost:8001";
-  const form = new FormData();
-  // BlobPart = BufferSource | Blob | string. Buffer (runtime subclass of Uint8Array) is accepted.
-  // Prisma Bytes is typed as Uint8Array; the runtime Buffer subclass satisfies BlobPart.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  form.append("file", new Blob([fileAsset.bytes as any]), "image");
+const SUPPORTED_MIME_TYPES = new Set([
+  // Office 文档
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  // 图片（OCR）
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/gif",
+  "image/webp",
+  "image/bmp",
+  "image/tiff",
+  // WPS Office（兼容性处理，映射到标准 MIME）
+  "application/wpsoffice",
+  "application/wps-office.docx",
+  "application/wps-office.pptx",
+  "application/wps-office.xlsx",
+]);
 
-  const res = await fetch(`${baseUrl}/extract-text`, { method: "POST", body: form });
-  if (!res.ok) throw new Error(`IMAGE_EXTRACT_FAILED: ${res.status}`);
-  const data = (await res.json()) as { text: string; metadata?: Record<string, unknown> };
-  return { text: data.text, metadata: data.metadata };
+/**
+ * 调用 embedding 服务的 /extract-text 端点提取文本。
+ * 将文件 bytes 转为 data URL，通过 JSON body 发送给服务。
+ */
+async function extractTextViaService(
+  fileAsset: { id: string; mimeType: string; bytes: Buffer },
+): Promise<{ text: string; pageCount?: number; metadata?: Record<string, unknown> }> {
+  const baseUrl = (process.env.EMBEDDING_API_URL ?? "http://localhost:5000").trim();
+  const mimeType = normalizeMimeType(fileAsset.mimeType);
+  const name = `file.${getExtension(mimeType)}`;
+
+  if (!SUPPORTED_MIME_TYPES.has(mimeType) && !mimeType.startsWith("image/")) {
+    throw new Error(`UNSUPPORTED_MIME: ${fileAsset.mimeType}`);
+  }
+
+  // 将 bytes 转为 base64 data URL
+  const base64 = fileAsset.bytes.toString("base64");
+  const dataUrl = `data:${mimeType};base64,${base64}`;
+
+  const response = await fetch(`${baseUrl}/extract-text`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      url: dataUrl,
+      mimeType,
+      name,
+      size: fileAsset.bytes.length,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(`EXTRACT_TEXT_FAILED: ${response.status} ${errorText}`);
+  }
+
+  const data = (await response.json()) as {
+    text?: string;
+    source?: string;
+    name?: string;
+  };
+
+  // source 为非 ok 表示提取失败
+  if (data.source && data.source !== "ok") {
+    throw new Error(`EXTRACT_${data.source.toUpperCase()}: ${data.name ?? fileAsset.mimeType}`);
+  }
+
+  return {
+    text: data.text ?? "",
+    metadata: { source: data.source },
+  };
 }
 
-async function extractPdfText(
-  fileAsset: { bytes: Buffer },
-): Promise<{ text: string; pageCount?: number }> {
-  const baseUrl = process.env.EMBEDDING_SERVICE_URL?.trim() ?? "http://localhost:8001";
-  const form = new FormData();
-  // BlobPart = BufferSource | Blob | string. Buffer (runtime subclass of Uint8Array) is accepted.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  form.append("file", new Blob([fileAsset.bytes as any]), "doc.pdf");
+/**
+ * 标准化 MIME 类型（WPS Office → 标准 Office MIME）
+ */
+function normalizeMimeType(mimeType: string): string {
+  const wpsMap: Record<string, string> = {
+    "application/wpsoffice": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/wps-office.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/wps-office.pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/wps-office.xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  };
+  return wpsMap[mimeType] ?? mimeType;
+}
 
-  const res = await fetch(`${baseUrl}/extract-pdf`, { method: "POST", body: form });
-  if (!res.ok) throw new Error(`PDF_EXTRACT_FAILED: ${res.status}`);
-  const data = (await res.json()) as { text: string; pageCount?: number };
-  return { text: data.text, pageCount: data.pageCount };
+/**
+ * 根据 MIME 类型获取文件扩展名
+ */
+function getExtension(mimeType: string): string {
+  const extMap: Record<string, string> = {
+    "application/pdf": "pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp",
+    "image/bmp": "bmp",
+    "image/tiff": "tiff",
+  };
+  return extMap[mimeType] ?? "bin";
 }
 
 /**
@@ -133,6 +260,9 @@ export async function processFileAssetJob(fileAssetId: string): Promise<void> {
     },
   });
 
+  // 查 projectId（事务外只读查询，查不到则 null，不阻塞处理）
+  const projectId = await resolveProjectIdFromFileAsset(fileAssetId);
+
   try {
     // Step 2: 提取文本
     const { text, pageCount, metadata: extractedMetadata } = await extractDocumentText({
@@ -170,6 +300,7 @@ export async function processFileAssetJob(fileAssetId: string): Promise<void> {
             sourceType: "DOCUMENT",
             sourceId: document.id,
             documentId: document.id,
+            projectId,
             chunkIndex: i,
             title: fileAsset.originalName,
             content: chunks[i],
