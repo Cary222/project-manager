@@ -82,11 +82,13 @@ export async function detectIntent(
   state: AgentState
 ): Promise<Partial<AgentState>> {
   if (state.mode !== "auto") {
+    console.log(`[detectIntent] early return: mode=${state.mode} !== auto`);
     return { mode: state.mode };
   }
 
   const lastMessage = state.messages[state.messages.length - 1];
   if (!lastMessage || lastMessage.getType() !== "human") {
+    console.log(`[detectIntent] early return: lastMessage missing or not human`);
     return { mode: "chat" };
   }
 
@@ -95,7 +97,10 @@ export async function detectIntent(
       ? lastMessage.content
       : JSON.stringify(lastMessage.content);
 
+  console.log(`[detectIntent] content="${content}"`);
+
   const mode = detectMode(content);
+  console.log(`[detectIntent] detectMode result=${mode}`);
 
   return { mode };
 }

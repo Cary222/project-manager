@@ -18,12 +18,14 @@ const TYPE_LABEL: Record<SearchResultType, string> = {
   ticket: "工单",
   commit: "提交",
   note: "笔记",
+  doc: "项目文档",
 };
 
 const TYPE_STYLE: Record<SearchResultType, string> = {
   ticket: "bg-brand-50 text-brand-700",
   commit: "bg-violet-50 text-violet-700",
   note: "bg-amber-50 text-amber-700",
+  doc: "bg-cyan-50 text-cyan-700",
 };
 
 function ResultMeta({ item }: { item: SearchResultItem }) {
@@ -45,6 +47,15 @@ function ResultMeta({ item }: { item: SearchResultItem }) {
         {item.metadata.noteTags && item.metadata.noteTags.length > 0
           ? ` · ${item.metadata.noteTags.slice(0, 3).join(" / ")}`
           : ""}
+      </span>
+    );
+  }
+
+  if (item.type === "doc") {
+    return (
+      <span className="text-xs text-ink-400">
+        {item.project?.name || item.metadata.projectName || "未关联项目"}
+        {item.metadata.author ? ` · ${item.metadata.author}` : ""}
       </span>
     );
   }

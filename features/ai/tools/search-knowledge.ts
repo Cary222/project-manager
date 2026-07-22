@@ -59,10 +59,13 @@ export const searchKnowledge = tool({
 
     // 缓存未命中，执行真正的检索
     try {
-      return await retrieveContext(query, {
+      const result = await retrieveContext(query, {
         limit,
         userId: currentViewerUserId,
       });
+      console.log(`[searchKnowledge.execute] query="${query.slice(0,40)}" results=${Array.isArray(result.results) ? result.results.length : typeof result.results} contextLen=${result.contextText.length} typeof_result=${typeof result} constructor=${result?.constructor?.name} keys=${result ? Object.keys(result).join(',') : 'null'}`);
+
+      return result;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       // 当 embedding 服务不可用时，返回一个明确的提示消息

@@ -24,6 +24,13 @@ export type NextNode =
  * - chat: generateResponse (no tools)
  */
 export function routeByMode(state: AgentState): NextNode {
+  const lastMessage = state.messages[state.messages.length - 1];
+  const content =
+    typeof lastMessage?.content === "string"
+      ? lastMessage.content
+      : "";
+  console.log(`[routeByMode] state.mode=${state.mode} content="${content.slice(0, 60)}"`);
+
   switch (state.mode) {
     case "search":
       return "searchKnowledge";

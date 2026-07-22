@@ -8,7 +8,7 @@ export const SEARCH_DOCUMENT_SOURCE_TYPES = {
 export type SearchDocumentSourceType =
   (typeof SEARCH_DOCUMENT_SOURCE_TYPES)[keyof typeof SEARCH_DOCUMENT_SOURCE_TYPES];
 
-export const SEARCH_RESULT_TYPES = ["ticket", "commit", "note"] as const;
+export const SEARCH_RESULT_TYPES = ["ticket", "commit", "note", "doc"] as const;
 
 export type SearchResultType = (typeof SEARCH_RESULT_TYPES)[number];
 

@@ -143,6 +143,8 @@ export async function generateResponseNode(
         ? JSON.stringify(lastMessage.content)
         : "";
 
+  console.log(`[generateResponseNode] searchResults=${state.searchResults?.length} toolResults=${state.toolResults ? Object.keys(state.toolResults).join(',') : 'none'} mode=${state.mode}`);
+
   const systemPrompt = buildSystemPrompt(userName, state.mode, profile);
   const messages = buildMessages(
     state.messages.slice(0, -1),
@@ -150,6 +152,12 @@ export async function generateResponseNode(
     state.searchResults,
     state.toolResults
   );
+
+  // Log what context the LLM will see (first user message after history)
+  const ctxMsg = messages[messages.length - 1];
+  if (ctxMsg && ctxMsg.role === "user") {
+    console.log(`[generateResponseNode] ctxMsg content preview="${String(ctxMsg.content).slice(0, 200)}"`);
+  }
 
   try {
     const result = await generateText({

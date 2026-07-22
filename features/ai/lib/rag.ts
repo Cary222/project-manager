@@ -23,7 +23,8 @@ export async function retrieveContext(
     .map((result, index) => {
       const metadata = result.metadata ?? {};
       const source = result.type === "ticket" ? "工单" :
-                     result.type === "commit" ? "提交记录" : "笔记";
+                     result.type === "commit" ? "提交记录" :
+                     result.type === "doc" ? "项目文档" : "笔记";
 
       const lines: string[] = [];
       lines.push(`[${index + 1}] ${source}：${result.title}`);
@@ -86,7 +87,7 @@ export interface SourceReference {
   index: number;
   title: string;
   url: string;
-  type: "ticket" | "commit" | "note";
+  type: "ticket" | "commit" | "note" | "doc";
 }
 
 export function extractSourceReferences(results: SearchResultItem[]): SourceReference[] {

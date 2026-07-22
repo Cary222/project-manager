@@ -38,6 +38,7 @@ export async function GET(request: Request) {
       ticket: dedupedResults.filter((r) => r.type === "ticket"),
       commit: dedupedResults.filter((r) => r.type === "commit"),
       note: dedupedResults.filter((r) => r.type === "note"),
+      doc: dedupedResults.filter((r) => r.type === "doc"),
     };
 
     return NextResponse.json({

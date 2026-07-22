@@ -12,7 +12,7 @@ const EMPTY_RESULTS: SearchResponse = {
   tookMs: 0,
   total: 0,
   results: [],
-  grouped: { ticket: [], commit: [], note: [] },
+  grouped: { ticket: [], commit: [], note: [], doc: [] },
 };
 
 type KnowledgeSearchPanelProps = {

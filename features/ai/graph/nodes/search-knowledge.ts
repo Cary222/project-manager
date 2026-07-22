@@ -30,10 +30,13 @@ export async function searchKnowledgeNode(
       : "";
 
   try {
+    console.log(`[searchKnowledgeNode] executing with query="${content.slice(0, 60)}"`);
     const result = await searchKnowledge.execute(
       { query: content, limit: 5 },
       { context: {}, messages: [], toolCallId: "lg-search-knowledge" }
     );
+
+    console.log(`[searchKnowledgeNode] result typeof=${typeof result} constructor=${result?.constructor?.name} isArray=${Array.isArray(result)} keys=${typeof result === 'object' && result !== null ? Object.keys(result as object).join(',') : 'N/A'}`);
 
     const resultText =
       typeof result === "string"

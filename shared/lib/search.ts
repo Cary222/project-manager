@@ -115,6 +115,7 @@ function toResultType(sourceType: string): SearchResultType | null {
   if (sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.TICKET) return "ticket";
   if (sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.COMMIT) return "commit";
   if (sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.PKM_NOTE) return "note";
+  if (sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.KNOWLEDGE_DOC) return "doc";
   return null;
 }
 
@@ -357,10 +358,15 @@ function buildSearchablePkmNoteDocumentContent(
 ): SearchableRecord {
   const authorName = note.user.name || note.user.email;
 
+  const tagsStr = Array.isArray(note.tags) && note.tags.length > 0
+    ? `标签 ${note.tags.join(" ")}`
+    : null;
+
   const header = [
     `标题 ${note.title.trim()}`,
     `作者 ${authorName}`,
     note.project ? `项目 ${note.project.name}` : null,
+    tagsStr,
     `[chunk ${chunkIndex + 1}/${totalChunks}]`,
   ].filter(Boolean).join("\n");
 
@@ -1002,13 +1008,14 @@ function toRankedCandidate(args: {
   const directMatchBoost = hasDirectQueryMatch(args.document.title, args.document.content, args.query) ? 2 : 0;
   const score = keywordScore + semanticScore * 10 + directMatchBoost;
 
-  // For PKM note chunks, use the full content as the snippet instead of cropping.
-  // A chunk boundary is set at 1500 chars — the whole thing is a coherent section
-  // of the document. Cropping it (even to 800 chars) risks hiding the answer that
-  // the user is looking for if it happens to fall near the boundary.
-  // This matters especially for technical spec queries where the answer (e.g.
-  // "视场角：±15°") sits in the middle of a chunk.
-  const useFullContent = args.document.sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.PKM_NOTE;
+  // For PKM note and KNOWLEDGE_DOC chunks, use the full content as the snippet
+  // instead of cropping. A chunk boundary is set at 1500 chars — the whole
+  // thing is a coherent section of the document. Cropping it (even to 800 chars)
+  // risks hiding the answer that the user is looking for if it happens to fall
+  // near the boundary. This matters especially for technical spec queries.
+  const useFullContent =
+    args.document.sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.PKM_NOTE ||
+    args.document.sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.KNOWLEDGE_DOC;
   const snippet = useFullContent
     ? args.document.content
     : buildSnippet(args.document.content, args.terms);
@@ -1122,7 +1129,7 @@ export async function searchDocuments(options: {
       tookMs: 0,
       total: 0,
       results: [],
-      grouped: { ticket: [], commit: [], note: [] },
+      grouped: { ticket: [], commit: [], note: [], doc: [] },
     };
   }
 
@@ -1146,6 +1153,7 @@ export async function searchDocuments(options: {
     ticket: [],
     commit: [],
     note: [],
+    doc: [],
   };
 
   for (const item of ranked) {
