@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { IconExternalLink, IconTicket, IconProject, IconTeam, IconReport, IconRepo } from "@/shared/ui/icons";
+import { IconExternalLink, IconTicket, IconProject, IconTeam, IconReport, IconRepo, IconKnowledge } from "@/shared/ui/icons";
 
 /** Shared source reference shape */
 export interface SourceReference {
   index?: number;
   title: string;
   url: string;
-  type: "ticket" | "commit" | "note" | "project" | "user" | "weekly_report";
+  type: "ticket" | "commit" | "note" | "doc" | "project" | "user" | "weekly_report";
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -42,6 +42,9 @@ function SourceTypeIcon({ type }: { type: string }) {
       return <IconRepo width={12} height={12} />;
     case "weekly_report":
       return <IconReport width={12} height={12} />;
+    case "note":
+    case "doc":
+      return <IconKnowledge width={12} height={12} />;
     default:
       return <IconExternalLink width={12} height={12} />;
   }
@@ -55,6 +58,7 @@ function SourceTypeLabel({ type }: { type: string }) {
     case "commit": return "提交";
     case "weekly_report": return "周报";
     case "note": return "笔记";
+    case "doc": return "项目文档";
     default: return "查看";
   }
 }

@@ -298,6 +298,9 @@ export async function processFileAssetJob(fileAssetId: string): Promise<void> {
 
       // 写新 chunks（embedding 先跳过，用 $executeRaw 后续更新）
       const savedChunks = [];
+      const chunkUrl = projectId
+        ? `/projects/${projectId}/documents/${fileAsset.id}`
+        : `/api/upload/${fileAsset.id}`;
       for (let i = 0; i < chunks.length; i++) {
         const saved = await tx.searchDocument.create({
           data: {
@@ -308,7 +311,7 @@ export async function processFileAssetJob(fileAssetId: string): Promise<void> {
             chunkIndex: i,
             title: fileAsset.originalName,
             content: chunks[i],
-            url: `/api/upload/${fileAsset.id}`,
+            url: chunkUrl,
             // metadata 暂保留 fileAssetId 一个版本（PR11 清理）
             metadata: { fileAssetId, hash: null } as Prisma.InputJsonValue,
           },
