@@ -1,5 +1,5 @@
 #!/bin/bash
-# 自动部署脚本：git pull → 构建 → 切换服务
+# 自动部署脚本：git pull → 构建 → 切换服务 + 重试失败任务
 
 set -e
 
@@ -103,4 +103,34 @@ while ! ss -ltn | tail -n +2 | grep -q ":$PORT"; do
 done
 
 log "服务启动成功 (port ${PORT})"
+
+# 重试失败的 IndexJob（FILE_ASSET 类型）
+log "重试失败的索引任务..."
+retry_result=$(cd "$WORK" && npx tsx -e "
+import { loadEnvConfig } from '@next/env';
+import { prisma } from './shared/db/client';
+
+loadEnvConfig(process.cwd());
+
+async function main() {
+  const result = await prisma.indexJob.updateMany({
+    where: {
+      targetType: 'FILE_ASSET',
+      status: 'FAILED',
+    },
+    data: {
+      status: 'PENDING',
+      attempt: 0,
+      error: null,
+      updatedAt: new Date(),
+    },
+  });
+  console.log(JSON.stringify({ count: result.count }));
+}
+main().catch(e => console.error(e.message)).finally(() => prisma.\$disconnect());
+" 2>&1 || echo '{"count":0}')
+
+retry_count=$(echo "$retry_result" | grep -o '"count":[0-9]*' | grep -o '[0-9]*' || echo "0")
+log "已重置 ${retry_count} 个失败任务，Worker 将在下次轮询时处理"
+
 log "=== 部署完成 ==="
