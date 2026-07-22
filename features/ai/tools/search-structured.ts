@@ -121,6 +121,7 @@ const inputSchema = z.object({
       priority: z.number().optional().describe("ticket: 1-4，数字越小优先级越高"),
       userId: z.string().optional().describe("用户标识（用户名、邮箱前缀、邮箱全称、cUID 等任意子串都会模糊匹配）"),
       projectId: z.string().optional().describe("项目ID"),
+      ticketNo: z.number().int().optional().describe("commit: 按工单号过滤（关联 TicketCommit.ticketNo）"),
     })
     .optional(),
   limit: z.number().min(1).max(20).default(5),
@@ -160,20 +161,62 @@ async function queryTicket(id: string | undefined, filters: Input["filters"], vi
       const deadlineStr = ticket.deadline
         ? `，截止 ${new Date(ticket.deadline).toLocaleDateString("zh-CN")}`
         : "";
-      const summary = `工单 #${ticket.ticketNo} ${ticket.title}
-状态：${ticket.status}，优先级：${ticket.priority}（1最高）
-项目：${ticket.project.name} / ${ticket.module.name}
-指派给：${assigneeNames || "无人"}
-创建者：${ticket.creator.name}${deadlineStr}
-创建时间：${new Date(ticket.createdAt).toLocaleString("zh-CN")}`;
+      // 该工单的提交记录（按时间倒序，最新 5 条）。从 TicketCommit 反查，
+      // 不依赖语义搜索对数字工单 ID 的命中率（向量嵌入对纯数字 ID 区分度差）。
+      const commits = await prisma.ticketCommit.findMany({
+        where: { ticketNo: ticket.ticketNo },
+        orderBy: { committedAt: "desc" },
+        take: 5,
+        select: {
+          id: true,
+          commitSha: true,
+          subject: true,
+          author: true,
+          committedAt: true,
+          branches: true,
+        },
+      });
+
+      const summaryLines = [
+        `工单 #${ticket.ticketNo} ${ticket.title}`,
+        `状态：${ticket.status}，优先级：${ticket.priority}（1最高）`,
+        `项目：${ticket.project.name} / ${ticket.module.name}`,
+        `指派给：${assigneeNames || "无人"}`,
+        `创建者：${ticket.creator.name}${deadlineStr}`,
+        `创建时间：${new Date(ticket.createdAt).toLocaleString("zh-CN")}`,
+      ];
+
+      const sources: SourceReference[] = [{
+        index: 1,
+        title: `#${ticket.ticketNo} ${ticket.title}`,
+        url: `/tickets/${ticket.id}`,
+        type: "ticket" as const,
+      }];
+
+      if (commits.length > 0) {
+        summaryLines.push("");
+        summaryLines.push(`最新提交（共 ${commits.length} 条）：`);
+        commits.forEach((c) => {
+          summaryLines.push(
+            `${c.commitSha.slice(0, 7)} ${c.subject} | ${c.author} | ${new Date(c.committedAt).toLocaleString("zh-CN")} | 分支 ${c.branches.join(", ") || "无"}`,
+          );
+        });
+        commits.forEach((c, idx) => {
+          sources.push({
+            index: idx + 2,
+            title: `${c.commitSha.slice(0, 7)} ${c.subject}`,
+            url: `/tickets/${ticket.id}`,
+            type: "commit" as const,
+          });
+        });
+      } else {
+        summaryLines.push("");
+        summaryLines.push("该工单暂无关联提交记录。");
+      }
+
       return {
-        summary,
-        sources: [{
-          index: 1,
-          title: `#${ticket.ticketNo} ${ticket.title}`,
-          url: `/tickets/${ticket.id}`,
-          type: "ticket" as const
-        }]
+        summary: summaryLines.join("\n"),
+        sources,
       };
     }
     return {
@@ -381,7 +424,49 @@ async function queryUser(
 }
 
 async function queryCommit(id: string | undefined, filters: Input["filters"], viewerUserId?: string): Promise<StructuredResult> {
-  if (!id) return { summary: "请提供 commit SHA（如 abc1234）", sources: [] };
+  // 按工单号过滤：这是“某工单的最新提交记录”类查询的精确入口，
+  // 不依赖向量搜索（语义检索对纯数字 ID 区分度差）。
+  if (filters?.ticketNo !== undefined) {
+    const ticketNo = filters.ticketNo;
+    const ticket = await prisma.ticket.findUnique({
+      where: { ticketNo },
+      select: { id: true, ticketNo: true, title: true, status: true },
+    });
+    if (!ticket) return { summary: `未找到工单 #${ticketNo}`, sources: [] };
+
+    const commits = await prisma.ticketCommit.findMany({
+      where: { ticketNo },
+      orderBy: { committedAt: "desc" },
+      take: 5,
+      select: {
+        commitSha: true,
+        subject: true,
+        author: true,
+        committedAt: true,
+        branches: true,
+      },
+    });
+
+    if (commits.length === 0) {
+      return { summary: `工单 #${ticket.ticketNo} ${ticket.title} 暂无关联提交记录。`, sources: [] };
+    }
+
+    const lines = [`工单 #${ticket.ticketNo} ${ticket.title}（${ticket.status}）的最新提交（共 ${commits.length} 条）：`];
+    const sources: SourceReference[] = commits.map((c, i) => ({
+      index: i + 1,
+      title: `${c.commitSha.slice(0, 7)} ${c.subject}`,
+      url: `/tickets/${ticket.id}`,
+      type: "commit" as const,
+    }));
+    for (const c of commits) {
+      lines.push(
+        `${c.commitSha.slice(0, 7)} ${c.subject} | ${c.author} | ${new Date(c.committedAt).toLocaleString("zh-CN")} | 分支 ${c.branches.join(", ") || "无"}`,
+      );
+    }
+    return { summary: lines.join("\n"), sources };
+  }
+
+  if (!id) return { summary: "请提供 commit SHA（如 abc1234）或使用 filters.ticketNo 指定工单号", sources: [] };
 
   const commit = await prisma.ticketCommit.findFirst({
     where: { commitSha: { startsWith: id } },
