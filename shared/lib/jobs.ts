@@ -63,6 +63,9 @@ export async function enqueueIndexJobByNoteId(noteId: string): Promise<string> {
 
 /**
  * 把卡在 PROCESSING 状态超过阈值的 job 恢复到 PENDING（attempt + 1）。
+ * 恢复时写 updatedAt = now()，使恢复的 job 排到当前队列末尾（按 updatedAt ASC 排序）。
+ * 队列公平性由 Worker 重试时的 updatedAt 写入 + claimNextJob 按 updatedAt ASC 排序共同保证；
+ * 数据库本身不实现真正的 delayed scheduling，实际退避仍由 Worker sleep(delayMs) 保证。
  * Worker 启动时和每次轮询时调用。
  */
 export async function recoverStaleJobs(): Promise<number> {
@@ -76,6 +79,7 @@ export async function recoverStaleJobs(): Promise<number> {
       status: "PENDING",
       attempt: { increment: 1 },
       startedAt: null,
+      updatedAt: new Date(),
     },
   });
   return count;
@@ -83,13 +87,15 @@ export async function recoverStaleJobs(): Promise<number> {
 
 /**
  * 原子抢下一个 PENDING job 并标记为 PROCESSING。
+ * 按 updatedAt ASC 排序（配合 worker 重试时写 updatedAt = now()），实现队列公平性：
+ * 被恢复或重试的 job 写 updatedAt = now() 后自然排到新 jobs 之后。
  * 多 worker 并发安全。
  */
 export async function claimNextJob(): Promise<IndexJob | null> {
   return prisma.$transaction(async (tx) => {
     const found = await tx.indexJob.findFirst({
       where: { status: "PENDING" },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ updatedAt: "asc" }, { createdAt: "asc" }, { id: "asc" }],
     });
     if (!found) return null;
 

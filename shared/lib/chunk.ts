@@ -17,6 +17,13 @@ export function splitIntoChunks(
   maxChars = DEFAULT_MAX_CHARS,
   overlap = DEFAULT_OVERLAP,
 ): string[] {
+  if (!Number.isInteger(maxChars) || maxChars <= 0) {
+    throw new Error("CHUNK_MAX_CHARS_INVALID");
+  }
+  if (!Number.isInteger(overlap) || overlap < 0 || overlap >= maxChars) {
+    throw new Error("CHUNK_OVERLAP_INVALID");
+  }
+
   const normalized = text.replace(/\r\n/g, "\n").trim();
   if (normalized.length === 0) return [];
   if (normalized.length <= maxChars) return [normalized];
@@ -38,8 +45,11 @@ export function splitIntoChunks(
       }
     }
 
-    chunks.push(slice.trim());
-    cursor += slice.length - overlap;
+    const chunk = slice.trim();
+    if (chunk) chunks.push(chunk);
+    if (end === normalized.length) break;
+
+    cursor += Math.max(1, slice.length - overlap);
   }
   return chunks;
 }

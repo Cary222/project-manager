@@ -154,8 +154,8 @@ async function extractTextViaService(
     throw new Error(`UNSUPPORTED_MIME: ${fileAsset.mimeType}`);
   }
 
-  // 将 bytes 转为 base64 data URL
-  const base64 = fileAsset.bytes.toString("base64");
+  // 将 bytes 转为 base64 data URL（Buffer.from 确保 Node.js Buffer，toString("base64") 正确编码）
+  const base64 = Buffer.from(fileAsset.bytes).toString("base64");
   const dataUrl = `data:${mimeType};base64,${base64}`;
 
   const response = await fetch(`${baseUrl}/extract-text`, {

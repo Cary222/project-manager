@@ -151,7 +151,7 @@ async function handleJobError(
       attempt: nextAttempt,
       error: msg,
       startedAt: null,
-      updatedAt: new Date(Date.now() + delayMs),
+      updatedAt: new Date(),
     },
   });
 
