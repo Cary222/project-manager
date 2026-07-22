@@ -111,11 +111,11 @@ function splitTerms(query: string): string[] {
   return tokens.slice(0, 6);
 }
 
-function toResultType(sourceType: string): SearchResultType | null {
+export function toResultType(sourceType: string): SearchResultType | null {
   if (sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.TICKET) return "ticket";
   if (sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.COMMIT) return "commit";
   if (sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.PKM_NOTE) return "note";
-  if (sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.KNOWLEDGE_DOC) return "doc";
+  if (sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.DOCUMENT) return "doc";
   return null;
 }
 
@@ -1008,14 +1008,14 @@ function toRankedCandidate(args: {
   const directMatchBoost = hasDirectQueryMatch(args.document.title, args.document.content, args.query) ? 2 : 0;
   const score = keywordScore + semanticScore * 10 + directMatchBoost;
 
-  // For PKM note and KNOWLEDGE_DOC chunks, use the full content as the snippet
+  // For PKM note and DOCUMENT chunks, use the full content as the snippet
   // instead of cropping. A chunk boundary is set at 1500 chars — the whole
   // thing is a coherent section of the document. Cropping it (even to 800 chars)
   // risks hiding the answer that the user is looking for if it happens to fall
   // near the boundary. This matters especially for technical spec queries.
   const useFullContent =
     args.document.sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.PKM_NOTE ||
-    args.document.sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.KNOWLEDGE_DOC;
+    args.document.sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.DOCUMENT;
   const snippet = useFullContent
     ? args.document.content
     : buildSnippet(args.document.content, args.terms);
