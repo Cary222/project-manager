@@ -102,6 +102,28 @@ export default async function ProjectDetailPage({
     orderBy: { createdAt: "desc" },
   });
 
+  // 获取项目直接上传的附件（sourceType="PROJECT"）
+  const projectAttachments = await prisma.fileReference.findMany({
+    where: {
+      sourceType: "PROJECT",
+      sourceId: projectId,
+      deletedAt: null,
+    },
+    include: {
+      fileAsset: {
+        select: {
+          id: true,
+          originalName: true,
+          mimeType: true,
+          size: true,
+          createdAt: true,
+          uploader: { select: { name: true } },
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
   // 构建 ticket 附件数据供 ProjectDetail 使用
   const projectWithTicketAttachments = {
     ...(project as unknown as ProjectWithStatus),
@@ -111,6 +133,14 @@ export default async function ProjectDetailPage({
       name: ref.fileAsset.originalName,
       mimeType: ref.fileAsset.mimeType,
       size: ref.fileAsset.size,
+      createdAt: ref.createdAt.toISOString(),
+    })),
+    projectAttachments: projectAttachments.map((ref) => ({
+      fileId: ref.fileAssetId,
+      name: ref.fileAsset.originalName,
+      mimeType: ref.fileAsset.mimeType,
+      size: ref.fileAsset.size,
+      uploader: ref.fileAsset.uploader.name ?? "—",
       createdAt: ref.createdAt.toISOString(),
     })),
   };

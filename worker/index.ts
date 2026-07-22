@@ -25,11 +25,28 @@ import { prisma } from "@/shared/db/client";
 import { syncPkmNoteSearchDocumentFull, syncTicketSearchDocument, syncCommitSearchDocument } from "@/shared/lib/search";
 import { processFileAssetJob } from "@/shared/lib/document";
 import { claimNextJob, getBackoffDelayMs, recoverStaleJobs } from "@/shared/lib/jobs";
+import { syncAllManagedRepos } from "@/lib/git-sync/scan";
 
 loadEnvConfig(process.cwd());
 
 const POLL_INTERVAL_MS = 2_000;
+const GIT_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const LOG_PREFIX = "[worker]";
+
+async function runGitSync(): Promise<void> {
+  try {
+    const results = await syncAllManagedRepos();
+    for (const r of results) {
+      if (r.total > 0) {
+        console.log(
+          `${LOG_PREFIX} git-sync ${r.repoPath}: ${r.total} scanned, ${r.linked} linked`,
+        );
+      }
+    }
+  } catch (error) {
+    console.error(`${LOG_PREFIX} git-sync failed:`, error);
+  }
+}
 
 async function processNextJob(): Promise<boolean> {
   const job = await claimNextJob();
@@ -151,6 +168,10 @@ async function main(): Promise<void> {
   if (recovered > 0) {
     console.warn(`${LOG_PREFIX} recovered ${recovered} stale PROCESSING jobs`);
   }
+
+  // Run git sync immediately on start, then every 5 minutes
+  void runGitSync();
+  setInterval(() => { void runGitSync(); }, GIT_SYNC_INTERVAL_MS);
 
   let stopping = false;
   const shutdown = async (signal: string) => {

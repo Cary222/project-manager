@@ -10,7 +10,7 @@ import { type FileAttachment } from "@/shared/lib/pkm";
 import { AttachmentItem, type PreviewableFile } from "@/shared/ui/AttachmentItem";
 import { PriorityBadge } from "@/shared/ui/PriorityBadge";
 import { DocumentPreviewModal } from "@/shared/ui/DocumentPreviewModal";
-import { uploadAttachmentAsNote } from "@/shared/lib/upload";
+import { uploadProjectFile } from "@/shared/lib/upload";
 import { FileUploader } from "@/features/project/ui/FileUploader";
 import { DispatchProjectDetail } from "@/features/dispatch/ui/DispatchProjectDetail";
 import { useToast } from "@/shared/lib/use-toast";
@@ -56,6 +56,15 @@ type PkmNoteForDocs = {
   user: { id: string; name: string | null };
 };
 
+type ProjectAttachmentForDocs = {
+  fileId: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  uploader: string;
+  createdAt: string;
+};
+
 export type ProjectWithStatus = {
   id: string;
   name: string;
@@ -74,6 +83,8 @@ export type ProjectWithStatus = {
   }[];
   /** PR10: 单子附件数据 */
   ticketAttachments?: TicketAttachmentForProject[];
+  /** 新路线：项目直接上传的附件（sourceType=PROJECT） */
+  projectAttachments?: ProjectAttachmentForDocs[];
 };
 
 // ---- Kanban column config ----
@@ -606,7 +617,7 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
         {/* Upload bar */}
         <div className="rounded-xl border border-ink-200 bg-white p-4">
           <FileUploader
-            onUpload={(file) => uploadAttachmentAsNote(file, project.id, router)}
+            onUpload={(file) => uploadProjectFile(file, project.id, router)}
             label="上传项目文件"
             hint="支持 PDF、Word、PPT、Excel、TXT、Markdown（单个文件不超过 10 MB）"
             accept=".pdf,.doc,.docx,.ppt,.pptx,.xlsx,.xls,.txt,.md,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/markdown,text/plain"
@@ -726,21 +737,85 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
           </div>
         )}
 
-        {/* Attachment list */}
-        <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
-          <h2 className="mb-4 text-base font-semibold text-ink-900">
-            项目文档
-            {allAttachments.length > 0 && (
+        {/* 项目直接上传文档（新路线：sourceType=PROJECT） */}
+        {(project.projectAttachments ?? []).length > 0 && (
+          <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+            <h2 className="mb-4 text-base font-semibold text-ink-900">
+              项目直接上传
+              <span className="ml-2 text-sm font-normal text-ink-400">
+                （{(project.projectAttachments ?? []).length} 个文件）
+              </span>
+            </h2>
+            <ul className="space-y-2">
+              {(project.projectAttachments ?? []).map((att, i) => {
+                const mimeType = att.mimeType ?? "application/octet-stream";
+                const isImage = mimeType.startsWith("image/");
+                const canPreview =
+                  isImage ||
+                  mimeType === "application/pdf" ||
+                  mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+                  mimeType === "text/markdown" ||
+                  mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                const fileUrl = `/api/upload/${att.fileId}`;
+                const size = att.size ?? 0;
+                const sizeLabel =
+                  size < 1024
+                    ? `${size} B`
+                    : size < 1024 * 1024
+                      ? `${(size / 1024).toFixed(1)} KB`
+                      : `${(size / 1024 / 1024).toFixed(1)} MB`;
+
+                return (
+                  <li key={`${att.fileId}-${i}`} className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2 text-xs text-ink-400">
+                      <span className="rounded bg-brand-50 px-1.5 py-0.5 text-brand-600">项目文档</span>
+                      <span>上传者：{att.uploader}</span>
+                      {att.createdAt && <> · {new Date(att.createdAt).toLocaleDateString("zh-CN")}</>}
+                    </div>
+                    <div className="flex items-center gap-3 rounded-lg border border-brand-100 bg-brand-50 px-3 py-2">
+                      {isImage ? (
+                        <img src={fileUrl} alt={att.name} className="h-8 w-8 shrink-0 rounded object-cover" />
+                      ) : (
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-brand-200">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-brand-600">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14,2 14,8 20,8" />
+                          </svg>
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-ink-800">{att.name}</p>
+                        <p className="text-xs text-ink-400">{sizeLabel}</p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {canPreview && (
+                          <button
+                            type="button"
+                            onClick={() => setPreviewFile({ name: att.name || "document", url: fileUrl, mimeType })}
+                            className="rounded-lg border border-brand-200 bg-white px-2 py-1 text-xs text-brand-600 hover:bg-brand-50"
+                          >
+                            预览
+                          </button>
+                        )}
+                        <a href={fileUrl} download={att.name} className="rounded-lg border border-ink-200 bg-white px-2.5 py-1 text-xs text-ink-600 hover:bg-ink-100">
+                          下载
+                        </a>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
+        {/* 来源笔记（PKM 笔记附件路线） */}
+        {allAttachments.length > 0 && (
+          <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+            <h2 className="mb-4 text-base font-semibold text-ink-900">
+              来源笔记
               <span className="ml-2 text-sm font-normal text-ink-400">（{allAttachments.length} 个文件）</span>
-            )}
-          </h2>
-          {allAttachments.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-ink-200 py-12 text-center">
-              <IconBook className="mb-3 h-10 w-10 text-ink-300" />
-              <p className="text-sm text-ink-500">暂无文档</p>
-              <p className="mt-1 text-xs text-ink-400">上传文件或关联笔记附件后在此展示</p>
-            </div>
-          ) : (
+            </h2>
             <ul className="space-y-2">
               {allAttachments.map((item, i) => (
                 <li key={`${item.noteId}-${item.attachment.name}-${i}`} className="flex flex-col gap-1">
@@ -763,8 +838,16 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
                 </li>
               ))}
             </ul>
-          )}
-        </div>
+          </div>
+        )}
+
+        {allAttachments.length === 0 && (project.projectAttachments ?? []).length === 0 && (
+          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-ink-200 py-12 text-center">
+            <IconBook className="mb-3 h-10 w-10 text-ink-300" />
+            <p className="text-sm text-ink-500">暂无文档</p>
+            <p className="mt-1 text-xs text-ink-400">上传文件或关联笔记附件后在此展示</p>
+          </div>
+        )}
       </div>
     </>
   );

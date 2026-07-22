@@ -113,44 +113,35 @@ export function toAbsoluteUploadUrl(urlOrPath: string): string {
 }
 
 /**
- * 将文件作为 PKM 笔记附件上传到指定项目。
- * 自动以文件名作为笔记标题，上传到 /api/pkm/notes 后刷新路由。
+ * 将文件作为项目文档上传到指定项目。
+ * 流程：
+ * 1. uploadFile → FileAsset 表（bytes 存 DB）→ 入队 IndexJob（Worker 提取文本 → SearchDocument）
+ * 2. 创建 sourceType="PROJECT" 的 FileReference（projectId 关联）
+ * 3. refresh 路由刷新列表
  * @throws 文件超限或 API 返回错误时抛出 Error。
  */
-export async function uploadAttachmentAsNote(
+export async function uploadProjectFile(
   file: File,
   projectId: string,
   router: { refresh: () => void },
 ): Promise<void> {
-  if (file.size > MAX_SIZE) {
-    throw new Error(`文件不能超过 ${formatBytes(MAX_SIZE)}`);
-  }
-  const url = await fileToDataUrl(file);
-  const title = file.name.replace(/\.[^.]+$/, "") || "无标题文档";
-  const res = await fetch("/api/pkm/notes", {
+  // Step 1: 上传到 FileAsset
+  const result = await uploadFile(file);
+
+  // Step 2: 创建 PROJECT 类型引用（触发 resolveProjectIdFromFileAsset）
+  const res = await fetch(`/api/file-assets/${result.fileId}/references`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      title,
-      content: `通过项目文档上传：${file.name}`,
-      tags: [],
-      projectId,
-      isPublic: true,
-      attachments: [
-        {
-          name: file.name,
-          url,
-          mimeType: file.type || "application/octet-stream",
-          size: file.size,
-        },
-      ],
-    }),
+    body: JSON.stringify({ sourceType: "PROJECT", sourceId: projectId }),
   });
-  const data = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) throw new Error(data.error || "上传失败");
+  const refData = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) {
+    throw new Error(refData.error || "创建文件引用失败");
+  }
+
+  // Step 3: 刷新列表
   router.refresh();
 }
-
 export function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;

@@ -654,7 +654,12 @@ async function handleLangGraphRequest(
         enqueueData({ type: "text", delta: lastResponse });
 
         // Append final message to conversation store
-        await appendMessage(conversationId, "assistant", lastResponse);
+        await appendMessage(
+          conversationId,
+          "assistant",
+          lastResponse,
+          allSources.length > 0 ? allSources : undefined
+        );
         enqueueData({ type: "done" });
         closeStream();
       } catch (err) {

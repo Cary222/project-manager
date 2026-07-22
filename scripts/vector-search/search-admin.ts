@@ -298,7 +298,7 @@ async function cmdSearch(query: string, flags: Map<string, string>) {
 
   console.log(`total=${result.total} took=${result.tookMs}ms\n`);
 
-  const GROUP_LABELS: Record<string, string> = { note: "笔记", ticket: "工单", commit: "提交" };
+  const GROUP_LABELS: Record<string, string> = { note: "笔记", ticket: "工单", commit: "提交", doc: "项目文档" };
   for (const [group, items] of Object.entries(result.grouped)) {
     const label = GROUP_LABELS[group] ?? group;
     console.log(`━━━ ${label} (${items.length} 条) ━━`);
