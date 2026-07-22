@@ -138,8 +138,9 @@ model SearchDocument {
   chunkIndex Int                      @default(0)
   project    Project?                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
   /// 结构化字段：关联 Document.id（而不是 FileAsset.id）
+  /// 一个 Document 对应多个 SearchDocument chunk，因此不能唯一约束 documentId。
   /// PR11 清理旧 metadata.fileAssetId
-  documentId String?                  @unique
+  documentId String?
   document   Document?                @relation(fields: [documentId], references: [id], onDelete: SetNull)
 
   @@unique([sourceType, sourceId, chunkIndex])
