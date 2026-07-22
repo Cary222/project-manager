@@ -98,6 +98,10 @@ async function upsertSearchDocumentEmbedding(
  * 支持 MIME 类型：PDF、图片(OCR)、Office文档(DOCX/PPTX/XLSX)、纯文本
  * 调用 embedding 服务的 /extract-text 端点（JSON body，含 data URL）
  */
+export function decodeTextBytes(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString("utf-8");
+}
+
 export async function extractDocumentText(
   fileAsset: { id: string; mimeType: string; bytes: Buffer },
 ): Promise<{
@@ -105,12 +109,12 @@ export async function extractDocumentText(
   pageCount?: number;
   metadata?: Record<string, unknown>;
 }> {
-  // 纯文本类型直接解码
+  // Prisma Bytes 静态类型是 Uint8Array；显式转 Buffer 后再按 UTF-8 解码。
   if (
     fileAsset.mimeType === "text/markdown" ||
     fileAsset.mimeType === "text/plain"
   ) {
-    return { text: fileAsset.bytes.toString("utf-8") };
+    return { text: decodeTextBytes(fileAsset.bytes) };
   }
 
   // 其余类型走 embedding 服务的 /extract-text（JSON body + data URL）
