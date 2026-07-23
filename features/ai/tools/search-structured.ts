@@ -13,9 +13,20 @@ interface SourceReference {
   type: "ticket" | "project" | "user" | "commit" | "weekly_report";
 }
 
+interface UserActivityAttribution {
+  kind: "user_activity";
+  targetUserName: string;
+  windowLabel: string;
+  hasDirectEvidence: boolean;
+  directNoteCount: number;
+  relatedTicketCount: number;
+  relatedCommitCount: number;
+}
+
 interface StructuredResult {
   summary: string;
   sources: SourceReference[];
+  attribution?: UserActivityAttribution;
 }
 
 /**
@@ -122,6 +133,10 @@ const inputSchema = z.object({
       userId: z.string().optional().describe("用户标识（用户名、邮箱前缀、邮箱全称、cUID 等任意子串都会模糊匹配）"),
       projectId: z.string().optional().describe("项目ID"),
       ticketNo: z.number().int().optional().describe("commit: 按工单号过滤（关联 TicketCommit.ticketNo）"),
+      activityWindow: z
+        .enum(["today", "yesterday", "this_week", "this_month", "recent"])
+        .optional()
+        .describe("user: 工作近况时间范围；today/昨日/本周/本月/最近"),
     })
     .optional(),
   limit: z.number().min(1).max(20).default(5),
@@ -357,7 +372,7 @@ async function queryUser(
 ): Promise<StructuredResult> {
   const targetId = filters?.userId ?? id;
   const resolved = await resolveUser(targetId, viewerUserId);
-  console.log(`[queryUser] targetId="${targetId}" resolved=${resolved ? JSON.stringify(resolved) : "null"}`);
+  console.log(`[queryUser] targetId="${targetId}" resolved=${resolved ? JSON.stringify(resolved) : "null"} window=${filters?.activityWindow ?? "none"}`);
 
   if (!resolved) {
     const hint = targetId
@@ -368,6 +383,10 @@ async function queryUser(
       sources: []
     };
   }
+
+  // 按 activityWindow 算出时间窗口下界（包含）。undefined = 不过滤。
+  const windowSince = getWindowStart(filters?.activityWindow);
+  const dateFilter = windowSince ? { gte: windowSince } : undefined;
 
   const [user, assignedCount, createdCount, reportCount] = await Promise.all([
     prisma.user.findUnique({
@@ -387,40 +406,293 @@ async function queryUser(
 
   if (!user) return { summary: `未找到用户 ID: ${resolved.id}`, sources: [] };
 
-  // Recent assignments (包含创建者信息)
-  const recentTickets = await prisma.ticket.findMany({
-    where: { assignees: { some: { userId: resolved.id } } },
-    orderBy: { updatedAt: "desc" },
-    take: 5,
-    select: { 
-      id: true, 
-      ticketNo: true, 
-      title: true, 
-      status: true, 
-      project: { select: { name: true } },
-      creator: { select: { name: true } }
-    },
-  });
+  // ---- 当前负责范围内、窗口中被更新过的工单 ----
+  // Ticket.updatedAt 只能证明工单被某人修改过。目标用户作为 assignee / creator
+  // 仅表示关联关系，不能据此断言更新由目标用户完成，更不能当作个人产出。
+  const relatedTickets = dateFilter
+    ? await prisma.ticket.findMany({
+        where: {
+          updatedAt: dateFilter,
+          OR: [
+            { assignees: { some: { userId: resolved.id } } },
+            { creatorId: resolved.id },
+          ],
+        },
+        orderBy: { updatedAt: "desc" },
+        take: 20,
+        select: {
+          id: true,
+          ticketNo: true,
+          title: true,
+          status: true,
+          updatedAt: true,
+          project: { select: { name: true } },
+          creator: { select: { name: true } }
+        },
+      })
+    : await prisma.ticket.findMany({
+        where: {
+          OR: [
+            { assignees: { some: { userId: resolved.id } } },
+            { creatorId: resolved.id },
+          ],
+        },
+        orderBy: { updatedAt: "desc" },
+        take: 20,
+        select: {
+          id: true,
+          ticketNo: true,
+          title: true,
+          status: true,
+          updatedAt: true,
+          project: { select: { name: true } },
+          creator: { select: { name: true } }
+        },
+      });
 
-  const sources: SourceReference[] = recentTickets.map((t, i) => ({
+  // ---- 负责范围内工单的 commit ----
+  // TicketCommit 目前只有 author 文本，没有可靠的 userId 映射。因此这些 commit
+  // 只能作为“相关工单有代码变更”的证据，绝不能表述成目标用户本人提交。
+  const relatedCommits = dateFilter
+    ? await prisma.ticketCommit.findMany({
+        where: {
+          committedAt: dateFilter,
+          ticket: {
+            OR: [
+              { assignees: { some: { userId: resolved.id } } },
+              { creatorId: resolved.id },
+            ],
+          },
+        },
+        orderBy: { committedAt: "desc" },
+        take: 20,
+        select: {
+          commitSha: true,
+          subject: true,
+          author: true,
+          committedAt: true,
+          ticketNo: true,
+          ticket: {
+            select: {
+              id: true,
+              ticketNo: true,
+              title: true,
+              status: true,
+              project: { select: { name: true } },
+            },
+          },
+        },
+      })
+    : await prisma.ticketCommit.findMany({
+        where: {
+          ticket: {
+            OR: [
+              { assignees: { some: { userId: resolved.id } } },
+              { creatorId: resolved.id },
+            ],
+          },
+        },
+        orderBy: { committedAt: "desc" },
+        take: 20,
+        select: {
+          commitSha: true,
+          subject: true,
+          author: true,
+          committedAt: true,
+          ticketNo: true,
+          ticket: {
+            select: {
+              id: true,
+              ticketNo: true,
+              title: true,
+              status: true,
+              project: { select: { name: true } },
+            },
+          },
+        },
+      });
+
+  // ---- 窗口内笔记 ----
+  const recentNotes = dateFilter
+    ? await prisma.pkmNote.findMany({
+        where: { userId: resolved.id, updatedAt: dateFilter },
+        orderBy: { updatedAt: "desc" },
+        take: 10,
+        select: {
+          id: true,
+          title: true,
+          updatedAt: true,
+          project: { select: { name: true } },
+        },
+      })
+    : await prisma.pkmNote.findMany({
+        where: { userId: resolved.id },
+        orderBy: { updatedAt: "desc" },
+        take: 10,
+        select: {
+          id: true,
+          title: true,
+          updatedAt: true,
+          project: { select: { name: true } },
+        },
+      });
+
+  // ---- 相关工单补集 ----
+  // Ticket.updatedAt 不会因为 commit 写入而自动更新，因此把窗口内有 commit 的相关工单
+  // 并入“负责范围”。这仍然只是工单级活动，不能归因给目标用户。
+  type RecentTicket = {
+    id: string;
+    ticketNo: number;
+    title: string;
+    status: string;
+    updatedAt: Date;
+    project: { name: string };
+    creator?: { name: string | null } | null;
+  };
+  const mergedMap = new Map<string, RecentTicket>();
+  for (const t of relatedTickets) mergedMap.set(t.id, t);
+  for (const c of relatedCommits) {
+    if (!c.ticket) continue;
+    const existing = mergedMap.get(c.ticket.id);
+    const committedAt = new Date(c.committedAt);
+    if (!existing) {
+      mergedMap.set(c.ticket.id, {
+        id: c.ticket.id,
+        ticketNo: c.ticket.ticketNo,
+        title: c.ticket.title,
+        status: c.ticket.status,
+        updatedAt: committedAt,
+        project: c.ticket.project ?? { name: "未分类" },
+      });
+    } else if (committedAt.getTime() > existing.updatedAt.getTime()) {
+      mergedMap.set(c.ticket.id, { ...existing, updatedAt: committedAt });
+    }
+  }
+  const mergedRecentTickets = Array.from(mergedMap.values())
+    .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+    .slice(0, 10);
+
+  const sources: SourceReference[] = mergedRecentTickets.map((t, i) => ({
     index: i + 1,
     title: `#${t.ticketNo} ${t.title}`,
     url: `/tickets/${t.id}`,
     type: "ticket" as const
   }));
 
+  const windowLabel = formatWindowLabel(filters?.activityWindow);
   const lines = [`用户：${user.name}（${user.email}）`];
   lines.push(`角色：${user.role} | 在职时长：${Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24 * 30))} 个月`);
   lines.push(`指派工单：${assignedCount} 个 | 创建工单：${createdCount} 个 | 周报：${reportCount} 份`);
 
-  if (recentTickets.length > 0) {
-    lines.push(`\n最近指派（由 创建者 创建）：`);
-    for (const t of recentTickets) {
-      lines.push(`#${t.ticketNo} ${t.title} | ${t.status} | ${t.project.name} | 创建者:${t.creator.name} → /tickets/${t.id}`);
+  if (windowLabel) lines.push(`时间窗口：${windowLabel}`);
+
+  const evidenceWindow = windowLabel ?? "当前查询范围";
+  const hasDirectActivityEvidence = recentNotes.length > 0;
+  lines.push(
+    `\n【归因结论】${evidenceWindow}内${
+      hasDirectActivityEvidence
+        ? "存在该用户本人更新的笔记；除此之外，没有可可靠归因给该用户的工单操作或代码提交证据。"
+        : "没有可可靠归因给该用户本人的工单操作、代码提交或笔记更新证据。"
+    }`,
+  );
+
+  if (mergedRecentTickets.length > 0) {
+    lines.push(
+      `\n【仅表示负责关系，禁止当作个人产出】${evidenceWindow}内被更新的相关工单（目标用户是 assignee 或 creator，但更新者身份未知）：`,
+    );
+    for (const t of mergedRecentTickets) {
+      const updated = new Date(t.updatedAt).toLocaleString("zh-CN");
+      const creatorTag = t.creator?.name ? ` | 创建者:${t.creator.name}` : "";
+      lines.push(
+        `#${t.ticketNo} ${t.title} | ${t.status} | ${t.project.name}${creatorTag} | 工单更新时间 ${updated} | 归因=未知 → /tickets/${t.id}`,
+      );
+    }
+  } else {
+    lines.push(`\n${evidenceWindow}内没有被更新的相关工单。`);
+  }
+
+  if (relatedCommits.length > 0) {
+    lines.push(
+      `\n【仅表示相关工单有代码变更，禁止归因给目标用户】${evidenceWindow}内相关工单的提交：`,
+    );
+    for (const c of relatedCommits) {
+      const committedAt = new Date(c.committedAt).toLocaleString("zh-CN");
+      const ticketRef = c.ticket
+        ? `#${c.ticket.ticketNo} ${c.ticket.title}`
+        : `#${c.ticketNo}`;
+      const url = c.ticket ? `/tickets/${c.ticket.id}` : `/tickets`;
+      lines.push(
+        `${c.commitSha.slice(0, 7)} ${c.subject} | git author 原文: ${c.author} | ${committedAt} | ${ticketRef} | 目标用户归因=未验证 → ${url}`,
+      );
+    }
+  } else {
+    lines.push(`\n${evidenceWindow}内相关工单没有代码提交记录。`);
+  }
+
+  if (recentNotes.length > 0) {
+    lines.push(`\n${windowLabel ? windowLabel + "内" : "最近"}更新的笔记：`);
+    for (const n of recentNotes) {
+      const updated = new Date(n.updatedAt).toLocaleString("zh-CN");
+      const projectTag = n.project?.name ? ` | 项目: ${n.project.name}` : "";
+      lines.push(`《${n.title}》${projectTag} | 更新 ${updated} → /notes/${n.id}`);
     }
   }
 
-  return { summary: lines.join("\n"), sources };
+  return {
+    summary: lines.join("\n"),
+    sources,
+    attribution: {
+      kind: "user_activity",
+      targetUserName: user.name ?? user.email,
+      windowLabel: evidenceWindow,
+      hasDirectEvidence: hasDirectActivityEvidence,
+      directNoteCount: recentNotes.length,
+      relatedTicketCount: mergedRecentTickets.length,
+      relatedCommitCount: relatedCommits.length,
+    },
+  };
+}
+
+/**
+ * Map activityWindow enum to the inclusive lower bound of the time window.
+ * Returns undefined to disable filtering.
+ */
+function getWindowStart(window: Input["filters"] extends infer F ? (F extends { activityWindow?: infer W } ? W : undefined) : undefined): Date | undefined {
+  if (!window) return undefined;
+  const now = new Date();
+  switch (window) {
+    case "today":
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    case "yesterday": {
+      const y = new Date(now);
+      y.setDate(y.getDate() - 1);
+      return new Date(y.getFullYear(), y.getMonth(), y.getDate());
+    }
+    case "this_week": {
+      const d = new Date(now);
+      const day = (d.getDay() + 6) % 7; // 把周一当作一周开始
+      d.setDate(d.getDate() - day);
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    }
+    case "this_month":
+      return new Date(now.getFullYear(), now.getMonth(), 1);
+    case "recent":
+      return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    default:
+      return undefined;
+  }
+}
+
+function formatWindowLabel(window: Input["filters"] extends infer F ? (F extends { activityWindow?: infer W } ? W : undefined) : undefined): string | null {
+  if (!window) return null;
+  const labels: Record<string, string> = {
+    today: "今天",
+    yesterday: "昨天",
+    this_week: "本周",
+    this_month: "本月",
+    recent: "最近 7 天",
+  };
+  return labels[window] ?? null;
 }
 
 async function queryCommit(id: string | undefined, filters: Input["filters"], viewerUserId?: string): Promise<StructuredResult> {
@@ -618,6 +890,7 @@ export const searchStructured = tool({
       return {
         summary: result.summary,
         sources: result.sources,
+        ...(result.attribution ? { attribution: result.attribution } : {}),
         _debug: "structured_with_sources"
       };
     } catch (err) {

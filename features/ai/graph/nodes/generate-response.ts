@@ -23,8 +23,10 @@ function buildSystemPrompt(
     search: `【知识检索模式必须遵守以下规则】
 RULE 1（最高优先级）：先用 searchStructured 快速查询工单、项目、用户等结构化数据。
 RULE 2：如果 searchStructured 结果不够满意，再用 searchKnowledge 做深度语义检索。
-RULE 3：综合所有检索结果回答用户问题。`,
-    auto: `【通用模式】先用 searchStructured 快速查询工单和周报；如果搜索结果不理想，再用 searchKnowledge 做深度语义检索。`,
+RULE 3：综合所有检索结果回答用户问题。
+RULE 4：用户问“某人在做什么 / 最近在干什么 / 周报 / 工作近况”时，type 必须为 user 或 weekly_report，把人名作为 id 传入。`,
+    auto: `【通用模式】先用 searchStructured 快速查询工单和周报；如果搜索结果不理想，再用 searchKnowledge 做深度语义检索。
+用户问“某人在做什么 / 最近在干什么 / 周报 / 工作近况”时，type 必须为 user 或 weekly_report，把人名作为 id 传入。`,
     web: `【联网模式】先用 webSearch 联网搜索；必要时用 searchStructured 查项目内部数据。`,
     chat: ``,
   };
@@ -41,12 +43,61 @@ RULE 3：综合所有检索结果回答用户问题。`,
 - 禁止说“搜索失败 / 检索失败 / 向量搜索失败”：只要工具正常返回（即使 results 为空），就是正常结果，不是错误。
 - 查询结果为空时，说“知识库中未找到相关内容”，而不是“搜索失败”。
 - 只有工具结果明确包含 error 或失败信息时，才能说调用失败。
-- 用户问“某人在做什么 / 最近开发 / 周报 / 工单”时，必须以 searchStructured 查询结果为准。`;
+- 用户问“某人在做什么 / 最近开发 / 周报 / 工单”时，必须以 searchStructured 查询结果为准。
+- 【人员活动归因硬规则】“被指派/负责工单”只代表关系，不代表该用户在窗口内做过操作，也不代表完成了该工单。
+- 只有工具明确标注“该用户本人”或提供可靠 userId 归因的提交、状态变更、评论、笔记，才能说“该用户提交/更新/完成/正在做”。
+- 如果工具写着“归因=未知”“禁止当作个人产出”“目标用户归因=未验证”，回答中绝不能把这些工单或 commit 说成目标用户的工作成果。
+- 当【归因结论】明确没有个人证据时，必须直说“没有可可靠归因给该用户本人的近期产出证据”，不能用被指派工单推断其正在工作。`;
 
   const profileSummary = formatProfile(profile);
   const profileBlock = profileSummary ? `\n${profileSummary}` : "";
 
   return `${duty}\n${style}\n${userContext}${profileBlock}${toolRules}${modeHint}`;
+}
+
+interface UserActivityAttributionResult {
+  kind: "user_activity";
+  targetUserName: string;
+  windowLabel: string;
+  hasDirectEvidence: boolean;
+  directNoteCount: number;
+  relatedTicketCount: number;
+  relatedCommitCount: number;
+}
+
+function getNoDirectActivityConclusion(
+  toolResults: Record<string, unknown> | undefined,
+): string | null {
+  const structured = toolResults?.searchStructured;
+  if (!structured || typeof structured !== "object") return null;
+  const attribution = (structured as { attribution?: unknown }).attribution;
+  if (!attribution || typeof attribution !== "object") return null;
+
+  const result = attribution as Partial<UserActivityAttributionResult>;
+  if (
+    result.kind !== "user_activity" ||
+    result.hasDirectEvidence !== false ||
+    typeof result.targetUserName !== "string" ||
+    typeof result.windowLabel !== "string"
+  ) {
+    return null;
+  }
+
+  const relatedTicketCount =
+    typeof result.relatedTicketCount === "number" ? result.relatedTicketCount : 0;
+  const relatedCommitCount =
+    typeof result.relatedCommitCount === "number" ? result.relatedCommitCount : 0;
+
+  return [
+    `根据结构化数据，${result.windowLabel}没有可可靠归因给${result.targetUserName}本人的近期产出证据。`,
+    "没有查到该用户本人可归因的工单操作、代码提交或笔记更新。",
+    relatedTicketCount > 0
+      ? `系统只查到 ${relatedTicketCount} 个与其负责关系相关、但更新者身份未知的工单，不能据此判断他本人正在处理。`
+      : "没有查到与其负责关系相关的近期工单更新。",
+    relatedCommitCount > 0
+      ? "相关工单存在代码变更，但提交者与该用户的归因未验证，不能说是该用户提交。"
+      : "相关工单也没有代码提交记录。",
+  ].join("\n");
 }
 
 function formatProfile(profile: unknown): string | null {
@@ -147,6 +198,11 @@ export async function generateResponseNode(
         : "";
 
   console.log(`[generateResponseNode] searchResults=${state.searchResults?.length} toolResults=${state.toolResults ? Object.keys(state.toolResults).join(',') : 'none'} mode=${state.mode}`);
+
+  const noDirectActivityConclusion = getNoDirectActivityConclusion(state.toolResults);
+  if (noDirectActivityConclusion) {
+    return { response: noDirectActivityConclusion };
+  }
 
   const systemPrompt = buildSystemPrompt(userName, state.mode, profile);
   const messages = buildMessages(

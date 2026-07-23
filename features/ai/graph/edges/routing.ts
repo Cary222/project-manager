@@ -33,6 +33,8 @@ export function routeByMode(state: AgentState): NextNode {
 
   switch (state.mode) {
     case "search":
+      // 人员近况在 search 模式下也直接走 DB（结构化人员数据更准）。
+      if (isUserActivityQuery(content)) return "searchStructured";
       return "searchKnowledge";
 
     case "auto": {
@@ -41,6 +43,8 @@ export function routeByMode(state: AgentState): NextNode {
         typeof lastMessage?.content === "string"
           ? lastMessage.content
           : "";
+      // 人员近况 → DB 快查
+      if (isUserActivityQuery(content)) return "searchStructured";
       // Deep content / document / note queries → RAG for semantic retrieval
       if (isDeepContentQuery(content)) return "searchKnowledge";
       // Everything else (exact IDs, stats, vcs, workflow) → fast DB
@@ -81,4 +85,17 @@ export function routeToResponse(_state: AgentState): NextNode {
  */
 function isDeepContentQuery(content: string): boolean {
   return /(?:了解|想了解|详情|详细内容|具体内容|文档|需求文档|设计文档|技术文档|需求说明|PRD|需求内容|笔记|记录|说明|资料|光污染|传感器|硬件|功能设计|接口设计)/i.test(content);
+}
+
+/**
+ * Detects people-centric activity queries — "X 最近在干啥 / 本周在做什么".
+ * These go to searchStructured (DB) so the agent can resolve user names to IDs
+ * and surface weekly reports + recently-updated tickets.
+ */
+function isUserActivityQuery(content: string): boolean {
+  const time = "(?:最近|近期|这周|本周|近来|今天|今日|昨天|昨日|前天|上周|这阵子|近几天|前几天)";
+  const activity = "(?:在做什么|在干什么|在干嘛|做了什么|干了什么|做了啥|干了啥|做什么|干什么|开发什么|工作近况|工作内容|工作时间|进展|进度|动态)";
+  return new RegExp(`${time}.{0,12}${activity}`, "i").test(content)
+    || new RegExp(`${activity}.{0,12}${time}`, "i").test(content)
+    || /[\u4e00-\u9fa5A-Za-z0-9_.\-@]{1,30}\s*(?:干了什么|做了啥|做了什么|进展|进度|最近动态)/i.test(content);
 }

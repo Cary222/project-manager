@@ -5,7 +5,14 @@ import { AiChatInput } from "./AiChatInput";
 import { AiMessageBubble } from "./AiMessageBubble";
 import { type SourceReference } from "./AiSourcesList";
 import { AiTypingBubble } from "./AiTypingBubble";
-import { AI_MODE_OPTIONS, type AiMode } from "@/features/ai/lib/types";
+import { AiThinkingTrace } from "./AiThinkingTrace";
+import {
+  AI_MODE_OPTIONS,
+  type AiMode,
+  type ThinkingNodeName,
+  type ThinkingStep,
+  buildStepPlan,
+} from "@/features/ai/lib/types";
 import { shouldUseRag, shouldUseWebSearch } from "@/features/ai/lib/detector";
 import { IconCheck, IconChevronDown, IconEdit, IconPlus, IconSparkles, IconX } from "@/shared/ui/icons";
 
@@ -34,6 +41,41 @@ function formatToolResult(output: unknown): string {
   if (typeof o.answer === "string" && o.answer) return `已获取摘要`;
   if (Array.isArray(o.context) && o.context.length > 0) return `检索到 ${o.context.length} 条相关内容`;
   return "完成";
+}
+
+/**
+ * 把 toolName 映射到 ThinkingStep 的 nodeName。
+ * 工具 SSE 事件只有 toolName（searchKnowledge / searchStructured / webSearch），
+ * 非工具节点通过单独的 SSE 事件标记（text / 流结束）映射。
+ */
+function toolNameToNode(
+  toolName: string,
+): ThinkingNodeName | null {
+  switch (toolName) {
+    case "searchKnowledge":
+      return "searchKnowledge";
+    case "searchStructured":
+      return "searchStructured";
+    case "webSearch":
+      return "webSearch";
+    default:
+      return null;
+  }
+}
+
+function patchStep(
+  steps: ThinkingStep[],
+  nodeName: ThinkingNodeName,
+  patch: (s: ThinkingStep) => ThinkingStep,
+): ThinkingStep[] {
+  return steps.map((s) => (s.nodeName === nodeName ? patch(s) : s));
+}
+
+/** 把仍未触发的 pending 节点标为 skipped（流程结束后清理）。 */
+function markPendingAsSkipped(steps: ThinkingStep[]): ThinkingStep[] {
+  return steps.map((s) =>
+    s.status === "pending" ? { ...s, status: "skipped" as const } : s,
+  );
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -193,6 +235,8 @@ function UserProfilePanel({
   // editing, so the user's unsaved edits don't get clobbered by a refetch
   // (e.g. after switching conversations).
   useEffect(() => {
+    // 外部画像切换时必须重置未编辑草稿，避免跨会话残留；编辑中则保留用户输入。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!editing) setDraft(profile ?? {});
   }, [profile, editing]);
 
@@ -426,6 +470,24 @@ export function AiChatPanel({
     status: "calling" | "done" | "error";
     message?: string;
   } | null>(null);
+  // Tracks every tool call in the current stream so the UI can show a full
+  // "searchKnowledge → searchStructured" pipeline instead of the last tool only.
+  // Use the functional setter form to avoid stale-closure issues when SSE
+  // events arrive in quick succession.
+  const [toolCallChain, setToolCallChain] = useState<Array<{
+    toolName: string;
+    displayLabel: string;
+    status: "calling" | "done" | "error";
+    message?: string;
+  }>>([]);
+  // 完整思考流程面板：覆盖 detectIntent / searchKnowledge / searchStructured /
+  // webSearch / generateResponse 五个节点。`toolCallChain` 仅用于兜底日志。
+  // 同样使用函数式 setter 避免 SSE 快速连发时的 stale-closure。
+  const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([]);
+  /** 控制思考面板是否折叠。undefined 时由组件自动判断（运行中展开、结束折叠）。 */
+  const [thinkingCollapsed, setThinkingCollapsed] = useState<boolean | undefined>(
+    undefined,
+  );
   // Tracks whether the static preset-welcome typewriter is currently running
   // for the active conversation. Used to skip auto-scrolling to the typing
   // indicator while the typewriter is mid-animation.
@@ -697,6 +759,7 @@ export function AiChatPanel({
         );
         setStreamingContent("");
         setPendingSources([]);
+        setToolCallChain([]);
       }
     })();
   }, [
@@ -732,6 +795,16 @@ export function AiChatPanel({
       setIsLoading(true);
       setStreamingContent("");
       setPendingSources([]);
+      setToolCallChain([]);
+      setThinkingCollapsed(undefined);
+      setThinkingSteps(
+        buildStepPlan(aiModeRef.current).map((tpl) => ({
+          nodeName: tpl.nodeName,
+          nodeLabel: tpl.nodeLabel,
+          toolName: tpl.toolName,
+          status: "pending",
+        })),
+      );
 
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -810,11 +883,42 @@ export function AiChatPanel({
                 console.log("[AI] text delta:", parsed.delta);
                 fullContent += parsed.delta;
                 setStreamingContent(fullContent);
+                // 首次产生 token 时，把 detectIntent 标记为已完成、generateResponse
+                // 标记为 running（持续到 done）。这是 LangGraph 节点顺序
+                // 的简化推断：SSE 在 LLM 决定 action 时不会发出单独的
+                // detectIntent 事件，但 token 到来意味着已经走到 generate。
+                const tNow = performance.now();
+                setThinkingSteps((prev) =>
+                  prev.map((s) => {
+                    if (
+                      s.nodeName === "detectIntent" &&
+                      (s.status === "pending" || s.status === "running")
+                    ) {
+                      return {
+                        ...s,
+                        status: "done",
+                        startedAt: s.startedAt ?? tNow,
+                        endedAt: tNow,
+                      };
+                    }
+                    if (s.nodeName === "generateResponse") {
+                      if (s.status === "pending") {
+                        return {
+                          ...s,
+                          status: "running",
+                          startedAt: tNow,
+                        };
+                      }
+                    }
+                    return s;
+                  }),
+                );
               } else if (parsed.type === "sources") {
                 sources = parsed.sources ?? [];
                 setPendingSources(sources);
               } else if (parsed.type === "done") {
                 setActiveToolCall(null);
+                setToolCallChain([]);
                 const assistantMessage: Message = {
                   id: `assistant-${Date.now()}`,
                   role: "assistant",
@@ -825,6 +929,22 @@ export function AiChatPanel({
                 setIsLoading(false);
                 setStreamingContent("");
                 setPendingSources([]);
+                // 全部节点收尾：把仍然 pending 的视为 skipped，仍然 running
+                // 的视为 done（兜底，万一 tool_result 漏了）。
+                const dNow = performance.now();
+                setThinkingSteps((prev) =>
+                  prev.map((s) => {
+                    if (s.status === "pending") {
+                      return { ...s, status: "skipped" };
+                    }
+                    if (s.status === "running" && s.endedAt === undefined) {
+                      return { ...s, status: "done", endedAt: dNow };
+                    }
+                    return s;
+                  }),
+                );
+                // 1.5s 后让面板自动折叠成单行摘要。
+                setTimeout(() => setThinkingCollapsed(true), 1500);
               } else if (parsed.type === "tool_call") {
                 console.log("[AI] tool_call received:", parsed);
                 const toolLabel =
@@ -832,30 +952,146 @@ export function AiChatPanel({
                     ? "联网搜索"
                     : parsed.toolName === "searchKnowledge"
                       ? "知识检索"
-                      : parsed.toolName;
+                      : parsed.toolName === "searchStructured"
+                        ? "数据库查询"
+                        : parsed.toolName;
+                setToolCallChain((prev) => {
+                  // Replace any in-flight entry for the same tool so re-entrant
+                  // calls don't duplicate rows.
+                  const next = prev.filter((c) => c.toolName !== parsed.toolName || c.status !== "calling");
+                  return [
+                    ...next,
+                    {
+                      toolName: parsed.toolName,
+                      displayLabel: toolLabel,
+                      status: "calling",
+                    },
+                  ];
+                });
                 setActiveToolCall({
                   toolName: parsed.toolName,
                   displayLabel: toolLabel,
                   status: "calling",
                 });
                 console.log("[AI] setActiveToolCall:", parsed.toolName);
+                // 思考流程：detectIntent 进入 done，对应工具节点进入 running。
+                const tcNow = performance.now();
+                const nodeName = toolNameToNode(parsed.toolName);
+                setThinkingSteps((prev) => {
+                  const basePrev = prev.map((s) => {
+                    if (
+                      s.nodeName === "detectIntent" &&
+                      (s.status === "pending" || s.status === "running")
+                    ) {
+                      return {
+                        ...s,
+                        status: "done" as const,
+                        startedAt: s.startedAt ?? tcNow,
+                        endedAt: tcNow,
+                      };
+                    }
+                    return s;
+                  });
+                  if (!nodeName) return basePrev;
+                  return patchStep(basePrev, nodeName, (s) =>
+                    s.status === "running" || s.status === "done"
+                      ? s
+                      : { ...s, status: "running", startedAt: tcNow },
+                  );
+                });
               } else if (parsed.type === "tool_result") {
                 console.log("[AI] tool_result received:", parsed);
-                console.log("[AI] activeToolCall:", activeToolCall);
-                console.log("[AI] match?", activeToolCall?.toolName, "===", parsed.toolName);
-                if (activeToolCall?.toolName === parsed.toolName) {
-                  setActiveToolCall((prev) =>
-                    prev ? { ...prev, status: "done", message: formatToolResult(parsed.output) } : null
+                const formatted = formatToolResult(parsed.output);
+                setToolCallChain((prev) => {
+                  const idx = prev.findIndex(
+                    (c) => c.toolName === parsed.toolName && c.status === "calling"
+                  );
+                  if (idx === -1) {
+                    // Result arrived before call (rare); append as done row.
+                    return [
+                      ...prev,
+                      {
+                        toolName: parsed.toolName,
+                        displayLabel: parsed.toolName,
+                        status: "done",
+                        message: formatted,
+                      },
+                    ];
+                  }
+                  const next = prev.slice();
+                  next[idx] = { ...next[idx], status: "done", message: formatted };
+                  return next;
+                });
+                setActiveToolCall((prev) =>
+                  prev && prev.toolName === parsed.toolName
+                    ? { ...prev, status: "done", message: formatted }
+                    : prev
+                );
+                // 思考流程：把对应工具节点标记为 done + 输出。
+                const trNow = performance.now();
+                const nodeName = toolNameToNode(parsed.toolName);
+                if (nodeName) {
+                  setThinkingSteps((prev) =>
+                    patchStep(prev, nodeName, (s) => ({
+                      ...s,
+                      status: "done",
+                      startedAt: s.startedAt ?? trNow,
+                      endedAt: trNow,
+                      output: parsed.output,
+                    })),
                   );
                 }
               } else if (parsed.type === "tool_error") {
-                if (activeToolCall?.toolName === parsed.toolName) {
-                  setActiveToolCall((prev) =>
-                    prev ? { ...prev, status: "error", message: parsed.error } : null
+                const errorMsg = parsed.error;
+                setToolCallChain((prev) => {
+                  const idx = prev.findIndex(
+                    (c) => c.toolName === parsed.toolName && c.status === "calling"
+                  );
+                  if (idx === -1) {
+                    return [
+                      ...prev,
+                      {
+                        toolName: parsed.toolName,
+                        displayLabel: parsed.toolName,
+                        status: "error",
+                        message: errorMsg,
+                      },
+                    ];
+                  }
+                  const next = prev.slice();
+                  next[idx] = { ...next[idx], status: "error", message: errorMsg };
+                  return next;
+                });
+                setActiveToolCall((prev) =>
+                  prev && prev.toolName === parsed.toolName
+                    ? { ...prev, status: "error", message: errorMsg }
+                    : prev
+                );
+                // 思考流程：对应工具节点标 error。
+                const teNow = performance.now();
+                const nodeName = toolNameToNode(parsed.toolName);
+                if (nodeName) {
+                  setThinkingSteps((prev) =>
+                    patchStep(prev, nodeName, (s) => ({
+                      ...s,
+                      status: "error",
+                      startedAt: s.startedAt ?? teNow,
+                      endedAt: teNow,
+                      error: errorMsg,
+                    })),
                   );
                 }
               } else if (parsed.type === "error") {
                 setActiveToolCall(null);
+                setThinkingSteps((prev) =>
+                  markPendingAsSkipped(
+                    prev.map((s) =>
+                      s.status === "running" && s.endedAt === undefined
+                        ? { ...s, status: "error", endedAt: performance.now() }
+                        : s,
+                    ),
+                  ),
+                );
                 throw new Error(parsed.message || "Stream error");
               }
             } catch {
@@ -879,6 +1115,7 @@ export function AiChatPanel({
         setIsLoading(false);
         setStreamingContent("");
         setActiveToolCall(null);
+        setToolCallChain([]);
       }
     },
     [conversationId, onConversationCreated]
@@ -904,6 +1141,7 @@ export function AiChatPanel({
       setIsLoading(false);
       setPendingSources([]);
       setActiveToolCall(null);
+      setToolCallChain([]);
     }
   }, [pendingSources]);
 
@@ -1039,29 +1277,16 @@ export function AiChatPanel({
             <AiTypingBubble text={greetingHint ?? undefined} />
           )}
 
-          {/* Tool call status indicator */}
-          {activeToolCall && (
-            <div
-              className={`mx-4 mb-2 flex items-center gap-2 rounded-lg px-3 py-2 text-xs ${
-                activeToolCall.status === "error"
-                  ? "bg-danger-50 text-danger-700"
-                  : activeToolCall.status === "done"
-                    ? "bg-success-50 text-success-700"
-                    : "bg-brand-50 text-brand-700"
-              }`}
-            >
-              {activeToolCall.status === "calling" && (
-                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-brand-500" />
-              )}
-              {activeToolCall.status === "done" && <IconCheck className="h-3 w-3" />}
-              {activeToolCall.status === "error" && <IconX className="h-3 w-3" />}
-              <span>
-                {activeToolCall.status === "calling" && `正在使用 ${activeToolCall.displayLabel}…`}
-                {activeToolCall.status === "done" && `${activeToolCall.displayLabel} 完成`}
-                {activeToolCall.status === "error" && `${activeToolCall.displayLabel} 失败`}
-                {activeToolCall.message && ` — ${activeToolCall.message}`}
-              </span>
-            </div>
+          {/* Thinking trace — full node pipeline (detectIntent →
+              searchKnowledge / searchStructured / webSearch → generateResponse).
+              Replaces the old single-tool indicator with a complete progress view
+              so the user can see what the AI is doing and how long each step took. */}
+          {thinkingSteps.length > 0 && (
+            <AiThinkingTrace
+              steps={thinkingSteps}
+              collapsed={thinkingCollapsed}
+              onToggle={() => setThinkingCollapsed((c) => !c)}
+            />
           )}
 
           {/* Streaming message */}
