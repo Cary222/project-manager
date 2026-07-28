@@ -6,3 +6,4 @@ export { ReportsDashboard }     from "./ReportsDashboard";
 export { ReportsHealthAi }      from "./ReportsHealthAi";
 export { WeeklyReportsList }    from "./WeeklyReportsList";
 export { WeeklyReportBoard }     from "./WeeklyReportBoard";
+export { MonthlyExpenseBoard }  from "./MonthlyExpenseBoard";

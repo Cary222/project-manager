@@ -11,6 +11,7 @@ datasource db {
 model User {
   id                     String                  @id @default(cuid())
   name                   String?
+  searchName             String?                // 所有变体空格分隔，冗余存储避免运行时计算
   email                  String                  @unique
   emailVerified          DateTime?
   image                  String?
@@ -41,6 +42,7 @@ model User {
   responsibilities       UserResponsibility[]
   uploadedFiles          FileAsset[]
   weeklyReports          WeeklyReport[]
+  monthlyExpenses        MonthlyExpense[]
 
   @@schema("pm")
 }
@@ -556,6 +558,25 @@ model WeeklyReportProject {
   @@schema("pm")
 }
 
+model MonthlyExpense {
+  id           String        @id @default(cuid())
+  userId       String
+  month        String        // "YYYY-MM" 格式，如 "2026-07"
+  expenseType  ExpenseType
+  customType   String?       // 当 expenseType = OTHER 时使用
+  amount       Float
+  description  String
+  attachments  Json?        // FileAttachment[]
+  status       ExpenseStatus @default(ACTIVE)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, month(sort: Desc)])
+  @@index([month(sort: Desc)])
+  @@schema("pm")
+}
+
 /// 用户上传的图片/文件二进制，存 DB 不落本地文件系统。
 /// URL 由 `/api/upload/[id]` 代理返回；这样多实例部署不需要共享磁盘。
 model FileAsset {
@@ -738,6 +759,23 @@ enum FileReferenceSourceType {
   TICKET
   TICKET_COMMENT
   PROJECT
+
+  @@schema("pm")
+}
+
+enum ExpenseType {
+  TRANSPORT  // 交通
+  MEAL       // 餐饮
+  TRAVEL     // 差旅
+  OFFICE     // 办公
+  OTHER      // 其他
+
+  @@schema("pm")
+}
+
+enum ExpenseStatus {
+  ACTIVE
+  DELETED
 
   @@schema("pm")
 }

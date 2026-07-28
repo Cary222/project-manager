@@ -12,6 +12,7 @@ import {
   ReportsProjectHealth,
   ReportsHealthAi,
   WeeklyReportBoard,
+  MonthlyExpenseBoard,
 } from "@/features/reports/ui";
 
 export const dynamic = "force-dynamic";
@@ -63,6 +64,11 @@ export default async function ReportsPage() {
           />
           {/* 本周周报看板 */}
           <WeeklyReportBoard weeklyStats={weeklyStats} />
+        </div>
+
+        {/* 月度报销看板 */}
+        <div className="grid gap-5 lg:grid-cols-2">
+          <MonthlyExpenseBoard />
         </div>
 
         <div className="grid gap-5 lg:grid-cols-2">
