@@ -15,6 +15,11 @@ const updateSchema = z.object({
     mimeType: z.string().optional(),
     size: z.number().optional(),
   })).optional(),
+  // 分摊关联用户列表 [{ userId, shareAmount }]
+  shares: z.array(z.object({
+    userId: z.string(),
+    shareAmount: z.number().optional(),
+  })).optional(),
 });
 
 export async function GET(
@@ -33,12 +38,15 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // 只能查看自己的报销
-  if (expense.userId !== session.user.id) {
+  // 创建者或被关联用户都可以查看
+  const isCreator = expense.userId === session.user.id;
+  const isShared = expense.shares?.some((s) => s.userId === session.user.id);
+
+  if (!isCreator && !isShared) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  return NextResponse.json({ expense });
+  return NextResponse.json({ expense, isCreator });
 }
 
 export async function PATCH(
@@ -70,6 +78,7 @@ export async function PATCH(
       amount: data.amount,
       description: data.description,
       attachments: data.attachments,
+      shares: data.shares?.map((s) => ({ userId: s.userId, shareAmount: s.shareAmount ?? 0 })),
     });
 
     return NextResponse.json({ expense });
@@ -83,6 +92,7 @@ export async function PATCH(
     if (error instanceof Error && error.message === "NOT_FOUND") {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
+    console.error("[api/reports/monthly-expenses/[id]] PATCH error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

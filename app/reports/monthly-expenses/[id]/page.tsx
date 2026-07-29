@@ -24,6 +24,14 @@ export default async function MonthlyExpenseDetailPage({
     notFound();
   }
 
+  // 创建者或被关联用户都可以查看
+  const isCreator = expense.userId === session.user.id;
+  const isShared = expense.shares?.some((s) => s.userId === session.user.id);
+
+  if (!isCreator && !isShared) {
+    redirect("/reports/monthly-expenses");
+  }
+
   return (
     <AppShell
       header={
@@ -36,7 +44,7 @@ export default async function MonthlyExpenseDetailPage({
       }
     >
       <div className="mx-auto max-w-2xl px-0 sm:px-6">
-        <MonthlyExpenseDetailClient expense={expense} />
+        <MonthlyExpenseDetailClient expense={expense} isCreator={isCreator} />
       </div>
     </AppShell>
   );

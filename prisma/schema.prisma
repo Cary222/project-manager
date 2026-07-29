@@ -43,6 +43,7 @@ model User {
   uploadedFiles          FileAsset[]
   weeklyReports          WeeklyReport[]
   monthlyExpenses        MonthlyExpense[]
+  expenseShares          ExpenseShare[]
 
   @@schema("pm")
 }
@@ -560,20 +561,36 @@ model WeeklyReportProject {
 
 model MonthlyExpense {
   id           String        @id @default(cuid())
-  userId       String
+  userId       String        // 创建者
   month        String        // "YYYY-MM" 格式，如 "2026-07"
   expenseType  ExpenseType
   customType   String?       // 当 expenseType = OTHER 时使用
-  amount       Float
+  amount       Float         // 总金额
   description  String
   attachments  Json?        // FileAttachment[]
   status       ExpenseStatus @default(ACTIVE)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shares       ExpenseShare[]
 
   @@index([userId, month(sort: Desc)])
   @@index([month(sort: Desc)])
+  @@schema("pm")
+}
+
+/// 报销分摊记录
+model ExpenseShare {
+  id          String        @id @default(cuid())
+  expenseId   String
+  userId      String
+  shareAmount Float         // 该用户分摊的金额
+  createdAt   DateTime      @default(now())
+  expense     MonthlyExpense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([expenseId, userId])
+  @@index([userId, createdAt(sort: Desc)])
   @@schema("pm")
 }
 

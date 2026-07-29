@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import type { MonthlyExpenseWithUser, ExpenseType } from "@/features/reports/monthly-expenses/lib/monthly-expense-store";
 import { EXPENSE_TYPE_LABELS } from "@/features/reports/monthly-expenses/lib/monthly-expense-store";
-import type { FileAttachment } from "@/shared/lib/pkm";
+import type { FileAttachment } from "@/features/knowledge/lib/pkm";
 
 function formatDate(d: Date | string): string {
   return new Date(d).toLocaleDateString("zh-CN", {
@@ -35,6 +35,19 @@ function ExpenseTypeBadge({ type, customType }: { type: string; customType?: str
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colorClass}`}>
       {label}
     </span>
+  );
+}
+
+function UserAvatar({ user }: { user: { name: string | null; email: string; image: string | null } }) {
+  const initials = user.name?.slice(0, 1) ?? user.email.slice(0, 1);
+  return (
+    <div className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-brand-700 text-[10px] font-medium">
+      {user.image ? (
+        <img src={user.image} alt={user.name ?? user.email} className="h-full w-full rounded-full object-cover" />
+      ) : (
+        initials.toUpperCase()
+      )}
+    </div>
   );
 }
 
@@ -84,59 +97,76 @@ export function MonthlyExpenseList({ initialExpenses }: { initialExpenses: Month
 
   return (
     <div className="space-y-3 pm-fade-in">
-      {expenses.map((expense) => (
-        <div
-          key={expense.id}
-          className="group rounded-xl border border-ink-200 bg-white p-4 shadow-sm transition hover:border-ink-300 hover:shadow lg:p-5"
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <Link href={`/reports/monthly-expenses/${expense.id}`} className="block">
-                  <h3 className="text-base font-medium text-ink-900 hover:text-brand-600">
-                    {formatAmount(expense.amount)}
-                  </h3>
+      {expenses.map((expense) => {
+        const shares = expense.shares ?? [];
+        const participantCount = shares.length + 1; // 创建者 + 关联用户
+
+        return (
+          <div
+            key={expense.id}
+            className="group rounded-xl border border-ink-200 bg-white p-4 shadow-sm transition hover:border-ink-300 hover:shadow lg:p-5"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <Link href={`/reports/monthly-expenses/${expense.id}`} className="block">
+                    <h3 className="text-base font-medium text-ink-900 hover:text-brand-600">
+                      {formatAmount(expense.amount)}
+                    </h3>
+                  </Link>
+                  <ExpenseTypeBadge type={expense.expenseType} customType={expense.customType} />
+                </div>
+
+                <p className="mt-1.5 line-clamp-2 text-sm text-ink-600">
+                  {expense.description}
+                </p>
+
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-ink-500">
+                  <span>{expense.month}</span>
+                  <span>{formatDate(expense.createdAt)}</span>
+                  {/* 参与者 */}
+                  <div className="flex items-center gap-1">
+                    <div className="flex -space-x-1">
+                      <UserAvatar user={expense.user!} />
+                      {shares.slice(0, 3).map((s) => (
+                        <UserAvatar key={s.id} user={s.user} />
+                      ))}
+                    </div>
+                    {participantCount > 1 && (
+                      <span className="text-ink-400">{participantCount}人</span>
+                    )}
+                  </div>
+                  {Array.isArray(expense.attachments) && expense.attachments.length > 0 && (
+                    <span className="inline-flex items-center gap-1">
+                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                      </svg>
+                      {expense.attachments.length}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-2">
+                <Link
+                  href={`/reports/monthly-expenses/${expense.id}`}
+                  className="rounded-lg border border-ink-300 bg-white px-4 py-2 text-sm font-medium text-ink-700 transition hover:bg-ink-100"
+                >
+                  查看
                 </Link>
-                <ExpenseTypeBadge type={expense.expenseType} customType={expense.customType} />
+                <button
+                  type="button"
+                  onClick={() => handleDelete(expense.id)}
+                  disabled={deletingId === expense.id}
+                  className="rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {deletingId === expense.id ? "删除中..." : "删除"}
+                </button>
               </div>
-
-              <p className="mt-1.5 line-clamp-2 text-sm text-ink-600">
-                {expense.description}
-              </p>
-
-              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-ink-500">
-                <span>{expense.month}</span>
-                <span>{formatDate(expense.createdAt)}</span>
-                {Array.isArray(expense.attachments) && expense.attachments.length > 0 && (
-                  <span className="inline-flex items-center gap-1">
-                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                    </svg>
-                    {expense.attachments.length}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="flex shrink-0 items-center gap-2">
-              <Link
-                href={`/reports/monthly-expenses/${expense.id}`}
-                className="rounded-lg border border-ink-300 bg-white px-4 py-2 text-sm font-medium text-ink-700 transition hover:bg-ink-100"
-              >
-                查看
-              </Link>
-              <button
-                type="button"
-                onClick={() => handleDelete(expense.id)}
-                disabled={deletingId === expense.id}
-                className="rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {deletingId === expense.id ? "删除中..." : "删除"}
-              </button>
             </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

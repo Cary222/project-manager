@@ -15,6 +15,12 @@ const createSchema = z.object({
     mimeType: z.string().optional(),
     size: z.number().optional(),
   })).optional(),
+  // 分摊关联用户列表 [{ userId, shareAmount }]
+  // shareAmount 为可选，如不提供则自动均分
+  shares: z.array(z.object({
+    userId: z.string(),
+    shareAmount: z.number().optional(),
+  })).optional(),
 });
 
 export async function GET(request: NextRequest) {
@@ -59,6 +65,7 @@ export async function POST(request: NextRequest) {
       amount: data.amount,
       description: data.description,
       attachments: data.attachments,
+      shares: data.shares?.map((s) => ({ userId: s.userId, shareAmount: s.shareAmount ?? 0 })),
     });
 
     return NextResponse.json({ expense }, { status: 201 });
@@ -69,6 +76,7 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    console.error("[api/reports/monthly-expenses] POST error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
