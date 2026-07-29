@@ -432,6 +432,7 @@ interface ExpenseStatsResponse {
     total: number;
     count: number;
     byType: { type: string; label: string; count: number; total: number }[];
+    byPerson?: { userId: string; name: string | null; email: string; image: string | null; count: number; total: number }[];
   };
 }
 
@@ -442,6 +443,8 @@ function formatExpenseAmount(amount: number): string {
 }
 
 function ExpenseTabContent({ period }: { period: Period }) {
+  const [viewMode, setViewMode] = useState<"type" | "person">("type");
+
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const month =
@@ -452,17 +455,24 @@ function ExpenseTabContent({ period }: { period: Period }) {
         : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
   const { data, isLoading } = useSWR<ExpenseStatsResponse>(
-    `/api/reports/monthly-expenses/stats?month=${month}`,
+    `/api/reports/monthly-expenses/stats?month=${month}&groupBy=${viewMode}`,
     fetchJson,
     { refreshInterval: 30000, keepPreviousData: true },
   );
 
   const summary = data?.summary;
   const byType = summary?.byType ?? [];
+  const byPerson = summary?.byPerson ?? [];
 
   const pieData = byType
     .filter((t) => t.total > 0)
     .map((t) => ({ name: t.label, value: Math.round(t.total * 100) / 100 }));
+
+  const barData = byPerson.map((p) => ({
+    name: p.name ?? p.email.split("@")[0],
+    total: Math.round(p.total * 100) / 100,
+    count: p.count,
+  }));
 
   return (
     <div>
@@ -471,75 +481,159 @@ function ExpenseTabContent({ period }: { period: Period }) {
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
         </div>
       ) : summary && summary.count > 0 ? (
-        <div className="grid gap-6 lg:grid-cols-2">
-          {/* 饼图 */}
-          <div>
-            <p className="mb-2 text-xs text-ink-500">报销类型分布</p>
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={90}
-                  paddingAngle={3}
-                  dataKey="value"
-                  label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
-                  labelLine={{ stroke: "#9ca3af", strokeWidth: 1 }}
-                >
-                  {pieData.map((_, index) => (
-                    <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  formatter={(value: any) => [formatExpenseAmount(Number(value)), "金额"]}
-                  contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-              </PieChart>
-            </ResponsiveContainer>
+        <div>
+          {/* 分段切换按钮 */}
+          <div className="flex gap-1 rounded-lg bg-ink-100 p-1 mb-4">
+            {(["type", "person"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setViewMode(m)}
+                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 ${
+                  viewMode === m
+                    ? "bg-white text-ink-900 shadow-sm"
+                    : "text-ink-500 hover:text-ink-700"
+                }`}
+              >
+                {m === "type" ? "按类型" : "按人员"}
+              </button>
+            ))}
           </div>
-          {/* 明细表格 */}
-          <div>
-            <p className="mb-2 text-xs text-ink-500">报销明细</p>
-            <div className="rounded-lg border border-ink-200 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-ink-50">
-                    <th className="px-3 py-2 text-left font-medium text-ink-600">类型</th>
-                    <th className="px-3 py-2 text-right font-medium text-ink-600">笔数</th>
-                    <th className="px-3 py-2 text-right font-medium text-ink-600">金额</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {byType.map((t, i) => (
-                    <tr key={t.type} className={i % 2 === 0 ? "bg-white" : "bg-ink-50/50"}>
-                      <td className="px-3 py-2">
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className="h-2 w-2 rounded-full"
-                            style={{ backgroundColor: PIE_COLORS[byType.indexOf(t) % PIE_COLORS.length] }}
-                          />
-                          <span className="text-ink-700">{t.label}</span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 text-right text-ink-600">{t.count}</td>
-                      <td className="px-3 py-2 text-right font-medium text-ink-900">
-                        {formatExpenseAmount(t.total)}
-                      </td>
-                    </tr>
-                  ))}
-                  <tr className="border-t border-ink-200 bg-brand-50 font-semibold">
-                    <td className="px-3 py-2 text-ink-700">合计</td>
-                    <td className="px-3 py-2 text-right text-ink-700">{summary.count}</td>
-                    <td className="px-3 py-2 text-right text-brand-700">{formatExpenseAmount(summary.total)}</td>
-                  </tr>
-                </tbody>
-              </table>
+
+          {viewMode === "type" ? (
+            <div className="grid gap-6 lg:grid-cols-2">
+              {/* 饼图 */}
+              <div>
+                <p className="mb-2 text-xs text-ink-500">报销类型分布</p>
+                <ResponsiveContainer width="100%" height={260}>
+                  <PieChart>
+                    <Pie
+                      data={pieData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={90}
+                      paddingAngle={3}
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
+                      labelLine={{ stroke: "#9ca3af", strokeWidth: 1 }}
+                    >
+                      {pieData.map((_, index) => (
+                        <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      formatter={(value: any) => [formatExpenseAmount(Number(value)), "金额"]}
+                      contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              {/* 明细表格 */}
+              <div>
+                <p className="mb-2 text-xs text-ink-500">报销明细</p>
+                <div className="rounded-lg border border-ink-200 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-ink-50">
+                        <th className="px-3 py-2 text-left font-medium text-ink-600">类型</th>
+                        <th className="px-3 py-2 text-right font-medium text-ink-600">笔数</th>
+                        <th className="px-3 py-2 text-right font-medium text-ink-600">金额</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {byType.map((t, i) => (
+                        <tr key={t.type} className={i % 2 === 0 ? "bg-white" : "bg-ink-50/50"}>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className="h-2 w-2 rounded-full"
+                                style={{ backgroundColor: PIE_COLORS[byType.indexOf(t) % PIE_COLORS.length] }}
+                              />
+                              <span className="text-ink-700">{t.label}</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 text-right text-ink-600">{t.count}</td>
+                          <td className="px-3 py-2 text-right font-medium text-ink-900">
+                            {formatExpenseAmount(t.total)}
+                          </td>
+                        </tr>
+                      ))}
+                      <tr className="border-t border-ink-200 bg-brand-50 font-semibold">
+                        <td className="px-3 py-2 text-ink-700">合计</td>
+                        <td className="px-3 py-2 text-right text-ink-700">{summary.count}</td>
+                        <td className="px-3 py-2 text-right text-brand-700">{formatExpenseAmount(summary.total)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="grid gap-6 lg:grid-cols-2">
+              {/* 人员柱状图 */}
+              <div>
+                <p className="mb-2 text-xs text-ink-500">报销人员分布</p>
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart
+                    data={barData}
+                    layout="vertical"
+                    margin={{ top: 5, right: 30, left: 10, bottom: 5 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis type="number" tick={{ fontSize: 10 }} stroke="#9ca3af" tickFormatter={(v) => `¥${v}`} />
+                    <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} stroke="#9ca3af" width={80} />
+                    <Tooltip
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      formatter={(value: any) => [formatExpenseAmount(Number(value)), "金额"]}
+                      labelStyle={{ fontSize: 12 }}
+                      contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                    />
+                    <Bar dataKey="total" name="金额" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              {/* 人员明细表格 */}
+              <div>
+                <p className="mb-2 text-xs text-ink-500">人员报销明细</p>
+                <div className="rounded-lg border border-ink-200 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-ink-50">
+                        <th className="px-3 py-2 text-left font-medium text-ink-600">人员</th>
+                        <th className="px-3 py-2 text-right font-medium text-ink-600">笔数</th>
+                        <th className="px-3 py-2 text-right font-medium text-ink-600">金额</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {byPerson.map((p, i) => (
+                        <tr key={p.userId} className={i % 2 === 0 ? "bg-white" : "bg-ink-50/50"}>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-1.5">
+                              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[10px] font-medium text-brand-600">
+                                {(p.name ?? p.email)[0]?.toUpperCase() ?? "?"}
+                              </span>
+                              <span className="text-ink-700">{p.name ?? p.email}</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 text-right text-ink-600">{p.count}</td>
+                          <td className="px-3 py-2 text-right font-medium text-ink-900">
+                            {formatExpenseAmount(p.total)}
+                          </td>
+                        </tr>
+                      ))}
+                      <tr className="border-t border-ink-200 bg-brand-50 font-semibold">
+                        <td className="px-3 py-2 text-ink-700">合计</td>
+                        <td className="px-3 py-2 text-right text-ink-700">{summary.count}</td>
+                        <td className="px-3 py-2 text-right text-brand-700">{formatExpenseAmount(summary.total)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="flex h-[300px] flex-col items-center justify-center rounded-lg border border-dashed border-ink-200 bg-ink-50 text-center">

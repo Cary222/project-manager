@@ -1,18 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import useSWR from "swr";
 import { fetchJson } from "@/shared/api/fetch-json";
 import { MonthlyExpenseList } from "@/features/reports/monthly-expenses/ui/MonthlyExpenseList";
 import type { MonthlyExpenseWithUser } from "@/features/reports/monthly-expenses/lib/monthly-expense-store";
-
-interface ExpenseSummary {
-  type: string;
-  label: string;
-  count: number;
-  total: number;
-}
 
 interface ExpenseUser {
   id: string;
@@ -25,16 +18,30 @@ interface MonthlyStatsResponse {
   month: string;
   expenses: {
     id: string;
+    userId: string;
     amount: number;
     expenseType: string;
     description: string;
     createdAt: string;
     user: ExpenseUser;
+    shares?: {
+      id: string;
+      userId: string;
+      shareAmount: number;
+      user: ExpenseUser;
+    }[];
   }[];
   summary: {
     total: number;
     count: number;
-    byType: ExpenseSummary[];
+    byPerson?: {
+      userId: string;
+      name: string | null;
+      email: string;
+      image: string | null;
+      count: number;
+      total: number;
+    }[];
   };
 }
 
@@ -42,13 +49,16 @@ function formatAmount(amount: number): string {
   return `¥${amount.toFixed(2)}`;
 }
 
-const TYPE_COLORS: Record<string, { bg: string; text: string }> = {
-  TRANSPORT: { bg: "bg-blue-100", text: "text-blue-700" },
-  MEAL: { bg: "bg-orange-100", text: "text-orange-700" },
-  TRAVEL: { bg: "bg-purple-100", text: "text-purple-700" },
-  OFFICE: { bg: "bg-green-100", text: "text-green-700" },
-  OTHER: { bg: "bg-gray-100", text: "text-gray-700" },
-};
+function PersonAvatar({ src, name, email }: { src: string | null; name: string | null; email: string }) {
+  const initial = (name ?? email).slice(0, 1).toUpperCase();
+  return src ? (
+    <img src={src} alt={name ?? email} className="h-6 w-6 rounded-full border border-white object-cover" />
+  ) : (
+    <div className="flex h-6 w-6 items-center justify-center rounded-full border border-white bg-brand-100 text-xs font-medium text-brand-600">
+      {initial}
+    </div>
+  );
+}
 
 function MonthSwitcher({
   month,
@@ -148,8 +158,8 @@ export function MonthlyExpenseBoard() {
   const [month, setMonth] = useState(currentMonth);
   const [listExpanded, setListExpanded] = useState(false);
 
-  const { data, isLoading } = useSWR<MonthlyStatsResponse & { expenses?: MonthlyExpenseWithUser[] }>(
-    `/api/reports/monthly-expenses/stats?month=${month}`,
+  const { data, isLoading } = useSWR<MonthlyStatsResponse>(
+    `/api/reports/monthly-expenses/stats?month=${month}&groupBy=person`,
     fetchJson,
     { refreshInterval: 30000, keepPreviousData: true },
   );
@@ -157,8 +167,8 @@ export function MonthlyExpenseBoard() {
   const summary = data?.summary;
   const total = summary?.total ?? 0;
   const count = summary?.count ?? 0;
-  const byType = summary?.byType ?? [];
   const expenses = data?.expenses ?? [];
+  const byPerson = summary?.byPerson ?? [];
 
   return (
     <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
@@ -204,33 +214,33 @@ export function MonthlyExpenseBoard() {
       {/* 月度报销列表 - 可折叠 */}
       {listExpanded && (
         <div className="mb-4 rounded-lg border border-ink-200 bg-ink-50 p-3 pm-fade-in">
-          <MonthlyExpenseList initialExpenses={expenses} />
+          <MonthlyExpenseList initialExpenses={expenses as unknown as Parameters<typeof MonthlyExpenseList>[0]["initialExpenses"]} />
         </div>
       )}
 
-      {/* 类型分布 */}
-      {byType.length > 0 ? (
+      {/* 报销人员 */}
+      {byPerson.length > 0 && (
         <div className="mt-4 border-t border-ink-100 pt-4">
-          <p className="mb-2 text-xs text-ink-500">报销类型分布</p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-            {byType.map((item) => {
-              const colors = TYPE_COLORS[item.type] ?? { bg: "bg-gray-100", text: "text-gray-700" };
-              return (
-                <div
-                  key={item.type}
-                  className={`rounded-lg ${colors.bg} p-2.5`}
-                >
-                  <div className={`text-xs font-medium ${colors.text}`}>{item.label}</div>
-                  <div className={`text-lg font-bold ${colors.text}`}>
-                    {formatAmount(item.total)}
-                  </div>
-                  <div className={`text-xs ${colors.text} opacity-75`}>{item.count} 笔</div>
-                </div>
-              );
-            })}
+          <p className="mb-2 text-xs text-ink-500">
+            报销人员 ({byPerson.length})
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {byPerson.map((p) => (
+              <Link
+                key={p.userId}
+                href={`/team/${p.userId}`}
+                className="flex items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-2 py-1 text-xs transition-colors hover:border-brand-300 hover:bg-brand-50"
+              >
+                <PersonAvatar src={p.image} name={p.name} email={p.email} />
+                <span className="text-ink-700">{p.name ?? p.email.split("@")[0]}</span>
+                <span className="text-ink-400">{p.count}笔</span>
+              </Link>
+            ))}
           </div>
         </div>
-      ) : (
+      )}
+
+      {count === 0 && (
         <div className="mt-4 rounded-lg border border-dashed border-ink-200 bg-ink-50 p-6 text-center">
           <p className="text-sm text-ink-500">本月暂无报销记录</p>
         </div>

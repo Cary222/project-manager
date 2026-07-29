@@ -158,7 +158,7 @@ export function MonthlyExpenseList({ initialExpenses }: { initialExpenses: Month
                   href={`/reports/monthly-expenses/${expense.id}`}
                   className="rounded-lg border border-ink-200 bg-ink-50 px-3 py-1.5 text-sm text-ink-600 transition-colors hover:bg-brand-50 hover:text-brand-600"
                 >
-                  查看月报
+                  查看
                 </Link>
                 <button
                   type="button"

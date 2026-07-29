@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { prisma } from "@/shared/db/client";
 
 async function fixExpenseShares() {
   console.log("开始修复报销分摊金额...\n");

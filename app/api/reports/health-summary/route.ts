@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { prisma } from "@/shared/db/client";
 import {
   getReportsStats,
   getWeeklyStats,
@@ -123,6 +124,47 @@ export async function GET(request: NextRequest) {
         ? `${reportMissingNames}${missing.length > 2 ? "等" : ""}（${missing.length}人）`
         : "本周周报已全部提交";
 
+    // 月度报销情况（复用 Prisma groupBy 查询）
+    const now = new Date();
+    const expenseMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+    // 月度报销情况（复用 ExpenseShare 的权威分摊金额）
+    const expenseExpenses = await prisma.monthlyExpense.findMany({
+      where: { month: expenseMonth, status: "ACTIVE" },
+      include: {
+        shares: {
+          include: { user: { select: { id: true, name: true } } },
+        },
+      },
+    });
+
+    const expensePersonMap: Record<string, { userId: string; name: string | null; total: number; count: number }> = {};
+    let expenseTotal = 0;
+    let expenseCount = 0;
+
+    for (const e of expenseExpenses) {
+      expenseCount++;
+      expenseTotal += e.amount;
+
+      for (const sh of e.shares) {
+        if (!expensePersonMap[sh.userId]) {
+          expensePersonMap[sh.userId] = { userId: sh.userId, name: null, total: 0, count: 0 };
+        }
+        expensePersonMap[sh.userId].total += sh.shareAmount;
+        expensePersonMap[sh.userId].count++;
+        if (!expensePersonMap[sh.userId].name) {
+          expensePersonMap[sh.userId].name = sh.user?.name ?? null;
+        }
+      }
+    }
+
+    const sortedPersons = Object.values(expensePersonMap).sort((a, b) => b.total - a.total);
+    const topPerson = sortedPersons[0];
+
+    const expenseSummary = `### 月度报销情况
+- 本月报销总额 **¥${expenseTotal.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}**（共 ${expenseCount} 笔）
+${topPerson?.name ? `- 💰 报销最多：**${topPerson.name}**（¥${topPerson.total.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}，${topPerson.count} 笔）` : ""}`;
+
     const summary = `## 📊 团队健康度总结
 
 **综合评分：${healthScore}分**（基于项目健康度 + 任务完成率）
@@ -142,6 +184,8 @@ ${monthlyText ? `- ${monthlyText}` : ""}
 
 ### 成员贡献
 ${contributor || "暂无贡献数据"}
+
+${expenseSummary}
 
 ---
 ${advice}`;
