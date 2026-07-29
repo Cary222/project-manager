@@ -25,13 +25,35 @@ import type {
   DailyTrend,
   MonthlyTrend,
 } from "@/features/reports/lib/reports-store";
+
+type ProjectHealthDetail = {
+  id: string;
+  name: string;
+  progress: number;
+  status: "good" | "normal" | "attention" | "risk";
+};
+
+const STATUS_TONE: Record<ProjectHealthDetail["status"], string> = {
+  good:      "bg-emerald-500",
+  normal:    "bg-brand-500",
+  attention: "bg-amber-500",
+  risk:      "bg-red-500",
+};
+
+const STATUS_LABEL: Record<ProjectHealthDetail["status"], string> = {
+  good:      "良好",
+  normal:    "正常",
+  attention: "关注",
+  risk:      "风险",
+};
 import { fetchJson } from "@/shared/api/fetch-json";
 
 type Period = "week" | "month" | "halfYear";
-type Tab = "overview" | "delivery" | "report" | "contribution" | "expense";
+type Tab = "overview" | "delivery" | "report" | "contribution" | "expense" | "project";
 
 const TABS: { value: Tab; label: string }[] = [
   { value: "overview", label: "综合情况" },
+  { value: "project", label: "项目情况" },
   { value: "delivery", label: "交付情况" },
   { value: "report", label: "周报情况" },
   { value: "contribution", label: "贡献情况" },
@@ -113,10 +135,12 @@ export function ReportsDashboard({
   weeklyStats,
   monthlyStats,
   halfYearStats,
+  projectHealth,
 }: {
   weeklyStats: WeeklyStats;
   monthlyStats: WeeklyStats;
   halfYearStats: WeeklyStats;
+  projectHealth: ProjectHealthDetail[];
 }) {
   const [period, setPeriod] = useState<Period>("week");
   const [activeTab, setActiveTab] = useState<Tab>("overview");
@@ -161,7 +185,7 @@ export function ReportsDashboard({
     }));
 
   return (
-    <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+    <section className="flex h-full flex-col rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
       {/* 标题栏 */}
       <div className="mb-4 flex items-center justify-between">
         {/* Tab 切换 */}
@@ -348,6 +372,56 @@ export function ReportsDashboard({
       )}
 
       {activeTab === "expense" && <ExpenseTabContent period={period} />}
+
+      {activeTab === "project" && (
+        <div>
+          <div className="mb-2 flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-brand-500" />
+            <span className="text-xs text-ink-500">项目进度一览</span>
+          </div>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart
+              data={projectHealth}
+              layout="vertical"
+              margin={{ top: 5, right: 30, left: 0, bottom: 5 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10 }} stroke="#9ca3af" unit="%" />
+              <YAxis
+                type="category"
+                dataKey="name"
+                tick={{ fontSize: 10 }}
+                stroke="#9ca3af"
+                width={80}
+              />
+              <Tooltip
+                contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                formatter={(value: any) => [`${value}%`, "进度"]}
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                labelFormatter={(label: any) => String(label)}
+              />
+              <Bar
+                dataKey="progress"
+                radius={[0, 4, 4, 0]}
+                maxBarSize={20}
+              >
+                {projectHealth.map((entry, index) => (
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={
+                      entry.status === "good" ? "#10b981" :
+                      entry.status === "normal" ? "#3b82f6" :
+                      entry.status === "attention" ? "#f59e0b" :
+                      "#ef4444"
+                    }
+                  />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </section>
   );
 }

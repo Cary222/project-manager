@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { MarkdownContent } from "@/shared/ui/MarkdownContent";
 import { useToast } from "@/shared/lib/use-toast";
 
 type HealthSummary = {
@@ -48,7 +49,7 @@ export function ReportsHealthAi() {
   }, [fetchSummary]);
 
   return (
-    <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+    <section className="flex h-full flex-col rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="font-medium flex items-center gap-2">
           <span>AI 健康度总结</span>
@@ -68,14 +69,14 @@ export function ReportsHealthAi() {
       {error ? (
         <p className="text-sm text-red-500">{error}</p>
       ) : loading && !summary ? (
-        <div className="space-y-2">
+        <div className="flex flex-1 flex-col justify-center space-y-2">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-4 w-full animate-pulse rounded bg-ink-100" />
           ))}
         </div>
       ) : summary ? (
-        <div className="prose prose-sm max-w-none text-ink-600">
-          <div dangerouslySetInnerHTML={{ __html: renderMarkdown(summary.summary) }} />
+        <div className="flex-1 overflow-y-auto">
+          <MarkdownContent content={summary.summary} />
           {summary.generatedAt && (
             <p className="mt-3 text-xs text-ink-400">
               生成于 {new Date(summary.generatedAt).toLocaleString("zh-CN")}
@@ -85,14 +86,4 @@ export function ReportsHealthAi() {
       ) : null}
     </section>
   );
-}
-
-/** Minimal markdown-to-HTML (bold + newline, no deps needed) */
-function renderMarkdown(text: string): string {
-  return text
-    .replace(/## (.+)/g, "<h2 class='text-base font-semibold mt-3 mb-1'>$1</h2>")
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/^> (.+)/gm, "<blockquote class='border-l-2 border-ink-200 pl-3 italic text-ink-400'>$1</blockquote>")
-    .replace(/\n\n/g, "<br/>")
-    .replace(/\n/g, " ");
 }
