@@ -116,7 +116,7 @@ export function MonthlyExpenseDetailClient({ expense, isCreator = false }: Month
     },
     ...previewShares.map((s) => ({
       user: s.user,
-      shareAmount: s.shareAmount,
+      shareAmount: getPreviewShareAmount(expense.amount, totalParticipants),
       isCreator: false,
     })),
   ];
