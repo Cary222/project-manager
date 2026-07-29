@@ -102,6 +102,9 @@ export function MonthlyExpenseList({ initialExpenses }: { initialExpenses: Month
         // 过滤掉创建者，只保留其他关联用户（避免重复显示）
         const otherShares = shares.filter((s) => s.userId !== expense.userId);
         const participantCount = 1 + otherShares.length; // 创建者 + 其他用户
+        // 计算本人的分摊金额
+        const myShare = shares.find((s) => s.userId === expense.userId);
+        const myShareAmount = myShare?.shareAmount ?? (participantCount > 0 ? expense.amount / participantCount : expense.amount);
 
         return (
           <div
@@ -113,7 +116,7 @@ export function MonthlyExpenseList({ initialExpenses }: { initialExpenses: Month
                 <div className="flex items-center gap-2">
                   <Link href={`/reports/monthly-expenses/${expense.id}`} className="block">
                     <h3 className="text-base font-medium text-ink-900 hover:text-brand-600">
-                      {formatAmount(expense.amount)}
+                      {formatAmount(myShareAmount)}
                     </h3>
                   </Link>
                   <ExpenseTypeBadge type={expense.expenseType} customType={expense.customType} />
@@ -122,6 +125,10 @@ export function MonthlyExpenseList({ initialExpenses }: { initialExpenses: Month
                 <p className="mt-1.5 line-clamp-2 text-sm text-ink-600">
                   {expense.description}
                 </p>
+                <div className="mt-1 flex items-center gap-2 text-xs text-ink-400">
+                  <span>总金额 {formatAmount(expense.amount)}</span>
+                  {participantCount > 1 && <span>{participantCount}人分摊</span>}
+                </div>
 
                 <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-ink-500">
                   <span>{expense.month}</span>
@@ -134,9 +141,6 @@ export function MonthlyExpenseList({ initialExpenses }: { initialExpenses: Month
                         <UserAvatar key={s.id} user={s.user} />
                       ))}
                     </div>
-                    {participantCount > 1 && (
-                      <span className="text-ink-400">{participantCount}人</span>
-                    )}
                   </div>
                   {Array.isArray(expense.attachments) && expense.attachments.length > 0 && (
                     <span className="inline-flex items-center gap-1">
