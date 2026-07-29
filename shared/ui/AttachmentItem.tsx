@@ -1,6 +1,6 @@
 "use client";
 
-import { type FileAttachment } from "@/shared/lib/pkm";
+import { type FileAttachment } from "@/features/knowledge/lib/pkm";
 import { type PreviewableFile } from "@/shared/ui/DocumentPreviewModal";
 
 export type { PreviewableFile };

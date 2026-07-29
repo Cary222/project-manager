@@ -12,7 +12,7 @@ import {
 import { requireRoot, requireSession, requireDesignResponsibility } from "@/shared/lib/permissions";
 import { createModerationLog } from "@/features/admin/moderation";
 import { syncTicketCounterAfterDelete } from "@/entities/ticket/lib/ticket-counter";
-import { enqueueIndexJob } from "@/shared/lib/jobs";
+import { enqueueIndexJob } from "@/worker/lib/jobs";
 import {
   buildAssignedNotification,
   buildCompletedNotification,

@@ -10,9 +10,9 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
-import { splitIntoChunks } from "@/shared/lib/chunk";
-import { fetchEmbeddingsBatch } from "@/shared/lib/embedding";
-import type { FileReferenceSourceType } from "@/shared/lib/file-reference";
+import { splitIntoChunks } from "@/features/knowledge/lib/chunk";
+import { fetchEmbeddingsBatch } from "@/features/knowledge/lib/embedding";
+import type { FileReferenceSourceType } from "@/features/knowledge/lib/file-reference";
 
 /**
  * 将 number[] 向量转换为 PostgreSQL vector 字面量。

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/shared/db/client";
 import { requireRoot, requireSession } from "@/shared/lib/permissions";
+import { buildUserSearchTerms } from "@/features/profile/lib/user-search";
 
 function getSystemSettingModel() {
   return (prisma as typeof prisma & {
@@ -97,7 +98,7 @@ export async function updateProfileAction(
 
   await prisma.user.update({
     where: { id: session.user.id },
-    data: { name: trimmed },
+    data: { name: trimmed, searchName: buildUserSearchTerms(trimmed) },
   });
 
   revalidatePath("/admin/settings");

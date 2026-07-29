@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { AppShell } from "@/shared/ui/AppShell";
 import { BackPageHeader } from "@/shared/ui/headers";
 import { WeeklyReportForm } from "@/features/reports/weekly-reports/ui/WeeklyReportForm";
-import { getWeekRange } from "@/shared/lib/week";
+import { getWeekRange } from "@/features/weekly-reports/lib/week";
 
 export const dynamic = "force-dynamic";
 

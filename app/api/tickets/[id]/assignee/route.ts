@@ -14,7 +14,7 @@ import {
   createManyNotifications,
   listRootUserIds,
 } from "@/features/admin/notifications-lib";
-import { enqueueIndexJob } from "@/shared/lib/jobs";
+import { enqueueIndexJob } from "@/worker/lib/jobs";
 
 export async function PATCH(
   request: Request,

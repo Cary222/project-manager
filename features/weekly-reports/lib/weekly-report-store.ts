@@ -1,6 +1,6 @@
 import { prisma } from "@/shared/db/client";
 import type { WeeklyReport } from "@prisma/client";
-import type { FileAttachment } from "@/shared/lib/pkm";
+import type { FileAttachment } from "@/features/knowledge/lib/pkm";
 
 export type WeeklyReportWithProjects = WeeklyReport & {
   projects: { id: string; name: string }[];

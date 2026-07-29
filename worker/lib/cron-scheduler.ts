@@ -17,7 +17,7 @@
 import { TicketStatus } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
 import { createModerationLog } from "@/features/admin/moderation";
-import { runProfileCleanup } from "@/features/ai/lib/profile-cleanup";
+import { runProfileCleanup } from "@/features/ai/jobs/profile-cleanup";
 
 let __started = false;
 let __intervalId: ReturnType<typeof setInterval> | null = null;

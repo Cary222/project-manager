@@ -4,7 +4,7 @@ import { AppShell } from "@/shared/ui/AppShell";
 import { MarkdownContent } from "@/shared/ui/MarkdownContent";
 import { IconArrowLeft, IconKnowledge, IconTag } from "@/shared/ui/icons";
 import { prisma } from "@/shared/db/client";
-import { type FileAttachment } from "@/shared/lib/pkm";
+import { type FileAttachment } from "@/features/knowledge/lib/pkm";
 import { requireSession } from "@/shared/lib/permissions";
 import { NoteAttachments } from "@/features/knowledge/ui/NoteAttachments";
 import { NoteDetailRecord } from "./NoteDetailRecord";

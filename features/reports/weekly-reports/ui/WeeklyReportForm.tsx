@@ -7,7 +7,7 @@ import { WeeklyDraftPanel } from "./WeeklyDraftPanel";
 import type { WeeklyDraftSummary } from "@/features/reports/weekly-reports/lib/draft-summary";
 import type { WeeklyReportWithProjects } from "@/features/weekly-reports/lib/weekly-report-store";
 import { AttachmentEditor } from "@/shared/ui/AttachmentEditor";
-import type { FileAttachment } from "@/shared/lib/pkm";
+import type { FileAttachment } from "@/features/knowledge/lib/pkm";
 
 type ProjectOption = { id: string; name: string };
 

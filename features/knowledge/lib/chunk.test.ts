@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitIntoChunks } from "@/shared/lib/chunk";
+import { splitIntoChunks } from "@/features/knowledge/lib/chunk";
 
 describe("splitIntoChunks", () => {
   it("terminates when the final segment is shorter than the overlap", () => {

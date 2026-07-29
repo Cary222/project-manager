@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { searchDocuments } from "@/shared/lib/search";
+import { searchDocuments } from "@/features/knowledge/lib/search";
 import { requireSession } from "@/shared/lib/permissions";
 
 export async function GET(request: Request) {

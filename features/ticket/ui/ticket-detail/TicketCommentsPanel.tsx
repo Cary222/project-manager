@@ -8,9 +8,9 @@ import { IconTrash } from "@/shared/ui/icons";
 import { fetchJson } from "@/shared/api/fetch-json";
 import { STALE_SWR_OPTIONS } from "@/shared/api/swr-config";
 import { MarkdownContent } from "@/shared/ui/MarkdownContent";
-import { uploadFile, toAbsoluteUploadUrl } from "@/shared/lib/upload";
+import { uploadFile, toAbsoluteUploadUrl } from "@/features/knowledge/lib/upload";
 import type { CommentItem } from "@/entities/ticket/model/types";
-import type { FileAttachment } from "@/shared/lib/pkm";
+import type { FileAttachment } from "@/features/knowledge/lib/pkm";
 
 function IconEmoji(p: React.SVGProps<SVGSVGElement>) {
   return (

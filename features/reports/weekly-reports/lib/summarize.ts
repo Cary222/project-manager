@@ -7,8 +7,8 @@
  */
 
 import { prisma } from "@/shared/db/client";
-import { callAgnes } from "@/features/ai/lib/summarizer";
-import { enqueueUpdateProfile } from "@/features/ai/lib/background-jobs";
+import { callAgnes } from "@/features/ai/llm/summarizer";
+import { enqueueUpdateProfile } from "@/features/ai/jobs/background-jobs";
 
 const MAX_CONTENT_LENGTH = 8000;
 

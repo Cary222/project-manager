@@ -4,7 +4,7 @@
  */
 import { loadEnvConfig } from "@next/env";
 import { prisma } from "@/shared/db/client";
-import { getWeekRange } from "@/shared/lib/week";
+import { getWeekRange } from "@/features/weekly-reports/lib/week";
 
 loadEnvConfig(process.cwd());
 

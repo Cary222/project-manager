@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toResultType } from "@/shared/lib/search";
+import { toResultType } from "@/features/knowledge/lib/search";
 
 describe("toResultType", () => {
   it.each([

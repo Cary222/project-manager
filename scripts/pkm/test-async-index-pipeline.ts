@@ -15,8 +15,8 @@ import {
   enqueueIndexJob,
   syncPkmNoteSearchDocumentFull,
   syncPkmNoteSearchDocument,
-} from "@/shared/lib/search";
-import { recoverStaleJobs } from "@/shared/lib/jobs";
+} from "@/features/knowledge/lib/search";
+import { recoverStaleJobs } from "@/worker/lib/jobs";
 
 loadEnvConfig(process.cwd());
 

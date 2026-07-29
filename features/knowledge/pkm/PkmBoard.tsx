@@ -11,8 +11,8 @@ import {
   composeImageMarkdown,
   extractInlineImages,
   type FileAttachment,
-} from "@/shared/lib/pkm";
-import { uploadImage } from "@/shared/lib/upload";
+} from "@/features/knowledge/lib/pkm";
+import { uploadImage } from "@/features/knowledge/lib/upload";
 
 type ProjectOption = {
   id: string;

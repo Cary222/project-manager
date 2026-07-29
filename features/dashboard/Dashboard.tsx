@@ -24,7 +24,7 @@ import {
   STATUS_LABEL,
   STATUS_ORDER,
 } from "@/entities/ticket/model/types";
-import { formatWeekLabel, getWeekRangeByOffset } from "@/shared/lib/week";
+import { formatWeekLabel, getWeekRangeByOffset } from "@/features/weekly-reports/lib/week";
 import { PriorityBadge } from "@/shared/ui/PriorityBadge";
 
 type Project = {

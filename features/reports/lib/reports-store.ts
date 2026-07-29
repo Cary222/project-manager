@@ -11,7 +11,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { prisma } from "@/shared/db/client";
-import { getWeekRange, getIsoWeek } from "@/shared/lib/week";
+import { getWeekRange, getIsoWeek } from "@/features/weekly-reports/lib/week";
 
 // ---------------------------------------------------------------------------
 // Backfill 兜底：读取预计算的每日周报率 JSON

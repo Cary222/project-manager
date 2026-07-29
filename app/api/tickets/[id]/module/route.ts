@@ -3,7 +3,7 @@ import { prisma } from "@/shared/db/client";
 import { requireRoot } from "@/shared/lib/permissions";
 import { createModerationLog } from "@/features/admin/moderation";
 import { ModerationAction } from "@prisma/client";
-import { enqueueIndexJob } from "@/shared/lib/jobs";
+import { enqueueIndexJob } from "@/worker/lib/jobs";
 
 type Params = { params: Promise<{ id: string }> };
 

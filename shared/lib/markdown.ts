@@ -1,4 +1,4 @@
-import { extractInlineImages, type FileAttachment } from "@/shared/lib/pkm";
+import { extractInlineImages, type FileAttachment } from "@/features/knowledge/lib/pkm";
 
 const MARKDOWN_LINK_PATTERN = /\[([^\]]+)\]\(([^)\s]+)\)/g;
 const EXTERNAL_IMAGE_PATTERN = /!\[([^\]]*)\]\(([^)\s]+)\)/g;

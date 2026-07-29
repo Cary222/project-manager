@@ -3,6 +3,7 @@ import { UserRole } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/shared/db/client";
+import { buildUserSearchTerms } from "@/features/profile/lib/user-search";
 
 const registerSchema = z.object({
   name: z.string().trim().min(1, "name is required").max(40),
@@ -26,6 +27,7 @@ export async function POST(request: Request) {
   await prisma.user.create({
     data: {
       name,
+      searchName: buildUserSearchTerms(name),
       email,
       passwordHash,
       role: UserRole.USER,

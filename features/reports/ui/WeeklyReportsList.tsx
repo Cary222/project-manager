@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import useSWR from "swr";
-import { formatWeekLabel } from "@/shared/lib/week";
+import { formatWeekLabel } from "@/features/weekly-reports/lib/week";
 import { fetchJson } from "@/shared/api/fetch-json";
 
 interface WeekReportUser {

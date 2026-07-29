@@ -2,8 +2,8 @@
 
 import { useRef } from "react";
 import { AttachmentItem } from "@/shared/ui/AttachmentItem";
-import { PKM_ATTACHMENT_MAX_COUNT, PKM_ATTACHMENT_MAX_SIZE, type FileAttachment } from "@/shared/lib/pkm";
-import { uploadFile, formatBytes } from "@/shared/lib/upload";
+import { PKM_ATTACHMENT_MAX_COUNT, PKM_ATTACHMENT_MAX_SIZE, type FileAttachment } from "@/features/knowledge/lib/pkm";
+import { uploadFile, formatBytes } from "@/features/knowledge/lib/upload";
 import type { PreviewableFile } from "@/shared/ui/DocumentPreviewModal";
 
 export type { PreviewableFile };

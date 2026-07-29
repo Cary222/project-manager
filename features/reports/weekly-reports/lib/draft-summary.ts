@@ -7,7 +7,7 @@
  * 生成结构化 JSON：highlights / tasks / nextPlan / rawMarkdown。
  */
 
-import { callAgnes } from "@/features/ai/lib/summarizer";
+import { callAgnes } from "@/features/ai/llm/summarizer";
 import type { WeeklyContext } from "./context-aggregator";
 
 // ============================================================

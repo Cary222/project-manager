@@ -6,7 +6,7 @@ import {
   listConversations,
   upsertProfile,
   getOrCreateProfile,
-} from "@/features/ai/lib/conversation-store";
+} from "@/features/ai/store/conversation-store";
 
 async function main() {
   console.log("=== Test 1: listConversations returns tags field ===");

@@ -10,7 +10,7 @@ import {
   createManyNotifications,
   listRootUserIds,
 } from "@/features/admin/notifications-lib";
-import { enqueueIndexJob } from "@/shared/lib/jobs";
+import { enqueueIndexJob } from "@/worker/lib/jobs";
 
 // Auto-start the overdue scanner when this module is first loaded
 void import("@/worker/lib/cron-scheduler").catch(() => {});

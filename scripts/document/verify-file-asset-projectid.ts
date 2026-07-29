@@ -11,7 +11,7 @@
  */
 import { loadEnvConfig } from "@next/env";
 import { prisma } from "@/shared/db/client";
-import { processFileAssetJob } from "@/shared/lib/document";
+import { processFileAssetJob } from "@/features/knowledge/lib/document";
 
 loadEnvConfig(process.cwd());
 

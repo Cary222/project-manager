@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/shared/db/client";
 import { requireSession } from "@/shared/lib/permissions";
-import { removeFileReferences } from "@/shared/lib/file-reference";
+import { removeFileReferences } from "@/features/knowledge/lib/file-reference";
 
 type RouteParams = { params: Promise<{ id: string; commentId: string }> };
 

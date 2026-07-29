@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/shared/db/client";
 import { requireSession } from "@/shared/lib/permissions";
-import { recordFileReference, removeFileReferences } from "@/shared/lib/file-reference";
-import type { FileAttachment } from "@/shared/lib/pkm";
+import { recordFileReference, removeFileReferences } from "@/features/knowledge/lib/file-reference";
+import type { FileAttachment } from "@/features/knowledge/lib/pkm";
 
 type RouteParams = { params: Promise<{ id: string }> };
 

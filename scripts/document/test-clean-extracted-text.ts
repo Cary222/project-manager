@@ -11,7 +11,7 @@
  */
 import { loadEnvConfig } from "@next/env";
 import { prisma } from "@/shared/db/client";
-import { extractAttachmentTexts } from "@/shared/lib/search";
+import { extractAttachmentTexts } from "@/features/knowledge/lib/search";
 import { cleanExtractedTextForEmbedding } from "@/shared/lib/markdown";
 
 loadEnvConfig(process.cwd());

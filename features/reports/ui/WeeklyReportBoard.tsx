@@ -7,7 +7,7 @@ import {
   formatWeekLabel,
   getWeekRangeByOffset,
   getWeekReportTitle,
-} from "@/shared/lib/week";
+} from "@/features/weekly-reports/lib/week";
 import { fetchJson } from "@/shared/api/fetch-json";
 import { WeeklyReportsList } from "./WeeklyReportsList";
 import type { WeeklyStats } from "@/features/reports/lib/reports-store";

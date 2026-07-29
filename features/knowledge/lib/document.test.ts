@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeTextBytes } from "@/shared/lib/document";
+import { decodeTextBytes } from "@/features/knowledge/lib/document";
 
 describe("decodeTextBytes", () => {
   it("decodes Prisma Uint8Array bytes as UTF-8 text", () => {

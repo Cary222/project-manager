@@ -13,8 +13,8 @@ import {
   buildAssignedNotification,
   createManyNotifications,
 } from "@/features/admin/notifications-lib";
-import { syncTicketSearchDocument } from "@/shared/lib/search";
-import type { FileAttachment } from "@/shared/lib/pkm";
+import { syncTicketSearchDocument } from "@/features/knowledge/lib/search";
+import type { FileAttachment } from "@/features/knowledge/lib/pkm";
 
 // Auto-start the overdue scanner when this module is first loaded
 void import("@/worker/lib/cron-scheduler").catch(() => {});

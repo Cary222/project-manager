@@ -22,9 +22,9 @@
  */
 import { loadEnvConfig } from "@next/env";
 import { prisma } from "@/shared/db/client";
-import { syncPkmNoteSearchDocumentFull, syncTicketSearchDocument, syncCommitSearchDocument } from "@/shared/lib/search";
-import { processFileAssetJob } from "@/shared/lib/document";
-import { claimNextJob, getBackoffDelayMs, recoverStaleJobs } from "@/shared/lib/jobs";
+import { syncPkmNoteSearchDocumentFull, syncTicketSearchDocument, syncCommitSearchDocument } from "@/features/knowledge/lib/search";
+import { processFileAssetJob } from "@/features/knowledge/lib/document";
+import { claimNextJob, getBackoffDelayMs, recoverStaleJobs } from "@/worker/lib/jobs";
 import { syncAllManagedRepos } from "@/lib/git-sync/scan";
 
 loadEnvConfig(process.cwd());

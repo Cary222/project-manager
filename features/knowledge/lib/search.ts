@@ -1,14 +1,14 @@
 import { Prisma } from "@prisma/client";
 import type { SearchDocumentSourceType as PrismaSearchDocumentSourceType } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
-import { enqueueIndexJobByNoteId, type IndexJobTarget } from "@/shared/lib/jobs";
+import { enqueueIndexJobByNoteId, type IndexJobTarget } from "@/worker/lib/jobs";
 import {
   buildEmbeddingHash,
   buildEmbeddingInput,
   fetchEmbedding,
   fetchEmbeddingsBatch,
   getEmbeddingApiUrl,
-} from "@/shared/lib/embedding";
+} from "@/features/knowledge/lib/embedding";
 import type {
   SearchDocumentCommitRecord,
   SearchDocumentMetadata,
@@ -19,11 +19,11 @@ import type {
   SearchResultItem,
   SearchResultType,
   SearchableRecord,
-} from "@/shared/lib/search-types";
-import { SEARCH_DOCUMENT_SOURCE_TYPES } from "@/shared/lib/search-types";
-import { PKM_ATTACHMENT_MAX_SIZE, type FileAttachment } from "@/shared/lib/pkm";
+} from "@/features/knowledge/lib/search-types";
+import { SEARCH_DOCUMENT_SOURCE_TYPES } from "@/features/knowledge/lib/search-types";
+import { PKM_ATTACHMENT_MAX_SIZE, type FileAttachment } from "@/features/knowledge/lib/pkm";
 import { cleanExtractedTextForEmbedding, cleanMarkdownForEmbedding, formatAttachmentLabel } from "@/shared/lib/markdown";
-import { splitIntoChunks, CHUNK_DEFAULTS } from "@/shared/lib/chunk";
+import { splitIntoChunks, CHUNK_DEFAULTS } from "@/features/knowledge/lib/chunk";
 
 const SEARCH_LIMIT_DEFAULT = 8;
 const SEARCH_LIMIT_MAX = 20;
@@ -790,7 +790,7 @@ export async function syncPkmNoteSearchDocumentFull(noteId: string): ReturnType<
 }
 
 // Re-export enqueueIndexJobByNoteId for callers that import from search.ts
-export { enqueueIndexJobByNoteId } from "@/shared/lib/jobs";
+export { enqueueIndexJobByNoteId } from "@/worker/lib/jobs";
 
 /**
  * enqueueIndexJob — backward-compatible overload that accepts string noteId.

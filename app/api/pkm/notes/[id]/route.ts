@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
 import { requireSession } from "@/shared/lib/permissions";
-import { extractFileAttachmentsFromLegacy } from "@/shared/lib/pkm";
-import { SEARCH_DOCUMENT_SOURCE_TYPES } from "@/shared/lib/search-types";
+import { extractFileAttachmentsFromLegacy } from "@/features/knowledge/lib/pkm";
+import { SEARCH_DOCUMENT_SOURCE_TYPES } from "@/features/knowledge/lib/search-types";
 import {
   buildSearchDocumentSourceType,
   syncPkmNoteSearchDocument,
-} from "@/shared/lib/search";
-import { recordFileReference, removeFileReferences } from "@/shared/lib/file-reference";
+} from "@/features/knowledge/lib/search";
+import { recordFileReference, removeFileReferences } from "@/features/knowledge/lib/file-reference";
 
 type Params = { params: Promise<{ id: string }> };
 

@@ -5,9 +5,9 @@ import { requireSession } from "@/shared/lib/permissions";
 import {
   buildMentionedNotification,
 } from "@/features/admin/notifications-lib";
-import { enqueueIndexJob } from "@/shared/lib/jobs";
-import { extractFileAttachmentsFromLegacy } from "@/shared/lib/pkm";
-import { recordFileReference } from "@/shared/lib/file-reference";
+import { enqueueIndexJob } from "@/worker/lib/jobs";
+import { extractFileAttachmentsFromLegacy } from "@/features/knowledge/lib/pkm";
+import { recordFileReference } from "@/features/knowledge/lib/file-reference";
 
 type RouteParams = { params: Promise<{ id: string }> };
 

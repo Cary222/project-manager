@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { AttachmentItem, type PreviewableFile } from "@/shared/ui/AttachmentItem";
-import type { FileAttachment } from "@/shared/lib/pkm";
+import type { FileAttachment } from "@/features/knowledge/lib/pkm";
 import { DocumentPreviewModal } from "@/shared/ui/DocumentPreviewModal";
 
 type NoteAttachmentsProps = {

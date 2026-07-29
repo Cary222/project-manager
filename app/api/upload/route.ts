@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/shared/lib/permissions";
 import { prisma } from "@/shared/db/client";
 import { sha256Hex } from "@/shared/lib/hash";
-import { enqueueIndexJob } from "@/shared/lib/jobs";
+import { enqueueIndexJob } from "@/worker/lib/jobs";
 
 /**
  * 文件上传服务端入口。配对客户端 `shared/lib/upload.ts` 的 `uploadFile()`。

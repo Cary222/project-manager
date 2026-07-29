@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { AssigneePicker } from "@/features/ticket/ui/AssigneePicker";
-import { composeImageMarkdown } from "@/shared/lib/pkm";
-import { uploadImage } from "@/shared/lib/upload";
+import { composeImageMarkdown } from "@/features/knowledge/lib/pkm";
+import { uploadImage } from "@/features/knowledge/lib/upload";
 
 export type PushConfirmModalProps = {
   mode: "program" | "bug";

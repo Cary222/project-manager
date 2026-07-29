@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/shared/db/client";
-import type { UserProfileData } from "@/features/ai/lib/summarizer";
+import type { UserProfileData } from "@/features/ai/llm/summarizer";
 
 export type UserSkill = {
   kind: string;

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/shared/db/client";
-import { getWeekRangeByOffset } from "@/shared/lib/week";
+import { getWeekRangeByOffset } from "@/features/weekly-reports/lib/week";
 
 export const dynamic = "force-dynamic";
 

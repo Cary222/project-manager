@@ -4,8 +4,8 @@ import { prisma } from "@/shared/db/client";
 import { getCommitBranches } from "@/lib/git-sync/branches";
 import { parseTicketCommitSubject } from "@/entities/ticket/lib/parse-commit";
 import { listManagedRepos } from "@/lib/git-sync/repos";
-import { backfillSearchDocuments } from "@/shared/lib/search";
-import { enqueueIndexJob } from "@/shared/lib/jobs";
+import { backfillSearchDocuments } from "@/features/knowledge/lib/search";
+import { enqueueIndexJob } from "@/worker/lib/jobs";
 
 const execFileAsync = promisify(execFile);
 const SCAN_LIMIT = 500;

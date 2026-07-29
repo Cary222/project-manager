@@ -2,8 +2,8 @@ import { loadEnvConfig } from "@next/env";
 import { Prisma } from "@prisma/client";
 import type { SearchDocumentSourceType as PrismaSearchDocumentSourceType } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
-import { searchDocuments } from "@/shared/lib/search";
-import { SEARCH_DOCUMENT_SOURCE_TYPES } from "@/shared/lib/search-types";
+import { searchDocuments } from "@/features/knowledge/lib/search";
+import { SEARCH_DOCUMENT_SOURCE_TYPES } from "@/features/knowledge/lib/search-types";
 
 loadEnvConfig(process.cwd());
 

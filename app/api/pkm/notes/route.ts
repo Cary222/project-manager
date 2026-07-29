@@ -3,9 +3,9 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
 import { requireSession } from "@/shared/lib/permissions";
 import { PRIVATE_LIST_CACHE_CONTROL } from "@/lib/cache-control";
-import { extractFileAttachmentsFromLegacy } from "@/shared/lib/pkm";
-import { syncPkmNoteSearchDocument } from "@/shared/lib/search";
-import { recordFileReference } from "@/shared/lib/file-reference";
+import { extractFileAttachmentsFromLegacy } from "@/features/knowledge/lib/pkm";
+import { syncPkmNoteSearchDocument } from "@/features/knowledge/lib/search";
+import { recordFileReference } from "@/features/knowledge/lib/file-reference";
 
 function normalizeTags(tags: unknown) {
   if (!Array.isArray(tags)) return [] as string[];

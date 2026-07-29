@@ -5,8 +5,8 @@ import { AssigneePicker } from "@/features/ticket/ui/AssigneePicker";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
 import { AttachmentEditor, type PreviewableFile } from "@/shared/ui/AttachmentEditor";
 import { DocumentPreviewModal } from "@/shared/ui/DocumentPreviewModal";
-import { composeImageMarkdown, extractInlineImages, type FileAttachment } from "@/shared/lib/pkm";
-import { uploadImage } from "@/shared/lib/upload";
+import { composeImageMarkdown, extractInlineImages, type FileAttachment } from "@/features/knowledge/lib/pkm";
+import { uploadImage } from "@/features/knowledge/lib/upload";
 import { computeDefaultDeadline } from "@/features/ticket/lib/ticket-deadline";
 import {
   createTicketAction,
