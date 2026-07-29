@@ -61,6 +61,7 @@ export type UserProfile = {
     completedTickets: number;
     activeProjects: number;
     totalReports: number;
+    totalExpenses: number;
   };
 };
 
@@ -114,6 +115,10 @@ export async function getUserProfileAction(userId: string): Promise<UserProfile>
         select: { id: true, weekStart: true, title: true, aiSummary: true },
         orderBy: { weekStart: "desc" },
         take: 5,
+      },
+      monthlyExpenses: {
+        where: { status: "ACTIVE" },
+        select: { id: true },
       },
       aiProfile: true,
     },
@@ -208,6 +213,7 @@ export async function getUserProfileAction(userId: string): Promise<UserProfile>
       completedTickets,
       activeProjects: assignedTicketsCount,
       totalReports: user.weeklyReports.length,
+      totalExpenses: user.monthlyExpenses.length,
     },
   };
 }

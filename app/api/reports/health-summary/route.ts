@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getReportsStats } from "@/features/reports/lib/reports-store";
+import {
+  getReportsStats,
+  getWeeklyStats,
+  getMonthlyStats,
+} from "@/features/reports/lib/reports-store";
 import { getCachedHealthSummary, setCachedHealthSummary } from "@/shared/lib/health-cache";
 
 export async function GET(request: NextRequest) {
@@ -14,9 +18,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Try cache first
+  // Try cache first (5-minute TTL)
   const cached = getCachedHealthSummary();
-  if (cached) {
+  if (cached && !request.nextUrl.searchParams.has("refresh")) {
     return NextResponse.json(
       {
         data: {
@@ -30,24 +34,117 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Build summary from stats
+  // Build comprehensive summary from all report data
   try {
-    const stats = await getReportsStats();
-    const { kpis, projectStatus, topMembers } = stats;
+    const [stats, weeklyStats, monthlyStats] = await Promise.all([
+      getReportsStats(),
+      getWeeklyStats(),
+      getMonthlyStats(),
+    ]);
 
-    const topNames = topMembers.slice(0, 3).map((m) => m.name ?? "未知成员").join("、");
+    const { kpis, projectStatus, projectHealth, topMembers, thisWeekReports } = stats;
+    const { weeklyTrend, monthlyTrend } = stats;
+
     const riskCount = projectStatus.risk + projectStatus.attention;
+    const totalProjects =
+      projectStatus.good + projectStatus.normal + projectStatus.attention + projectStatus.risk;
+    const topNames = topMembers
+      .slice(0, 3)
+      .map((m) => m.name ?? "未知成员")
+      .join("、");
 
-    const prompt = `你是 PMO 专家，根据下列团队数据给出健康度总结（Markdown，200 字内）：
-- 活跃项目数：${kpis.activeProjects}
-- 按期完成率：${kpis.completionRate}%
-- 本月任务数：${kpis.monthlyTickets}
-- 风险项目：${riskCount} 个
-- TOP 完成者：${topNames || "暂无数据"}`;
+    // 本周周报情况
+    const { submitted, missing } = thisWeekReports;
+    const reportTotal = submitted.length + missing.length;
+    const weekReportRate =
+      reportTotal > 0 ? Math.round((submitted.length / reportTotal) * 100) : 0;
 
-    // In PR2 we don't have real LLM, so generate a template summary
-    // PR4 will replace this with actual AI call
-    const summary = generateTemplateSummary(kpis, projectStatus, topMembers);
+    // 趋势分析
+    let trendText = "";
+    if (weeklyTrend.length >= 2) {
+      const recent = weeklyTrend.slice(-3);
+      const avg = recent.reduce((s, w) => s + w.done, 0) / recent.length;
+      const prev = recent[0]?.done ?? avg;
+      if (avg > prev * 1.2) {
+        trendText = "本周交付呈上升趋势";
+      } else if (avg < prev * 0.8) {
+        trendText = "本周交付有所下滑";
+      } else {
+        trendText = "本周交付趋于平稳";
+      }
+    }
+
+    // 月度趋势
+    let monthlyText = "";
+    if (monthlyTrend.length >= 2) {
+      const last = monthlyTrend[monthlyTrend.length - 1].done;
+      const prev = monthlyTrend[monthlyTrend.length - 2].done;
+      const diff = last - prev;
+      if (diff > 2) monthlyText = "本月交付较上月明显增长";
+      else if (diff < -2) monthlyText = "本月交付较上月有所下降";
+      else monthlyText = "本月交付与上月基本持平";
+    }
+
+    // 健康度评分
+    const healthy = projectStatus.good + projectStatus.normal;
+    const healthScore =
+      totalProjects > 0
+        ? Math.round((healthy / totalProjects) * 50 + kpis.completionRate * 0.5)
+        : kpis.completionRate;
+
+    // 重点关注项目
+    const attentionProjects = projectHealth
+      .filter((p) => p.status === "risk" || p.status === "attention")
+      .sort((a, b) => a.progress - b.progress)
+      .slice(0, 3);
+    const attentionNames = attentionProjects
+      .map((p) => `${p.name}(${p.progress}%)`)
+      .join("、");
+
+    // 建议
+    let advice = "";
+    if (riskCount > totalProjects * 0.5) {
+      advice = "⚠️ 风险项目较多，建议优先推进关键路径";
+    } else if (weekReportRate < 50) {
+      advice = "📋 周报提交率偏低，建议督促团队按时提交";
+    } else if (kpis.completionRate < 30) {
+      advice = "📈 任务完成率有待提升，关注交付效率";
+    } else {
+      advice = "✨ 团队整体运行良好，保持当前节奏";
+    }
+
+    const contributor = topNames ? `本周贡献突出成员：**${topNames}**` : "";
+    const reportMissingNames = missing
+      .slice(0, 2)
+      .map((m) => m.name ?? "未知")
+      .join("、");
+    const missingText =
+      missing.length > 0
+        ? `${reportMissingNames}${missing.length > 2 ? "等" : ""}（${missing.length}人）`
+        : "本周周报已全部提交";
+
+    const summary = `## 📊 团队健康度总结
+
+**综合评分：${healthScore}分**（基于项目健康度 + 任务完成率）
+
+### 项目概况
+- 活跃项目 **${totalProjects}** 个，其中正常/良好 **${healthy}** 个，需关注 **${riskCount}** 个
+- 本月任务完成率 **${kpis.completionRate}%**，交付 **${kpis.monthlyTickets}** 个任务
+${attentionNames ? `- 🔴 重点关注：${attentionNames}` : ""}
+
+### 周报情况
+- 本周周报提交率 **${weekReportRate}%**（${submitted.length}/${reportTotal}）
+- ${missing.length > 0 ? `本周未提交周报：${reportMissingNames}${missing.length > 2 ? "等" : ""}（${missing.length}人）` : "本周周报已全部提交"}
+
+### 趋势分析
+${trendText ? `- ${trendText}` : ""}
+${monthlyText ? `- ${monthlyText}` : ""}
+
+### 成员贡献
+${contributor || "暂无贡献数据"}
+
+---
+${advice}`;
 
     setCachedHealthSummary(summary);
 
@@ -69,25 +166,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-/** Template summary (PR2 placeholder — PR4 replaces with real LLM) */
-function generateTemplateSummary(
-  kpis: { activeProjects: number; completionRate: number; monthlyTickets: number },
-  projectStatus: { good: number; normal: number; attention: number; risk: number },
-  topMembers: Array<{ name: string | null; done: number }>
-): string {
-  const riskCount = projectStatus.risk + projectStatus.attention;
-  const topNames  = topMembers.slice(0, 3).map((m) => m.name ?? "未知").join("、");
-
-  let body = "";
-  if (riskCount === 0) {
-    body = `团队整体表现良好，${kpis.activeProjects} 个活跃项目均处于健康状态，本月已交付 ${kpis.monthlyTickets} 个任务，完成率达 ${kpis.completionRate}%。`;
-  } else {
-    body = `团队整体运行平稳，${kpis.activeProjects} 个项目中 ${riskCount} 个需关注（${projectStatus.risk} 风险 + ${projectStatus.attention} 关注），本月任务完成率 ${kpis.completionRate}%。建议优先推进风险项目的关键路径。`;
-  }
-
-  const contributor = topNames ? `本周贡献突出成员：${topNames}。` : "";
-
-  return `## 团队健康度总结\n\n${body}\n\n${contributor}\n\n> 此总结为模板占位，PR4 将由 AI 实时生成。`;
 }

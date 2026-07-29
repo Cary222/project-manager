@@ -379,8 +379,8 @@ export function Dashboard() {
           </div>
         </section>
 
-        {/* 实用预览区：笔记 / 周报 / AI 对话 / 月度报销 */}
-        <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {/* 实用预览区：笔记 / 周报 / AI 对话 */}
+        <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {/* 最近笔记 */}
           <PreviewCard
             title="最近笔记"
@@ -424,113 +424,104 @@ export function Dashboard() {
             )}
           </PreviewCard>
 
-          {/* 本周周报 + 本月报销 */}
-          <div className="rounded-xl border border-ink-200 bg-white p-4 shadow-sm transition-shadow duration-150 hover:shadow lg:p-5">
-            <div className="mb-3 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+          {/* 报表区域：周报 + 报销 */}
+          <div className="rounded-xl border border-ink-200 bg-white p-4 shadow-sm transition-all duration-200 hover:border-ink-300 hover:shadow lg:p-5">
+            {/* 周报区域 */}
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-100 text-brand-600">
                   <IconTask className="h-4 w-4" />
                 </span>
-                <h3 className="text-sm font-medium text-ink-900">本周周报</h3>
+                <h3 className="text-sm font-semibold text-ink-900">周报</h3>
               </div>
-              <div className="flex items-center gap-3">
-                <Link
-                  href="/reports/monthly-expenses"
-                  className="text-xs font-medium text-brand-600 transition-colors duration-200 hover:text-brand-700"
-                >
-                  本月报销
-                </Link>
+              <div className="flex items-center gap-2">
                 <Link
                   href="/reports/weekly-reports"
-                  className="text-xs font-medium text-brand-600 transition-colors duration-200 hover:text-brand-700"
+                  className="rounded-lg border border-ink-200 px-3 py-1.5 text-xs font-medium text-ink-600 transition-colors hover:border-ink-300 hover:bg-ink-100"
                 >
-                  查看全部
+                  查看周报
                 </Link>
-              </div>
-            </div>
-            {weeklyLoading ? (
-              <div className="h-16 animate-pulse rounded-lg bg-ink-100" />
-            ) : (
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`flex h-6 w-6 items-center justify-center rounded-full ${
-                      weeklySubmitted
-                        ? "bg-emerald-100 text-emerald-600"
-                        : "bg-amber-100 text-amber-600"
-                    }`}
-                  >
-                    {weeklySubmitted ? (
-                      <svg
-                        className="h-4 w-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
-                    ) : (
-                      <svg
-                        className="h-4 w-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                        />
-                      </svg>
-                    )}
-                  </span>
-                  <span className="text-sm font-medium text-ink-700">
-                    {weeklySubmitted ? "已提交本周周报" : "请提交本周周报"}
-                  </span>
-                </div>
-                <div className="text-xs text-ink-500">
-                  {formatWeekLabel(weekStart, weekEnd)}
-                </div>
                 {!weeklySubmitted && (
                   <Link
                     href="/reports/weekly-reports/new"
-                    className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700"
+                    className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-brand-700 active:bg-brand-800 focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:outline-none"
                   >
                     立即提交
-                    <svg
-                      className="h-3 w-3"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 5l7 7-7 7"
-                      />
-                    </svg>
                   </Link>
                 )}
-                <div className="border-t border-ink-100 pt-2">
-                  <Link
-                    href="/reports/monthly-expenses"
-                    className="flex items-center justify-between rounded-lg px-2 py-2 text-xs transition-colors hover:bg-ink-50"
-                  >
-                    <span className="font-medium text-ink-600">本月报销</span>
-                    <span className="text-ink-500">{currentMonth}</span>
-                    {monthlyTotal > 0 && (
-                      <span className="font-medium text-brand-600">
-                        ¥{monthlyTotal.toFixed(2)}
-                      </span>
-                    )}
-                  </Link>
+              </div>
+            </div>
+            {weeklyLoading ? (
+              <div className="h-10 animate-pulse rounded-lg bg-ink-100" />
+            ) : (
+              <div className="flex items-center gap-3 rounded-lg border border-ink-100 bg-ink-50/50 px-3 py-2.5">
+                <span
+                  className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-sm font-medium ${
+                    weeklySubmitted
+                      ? "bg-emerald-100 text-emerald-600"
+                      : "bg-amber-100 text-amber-600"
+                  }`}
+                >
+                  {weeklySubmitted ? "✓" : "!"}
+                </span>
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium text-ink-700">
+                    {weeklySubmitted ? "已提交本周周报" : "请提交本周周报"}
+                  </span>
+                  <span className="text-xs text-ink-400">{formatWeekLabel(weekStart, weekEnd)}</span>
+                </div>
+              </div>
+            )}
+
+            {/* 分隔线 */}
+            <div className="my-4 border-t border-ink-100" />
+
+            {/* 报销区域 */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-100 text-brand-600">
+                  <span className="text-sm font-semibold">¥</span>
+                </span>
+                <h3 className="text-sm font-semibold text-ink-900">报销</h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/reports/monthly-expenses"
+                  className="rounded-lg border border-ink-200 px-3 py-1.5 text-xs font-medium text-ink-600 transition-colors hover:border-ink-300 hover:bg-ink-100"
+                >
+                  查看报销
+                </Link>
+                <Link
+                  href="/reports/monthly-expenses/new"
+                  className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-brand-700 active:bg-brand-800 focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:outline-none"
+                >
+                  立即提交
+                </Link>
+              </div>
+            </div>
+            {monthlyTotal > 0 ? (
+              <div className="mt-3 flex items-center gap-3 rounded-lg border border-ink-100 bg-ink-50/50 px-3 py-2.5">
+                <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-100 text-sm font-semibold text-brand-600">
+                  ¥
+                </span>
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium text-ink-700">本月报销</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-ink-400">{currentMonth}</span>
+                    <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-semibold text-brand-700">
+                      ¥{monthlyTotal.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3 flex items-center gap-3 rounded-lg border border-ink-100 bg-ink-50/50 px-3 py-2.5">
+                <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-ink-100 text-sm text-ink-400">
+                  ¥
+                </span>
+                <div className="flex flex-col">
+                  <span className="text-sm text-ink-400">暂无报销记录</span>
+                  <span className="text-xs text-ink-400">{currentMonth}</span>
                 </div>
               </div>
             )}
@@ -577,41 +568,6 @@ export function Dashboard() {
                 ))}
               </ul>
             )}
-          </PreviewCard>
-
-          {/* 月度报销 */}
-          <PreviewCard
-            title="月度报销"
-            icon={
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            }
-            href="/reports/monthly-expenses"
-          >
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-ink-700">
-                  {currentMonth}
-                </span>
-                {monthlyTotal > 0 ? (
-                  <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-600">
-                    ¥{monthlyTotal.toFixed(2)}
-                  </span>
-                ) : (
-                  <span className="text-xs text-ink-400">暂无报销</span>
-                )}
-              </div>
-              <Link
-                href="/reports/monthly-expenses/new"
-                className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700"
-              >
-                记录报销
-                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </Link>
-            </div>
           </PreviewCard>
         </section>
 

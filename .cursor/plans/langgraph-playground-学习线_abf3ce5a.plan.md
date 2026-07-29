@@ -4,13 +4,13 @@ overview: 建立 playground/langgraph/ 独立实验区，学习 Chat Agent（sta
 todos:
   - id: playground-setup
     content: "创建 playground/langgraph/ 目录结构"
-    status: pending
+    status: completed
   - id: playground-basics
     content: "00-runtime-model.ts: Chat vs Workflow 运行时对比"
-    status: pending
+    status: completed
   - id: playground-chat
     content: "01-chat-agent.ts: Stateless Chat Agent"
-    status: pending
+    status: completed
   - id: playground-workflow-intro
     content: "02-workflow-intro.ts: 什么是 Business Workflow"
     status: pending
@@ -40,7 +40,9 @@ isProject: false
 
 # Plan: LangGraph Playground 学习线
 
-## 核心洞察
+## 核心洞察（已更新：2026-07-29）
+
+> **注意**：以下 playground 目录结构为学习计划，实际实现已落地在 `features/ai/graph/` 目录。
 
 | 概念 | 说明 |
 |------|------|
@@ -69,10 +71,29 @@ Chat Agent    Workflow Agent
 - **Chat**：追求低延迟、快速响应
 - **Workflow**：追求可靠、可恢复、可持续执行
 
-## 目录结构
+## 实际落地位置（2026-07-29）
 
 ```
-playground/langgraph/
+features/ai/graph/                    # ✅ 已实现
+├── agent.ts                         # StateGraph 组装
+├── state.ts                         # AgentState Annotation
+├── types.ts                         # PendingHumanAction
+├── edges/
+│   └── routing.ts                   # 7 个路由函数
+└── nodes/
+    ├── detect-intent.ts             # 意图检测
+    ├── search-knowledge.ts          # RAG 检索
+    ├── search-structured.ts         # DB 查询
+    ├── decision.ts                  # 消歧决策
+    ├── human-confirmation.ts        # HIL 确认
+    ├── web-search.ts               # 联网搜索
+    └── generate-response.ts         # LLM 生成
+```
+
+## Playground 学习目录（待完成）
+
+```
+playground/langgraph/                 # 待完成
 ├── setup.ts                      # 共享 LLM/工具配置
 ├── 00-runtime-model.ts           # Chat vs Workflow 运行时对比
 ├── 01-chat-agent.ts              # Stateless Chat Agent
@@ -81,8 +102,7 @@ playground/langgraph/
 ├── 04-interrupt-resume.ts        # interrupt + resume
 ├── 05-scheduler.ts               # 定时执行
 ├── 06-daily-report-flow.ts       # 日报生成（8 小时流程）
-├── 07-project-risk-flow.ts       # 项目风险监控
-├── 08-architecture-pattern.ts    # Chat + Workflow 双层架构
+├── 07-project-risk-flow.ts        # 项目风险监控
 └── README.md                     # 学习笔记 + 架构演进路线
 ```
 

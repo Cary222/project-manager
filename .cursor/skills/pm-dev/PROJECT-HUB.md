@@ -8,8 +8,8 @@ description: >-
 
 > **项目启动**：2026-06-04（基于 GitHub 代码实际评估）
 > **仓库**：https://github.com/Cary222/project-manager
-> **最后更新**：2026-07-17（FSD 架构优化 + Dashboard 重构 + 周报 Markdown UI 优化）
-> **当前阶段**：功能迭代中
+> **最后更新**：2026-07-29（LangGraph 路由重构 + 意图检测优化 + 人员活动归因）
+> **当前阶段**：功能迭代中（LangGraph 状态机 + HIL 消歧）
 
 ---
 
@@ -49,7 +49,7 @@ description: >-
   ├── DOCX 附件文本提取（#10076，python-docx + chunking，2026-06-23）
   ├── PKM 异步索引化（#10044，Worker + Background Jobs，2026-06-26）
   ├── 全局访问记录系统（#10082，events/ track+compute+router+types，2026-06-25）
-  ├── AI Agent 对话系统（#10144，2026-06-28 / 2026-07-07 增强）
+  ├── AI Agent 对话系统（#10144，2026-06-28 / 2026-07-07 增强 / 2026-07-29 LangGraph 重构）
   │     ├── 对话 CRUD（AiConversation + AiChatMessage 两张表）
   │     ├── SSE 流式响应（Agnes API + ReadableStream 转发）
   │     ├── RAG 自动注入（detector 关键词检测 + retrieveContext）
@@ -58,7 +58,13 @@ description: >-
   │     ├── Agnes Tool Calling 接入 + 响应速度优化（2026-07-09）
   │     ├── 后台任务队列（globalThis + 15min 冷却期 + 失败重试）
   │     ├── AI 主动问候（根据画像生成个性化开场白）
-  │     └── 7 个 Agent skill（LangGraph、LangChain、RAG 检索、流式响应…）
+  │     ├── 7 个 Agent skill（LangGraph、LangChain、RAG 检索、流式响应…）
+  │     ├── LangGraph 路由重构（#10195，2026-07-29）
+  │     │     ├── StateGraph 状态机编排（detectIntent / searchKnowledge / searchStructured / decision / webSearch / generateResponse / humanConfirmation）
+  │     │     ├── 意图检测增强（人员消歧、多轮对话、代词指代）
+  │     │     ├── HIL 人工介入节点（humanConfirmation 节点）
+  │     │     ├── 路由规则修正（auto 模式 DB 快查优先）
+  │     │     └── 来源引用组件化（AiSourcesList 独立渲染）
   ├── 项目详情文档 Tab（#10081，附件上传 + DocumentPreviewModal，2026-06-24）
   ├── 管理端职能管理增强（#10080，2026-06-23）
   ├── 周报系统（PR1，2026-06-29）
@@ -79,12 +85,12 @@ description: >-
   └── 周报率图表 Bug 修复（#10166，2026-07-16）
         └── 修复累积算法，统一本周/本月视图数据
 
-当前阶段 🔄  功能迭代中（2026-07-17）
-            新增：Dashboard 重构（响应式布局 + 数据卡片增强）
-            新增：FSD 架构优化（UI/Lib 边界重构 + AI 对话页面 + TaskBoard 拆分）
-            新增：周报 Markdown UI 优化（标题加粗 + 列表序号 + 单换行 + XSS 防护）
-            新增：周报周选择器增强 + 周报率图表 Bug 修复
-            增强：AI 工具链优化（步数限制 + 预缓存 + 错误处理）
+当前阶段 🔄  功能迭代中（2026-07-29）
+            新增：LangGraph StateGraph 状态机编排
+            新增：HIL 人工介入节点（humanConfirmation）
+            新增：意图检测增强（人员消歧、多轮对话、代词指代）
+            新增：路由规则修正（auto 模式 DB 快查优先）
+            新增：来源引用组件化（AiSourcesList）
 ```
 
 ---
@@ -135,15 +141,77 @@ features/
 
 ---
 
+## AI 模块结构（2026-07-29 LangGraph 重构后）
+
+```
+features/ai/
+├── graph/                    # LangGraph 状态机核心
+│   ├── agent.ts             # StateGraph 组装 + 路由定义
+│   ├── state.ts             # AgentState Annotation 定义
+│   ├── types.ts             # PendingHumanAction / DisambiguationCandidate
+│   ├── edges/
+│   │   └── routing.ts       # 7 个路由函数（routeAfterDetectIntent 等）
+│   └── nodes/
+│       ├── detect-intent.ts       # 意图检测 + 实体提取
+│       ├── search-knowledge.ts    # RAG 向量检索
+│       ├── search-structured.ts    # DB 结构化查询
+│       ├── decision.ts            # 消歧决策节点
+│       ├── human-confirmation.ts  # HIL 确认节点
+│       ├── web-search.ts          # 联网搜索
+│       └── generate-response.ts    # LLM 生成回答
+├── core/
+│   ├── queries/             # 查询解析器
+│   │   ├── query-parser.ts       # 解析查询类型
+│   │   ├── query-ticket.ts       # 工单查询
+│   │   ├── query-user.ts         # 用户查询
+│   │   ├── query-project.ts      # 项目查询
+│   │   ├── query-weekly-report.ts # 周报查询
+│   │   ├── query-commit.ts       # 提交查询
+│   │   ├── query-note.ts         # 笔记查询
+│   │   ├── query-profile.ts      # 画像查询
+│   │   └── query-ambiguous.ts    # 歧义处理
+│   ├── resolvers/
+│   │   └── query-parser.ts       # 查询解析核心
+│   │   └── user-resolver.ts     # 用户解析
+│   ├── formatters.ts         # 格式化工具
+│   └── search-structured-core.ts # 结构化搜索核心
+├── search/
+│   ├── detector.ts           # 意图检测（shouldUseRag）
+│   ├── rag.ts                # RAG 检索
+│   └── speculation-cache.ts   # 预缓存
+├── tools/
+│   ├── index.ts              # 工具配置
+│   ├── web-search.ts         # 联网搜索工具
+│   ├── search-knowledge.ts   # 知识库搜索工具
+│   └── search-structured.ts  # 结构化搜索工具
+├── jobs/
+│   ├── background-jobs.ts    # 后台任务队列
+│   └── profile-cleanup.ts    # 画像清理
+├── llm/
+│   ├── agnes-provider.ts     # Agnes LLM 提供者
+│   └── summarizer.ts         # 对话摘要
+├── types/
+│   ├── index.ts              # 类型导出
+│   ├── modes.ts              # AgentMode 类型
+│   ├── structured.ts          # 结构化数据类型
+│   └── thinking.ts           # Thinking 类型
+└── ui/                       # UI 组件
+    ├── AiSourcesList.tsx     # 来源引用组件
+    ├── AiMessageBubble.tsx   # 消息气泡
+    └── AiChatPanel.tsx       # 聊天面板
+```
+
+---
+
 ## 下一步操作
 
-### 优先级 1：AI Agent 应用深入理解（当前阶段）
+### 优先级 1：LangGraph 深入理解 + 测试验证（当前阶段）
 
-- [x] SSE 流式响应原理理解
-- [x] 用户画像两阶段 LLM 链理解
-- [ ] LangGraph Agent 编排深入学习（skill 已建，10 篇参考文档）
+- [x] LangGraph StateGraph 状态机编排（2026-07-29）
+- [x] HIL 人工介入节点（humanConfirmation，2026-07-29）
+- [ ] LangGraph 测试用例执行（测试计划见 `.cursor/plans/langgraph-测试用例_b2c7d3f1.md`）
+- [ ] 多轮对话状态累积验证
 - [ ] Vercel AI SDK 流式响应框架
-- [ ] 语音输入/语音对话接入
 
 ### 优先级 2：RAG 调参验证
 
@@ -189,6 +257,9 @@ features/
 | 2026-07-16 | 周报周选择器增强               | AI 摘要 XSS 防护（#10166）                    |
 | 2026-07-17 | FSD 架构优化                   | UI/Lib 边界重构 + AI 对话 + TaskBoard（#10069）|
 | 2026-07-17 | 周报 Markdown UI 优化           | 标题加粗 + 列表序号 + 单换行（#10166）        |
+| 2026-07-29 | LangGraph 路由重构             | StateGraph 状态机 + 意图检测增强 + HIL 消歧（#10195）|
+| 2026-07-29 | 人员活动归因修复               | 修复 searchStructured 的 TicketCommit 列表加载 |
+| 2026-07-29 | 文件处理多 Bug 修复           | 多 chunk OOM + 纯文本解码 + 项目文档 RAG 映射 |
 
 ---
 
@@ -205,3 +276,18 @@ features/
 - `shared/lib/upload.ts`：只有 `clientHash` 有值时才上传 hint
 
 详见 [debug-log.md](docs/debug-log.md)
+
+### LangGraph 路由文件踩坑（2026-07-29）
+
+**问题**：原始 `routing.ts` 中 auto 模式判断写反了，导致应该走 DB 快查的请求走了 RAG 向量检索。
+
+**根因**：
+- `routeAfterSearchKnowledge` 导出了但从未在 `addConditionalEdges` 中使用
+- Graph 固定链 `searchKnowledge → searchStructured → generateResponse` 是硬编码的，导致路由函数形同虚设
+
+**解法**：
+- 修正 `routeByMode` 对 auto 模式的判断
+- auto + 浅层查询（工单号/项目名/统计/vcs）→ searchStructured（DB 快查）
+- auto + 深层内容（文档/笔记/详情）→ searchKnowledge（RAG 向量检索）
+
+详见 [docs/ai/PR10144-LangGraph-Routing-Recap.md](docs/ai/PR10144-LangGraph-Routing-Recap.md)

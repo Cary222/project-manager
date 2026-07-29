@@ -3,11 +3,11 @@
 > **适用对象**：前端工程师，AI 原生开发者，靠 AI 写代码，ProjectHub 项目实战
 > **目标**：通过重构自己的 AI 对话系统，深入理解 LangGraph 核心概念
 > **原则**：不背代码、不刷教程、在实战中理解
-> **预计周期**：2 周（每天 1-2 小时）
+> **更新日期**：2026-07-29
 
 ---
 
-## 背景：为什么现在学
+## 背景：为什么现在学（已更新：2026-07-29）
 
 你已经完成了：
 
@@ -15,13 +15,16 @@
 - ✅ Agnes Tool Calling 接入
 - ✅ SSE 流式响应 + 打字机效果
 - ✅ 用户画像 + 预缓存优化
+- ✅ **LangGraph StateGraph 状态机重构（2026-07-29）**
 
 你的代码里已经有：
 - `detector.ts` — 判断用哪个模式
-- `tools/index.ts` — 模式对应的工具集
-- `maxStepsForMode()` — 步数限制
+- `features/ai/graph/` — **LangGraph StateGraph 状态机**
+- `features/ai/graph/nodes/` — **7 个节点实现**
+- `features/ai/graph/edges/routing.ts` — **7 个路由函数**
+- `features/ai/graph/nodes/human-confirmation.ts` — **HIL 消歧节点**
 
-**这些都可以用 LangGraph 重构**，让你真正理解"状态机"和"Agent 编排"。
+**你已经用 LangGraph 重构了 AI 对话系统**，现在需要深入理解状态机原理 + 执行测试用例。
 
 ---
 

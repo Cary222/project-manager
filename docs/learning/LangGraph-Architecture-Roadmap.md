@@ -2,14 +2,14 @@
 
 > **项目**：ProjectHub AI Agent 系统
 > **目标**：从单 Agent 演进为多 Agent 智能体编排系统
-> **日期**：2026-07-17
+> **日期**：2026-07-29
 > **依赖**：[LangGraph 实战学习计划](docs/learning/LangGraph-实战学习计划.md)
 
 ---
 
 ## 一、现状分析
 
-### 1.1 当前架构
+### 1.1 当前架构（2026-07-29 已更新）
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -17,16 +17,22 @@
 │                            │                                │
 │                            ▼                                │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │              Vercel AI SDK                           │  │
+│  │              LangGraph StateGraph                    │  │
 │  │                                                      │  │
-│  │  detector.ts ──▶ 模式判断                           │  │
+│  │  detectIntent ──▶ 意图检测 + 实体提取              │  │
 │  │       │                                              │  │
-│  │       ├── search ──▶ searchKnowledge + searchStruct │  │
-│  │       ├── web ────▶ webSearch + searchStruct       │  │
-│  │       └── chat ────▶ 无工具                           │  │
+│  │       ├── search ──▶ searchKnowledge (RAG)         │  │
+│  │       │            ↓                                │  │
+│  │       │         searchStructured (DB)              │  │
+│  │       │            ↓                                │  │
+│  │       │         decision ──▶ humanConfirmation      │  │
+│  │       │                                              │  │
+│  │       ├── web ────▶ webSearch + searchStruct      │  │
+│  │       └── chat ────▶ generateResponse              │  │
 │  │                                                      │  │
-│  │  模型自动决定调用哪个工具                              │  │
-│  │  SDK 自动处理循环                                     │  │
+│  │  humanConfirmation ──▶ 消歧确认（人机交互）         │  │
+│  │                                                      │  │
+│  │  7 个节点 + 7 个路由函数                            │  │
 │  └──────────────────────────────────────────────────────┘  │
 │                            │                                │
 │                            ▼                                │
@@ -34,32 +40,60 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 1.2 当前痛点
+### 1.2 已实现功能
+
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| StateGraph 状态机编排 | ✅ | 7 个节点完整实现 |
+| 意图检测增强 | ✅ | 人员消歧、多轮对话、代词指代 |
+| HIL 人工介入节点 | ✅ | humanConfirmation 节点 |
+| 路由规则修正 | ✅ | auto 模式 DB 快查优先 |
+| 来源引用组件化 | ✅ | AiSourcesList 独立渲染 |
+
+### 1.3 当前痛点
 
 | 痛点 | 说明 |
 |------|------|
-| **黑盒调试** | 模型决定调用什么工具，你无法精确控制 |
-| **单点决策** | 所有逻辑都在一个模型里，复杂任务容易出错 |
-| **不可追溯** | 不知道为什么会走这条路 |
-| **人工无法介入** | 模型自己跑完，用户只能等结果 |
-| **工具调用混乱** | 多个工具同时可用时，模型可能选错 |
+| **测试用例未执行** | LangGraph 状态机已落地，测试用例见 `.cursor/plans/langgraph-测试用例_b2c7d3f1.md` |
+| **状态持久化未实现** | MemorySaver 未接入，重启后状态丢失 |
+| **多 Agent 协作未实现** | 当前为单 Agent，后续可演进为 Supervisor + 多子 Agent |
 
-### 1.3 你的需求
+### 1.4 你的需求
 
 ```
-☐ 需要可视化流程（LangGraph Studio）
-☐ 需要人工介入节点（暂停等用户确认）
-☐ 需要多 Agent 协作（规划 Agent + 执行 Agent）
-☐ 经常需要调试"为什么走这条路"
+☐ 测试用例执行（验证 7 个节点 + 4 个 HIL 场景）
+☐ 状态持久化（MemorySaver / SqliteSaver）
+☐ 人工审批节点（高风险操作确认）
+☐ 多 Agent 协作（Supervisor + Research/Database/Human 子 Agent）
 ```
-
-**结论**：必须演进到 LangGraph 多 Agent 架构。
 
 ---
 
 ## 二、目标架构
 
-### 2.1 整体架构图
+### 2.1 当前已实现架构（2026-07-29）
+
+```
+features/ai/
+├── graph/                    # LangGraph StateGraph 核心 ✅ 已实现
+│   ├── agent.ts             # StateGraph 组装 + 路由定义
+│   ├── state.ts             # AgentState Annotation 定义
+│   ├── types.ts             # PendingHumanAction / DisambiguationCandidate
+│   ├── edges/
+│   │   └── routing.ts       # 7 个路由函数
+│   └── nodes/
+│       ├── detect-intent.ts       # 意图检测 + 实体提取
+│       ├── search-knowledge.ts    # RAG 向量检索
+│       ├── search-structured.ts   # DB 结构化查询
+│       ├── decision.ts            # 消歧决策节点
+│       ├── human-confirmation.ts  # HIL 确认节点 ✅ 新增
+│       ├── web-search.ts          # 联网搜索
+│       └── generate-response.ts    # LLM 生成回答
+└── ui/
+    └── AiSourcesList.tsx     # 来源引用组件 ✅ 组件化
+```
+
+### 2.2 完整目标架构（未来演进）
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -144,7 +178,7 @@ features/ai/
 
 ## 三、演进阶段
 
-### 阶段 0：学习准备（Week 1）
+### 阶段 0：学习准备 ✅（Week 1，2026-07-29）
 
 **目标**：理解 LangGraph 核心概念，不写代码
 
@@ -158,13 +192,13 @@ features/ai/
 ```
 
 **产出**：
-- [ ] 能用自己的话解释"什么是状态机"
-- [ ] 能在纸上画出 AI 对话状态流转图
-- [ ] 能说出 `detector.ts` 里的逻辑对应 StateGraph 的哪个部分
+- [x] 能用自己的话解释"什么是状态机"
+- [x] 能在纸上画出 AI 对话状态流转图
+- [x] 能说出 `detector.ts` 里的逻辑对应 StateGraph 的哪个部分
 
 ---
 
-### 阶段 1：最小化 LangGraph 改造（Week 2）
+### 阶段 1：最小化 LangGraph 改造 ✅（Week 2，2026-07-29 完成）
 
 **目标**：保留现有工具链，加一层状态机控制
 
@@ -172,11 +206,27 @@ features/ai/
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `graph/state.ts` | 新增 | 状态定义 |
+| `graph/state.ts` | 新增 | 状态定义（AgentState Annotation） |
 | `graph/nodes/detect-intent.ts` | 新增 | 迁移 detector.ts |
-| `graph/edges/routing.ts` | 新增 | 路由逻辑 |
+| `graph/edges/routing.ts` | 新增 | 路由逻辑（7 个路由函数） |
 | `graph/agent.ts` | 新增 | 组装 StateGraph |
+| `features/ai/ui/AiSourcesList.tsx` | 新增 | 来源引用组件 |
 | `features/ai/index.ts` | 修改 | 新增 LangGraph 入口 |
+
+**路由规则修正**（踩坑记录）：
+- 原始 `routing.ts` 中 auto 模式判断写反了
+- `routeAfterSearchKnowledge` 导出了但从未在 `addConditionalEdges` 中使用
+- Graph 固定链硬编码导致路由函数形同虚设
+- 修正后：auto 模式直接从 `routeByMode` 返回目标节点
+
+**验证清单**：
+- [ ] 类型检查：`npx tsc --noEmit`
+- [ ] 开发服务器：`npm run dev`
+- [ ] 功能测试：
+  - [ ] 问 search 模式（"帮我找 #10156"）
+  - [ ] 问 chat 模式（"今天天气"）
+  - [ ] 问 web 模式（"最新 AI 新闻"）
+  - [ ] 问人员消歧（"刘工" → 选择候选人）
 
 **状态定义**：
 
@@ -786,11 +836,16 @@ USE_LANGGRAPH=false  # 开发阶段关闭
 
 | 里程碑 | 日期 | 验收标准 |
 |--------|------|---------|
-| M1: 基础状态机 | Week 2 结束 | detector.ts 迁移完成，SSE 正常 |
-| M2: ReAct 模式 | Week 3 结束 | Research/Database Agent 可用 |
-| M3: Human-in-Loop | Week 4 结束 | 暂停/恢复功能正常 |
-| M4: 多 Agent 编排 | Week 6 结束 | Supervisor 正确分发任务 |
-| M5: 持久化 | Week 7 结束 | 会话可恢复 |
+| M0: 学习准备 | Week 1 | 理解状态机概念 + 画出流转图 |
+| M1: 基础状态机 | Week 2 结束 | StateGraph 状态机 + 7 个节点 + 7 个路由函数 ✅ |
+| M2: HIL 消歧节点 | Week 2 结束 | humanConfirmation 节点 + 人员消歧 ✅ |
+| M3: 路由规则修正 | Week 2 结束 | auto 模式 DB 快查优先 ✅ |
+| M4: 来源引用组件化 | Week 2 结束 | AiSourcesList 独立渲染 ✅ |
+| M5: 测试用例执行 | 待完成 | 15 个测试用例全部通过 |
+| M6: ReAct 模式 | 待完成 | Research/Database Agent 可用 |
+| M7: Human-in-Loop | 待完成 | 暂停/恢复功能正常 |
+| M8: 多 Agent 编排 | 待完成 | Supervisor 正确分发任务 |
+| M9: 持久化 | 待完成 | 会话可恢复 |
 
 ---
 

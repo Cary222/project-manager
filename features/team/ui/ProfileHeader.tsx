@@ -49,11 +49,12 @@ export function ProfileHeader({ profile, userId }: Props) {
       )}
 
       {/* 统计数字（可点击跳转） */}
-      <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-5">
         <StatItem label="创建任务" value={profile.stats.totalTickets} href={`/team/${userId}`} />
         <StatItem label="已完成" value={profile.stats.completedTickets} accent />
         <StatItem label="参与单子" value={profile.stats.activeProjects} href={`/team/${userId}/tickets`} />
         <StatItem label="周报" value={profile.stats.totalReports} href={`/team/${userId}/reports`} />
+        <StatItem label="报销" value={profile.stats.totalExpenses ?? 0} href="/reports/monthly-expenses" />
       </div>
     </div>
   );

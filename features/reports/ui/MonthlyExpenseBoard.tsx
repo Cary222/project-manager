@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { fetchJson } from "@/shared/api/fetch-json";
+import { MonthlyExpenseList } from "@/features/reports/monthly-expenses/ui/MonthlyExpenseList";
+import type { MonthlyExpenseWithUser } from "@/features/reports/monthly-expenses/lib/monthly-expense-store";
 
 interface ExpenseSummary {
   type: string;
@@ -144,8 +146,9 @@ export function MonthlyExpenseBoard() {
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const [month, setMonth] = useState(currentMonth);
+  const [listExpanded, setListExpanded] = useState(false);
 
-  const { data, isLoading } = useSWR<MonthlyStatsResponse>(
+  const { data, isLoading } = useSWR<MonthlyStatsResponse & { expenses?: MonthlyExpenseWithUser[] }>(
     `/api/reports/monthly-expenses/stats?month=${month}`,
     fetchJson,
     { refreshInterval: 30000, keepPreviousData: true },
@@ -155,6 +158,7 @@ export function MonthlyExpenseBoard() {
   const total = summary?.total ?? 0;
   const count = summary?.count ?? 0;
   const byType = summary?.byType ?? [];
+  const expenses = data?.expenses ?? [];
 
   return (
     <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
@@ -179,12 +183,15 @@ export function MonthlyExpenseBoard() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Link
-            href="/reports/monthly-expenses"
+          <button
+            onClick={() => setListExpanded(!listExpanded)}
             className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-700"
           >
-            查看详情
-          </Link>
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={listExpanded ? "M19 9l-7 7-7-7" : "M9 5l7 7-7 7"} />
+            </svg>
+            {listExpanded ? "收起" : "查看月报"}
+          </button>
           <Link
             href="/reports/monthly-expenses/new"
             className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-700 focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:outline-none"
@@ -193,6 +200,13 @@ export function MonthlyExpenseBoard() {
           </Link>
         </div>
       </div>
+
+      {/* 月度报销列表 - 可折叠 */}
+      {listExpanded && (
+        <div className="mb-4 rounded-lg border border-ink-200 bg-ink-50 p-3 pm-fade-in">
+          <MonthlyExpenseList initialExpenses={expenses} />
+        </div>
+      )}
 
       {/* 类型分布 */}
       {byType.length > 0 ? (
