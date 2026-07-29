@@ -41,7 +41,7 @@ export function ProfileHeader({ profile, userId }: Props) {
       {Array.isArray(profile.skills) && profile.skills.length > 0 && (
         <div className="mt-4 flex flex-wrap gap-2">
           {profile.skills.map((s) => (
-            <span className="rounded-lg bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700">
+            <span key={s.kind} className="rounded-lg bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700">
               {s.kind}
             </span>
           ))}
@@ -54,7 +54,7 @@ export function ProfileHeader({ profile, userId }: Props) {
         <StatItem label="已完成" value={profile.stats.completedTickets} accent />
         <StatItem label="参与单子" value={profile.stats.activeProjects} href={`/team/${userId}/tickets`} />
         <StatItem label="周报" value={profile.stats.totalReports} href={`/team/${userId}/reports`} />
-        <StatItem label="报销" value={profile.stats.totalExpenses ?? 0} href="/reports/monthly-expenses" />
+        <StatItem label="报销" value={profile.stats.totalExpenses ?? 0} href={`/team/${userId}/expenses`} />
       </div>
     </div>
   );

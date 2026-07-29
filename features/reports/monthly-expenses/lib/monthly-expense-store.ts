@@ -89,6 +89,24 @@ export async function getExpenseById(id: string): Promise<MonthlyExpenseWithUser
   return expense as MonthlyExpenseWithUser | null;
 }
 
+export async function getMyExpenseById(
+  id: string,
+  userId: string,
+): Promise<MonthlyExpenseWithUser | null> {
+  const expense = await prisma.monthlyExpense.findFirst({
+    where: { id, userId, status: "ACTIVE" },
+    include: {
+      user: { select: { id: true, name: true, email: true, image: true } },
+      shares: {
+        include: {
+          user: { select: { id: true, name: true, email: true, image: true } },
+        },
+      },
+    },
+  });
+  return expense as MonthlyExpenseWithUser | null;
+}
+
 export async function createExpense(
   userId: string,
   input: {
@@ -198,12 +216,12 @@ export async function updateExpense(
 
   // 处理分摊更新
   if (input.shares !== undefined) {
-    // 保留创建者的分摊记录（更新金额），只删除非创建者的关联
+    // 删除非创建者的关联
     await prisma.expenseShare.deleteMany({
       where: { expenseId: id, userId: { not: existing.userId } },
     });
 
-    // 计算均分金额
+    // 计算均分金额（创建者 + 其他分摊用户全员参与均分）
     const totalAmount = input.amount ?? existing.amount;
     const otherShares = input.shares.filter((s) => s.userId !== existing.userId);
     const shareCount = 1 + otherShares.length; // 创建者 + 其他分摊用户
@@ -216,15 +234,12 @@ export async function updateExpense(
       create: { expenseId: id, userId: existing.userId, shareAmount: equalShare },
     });
 
-    // 创建其他分摊用户的关联
-    if (otherShares.length > 0) {
-      await prisma.expenseShare.createMany({
-        data: otherShares.map((s) => ({
-          expenseId: id,
-          userId: s.userId,
-          shareAmount: s.shareAmount ?? equalShare,
-        })),
-        skipDuplicates: true,
+    // 创建其他分摊用户（使用相同的 equalShare，而非手动传入的值）
+    for (const s of otherShares) {
+      await prisma.expenseShare.upsert({
+        where: { expenseId_userId: { expenseId: id, userId: s.userId } },
+        update: { shareAmount: equalShare },
+        create: { expenseId: id, userId: s.userId, shareAmount: equalShare },
       });
     }
   }
@@ -258,4 +273,20 @@ export async function deleteExpense(id: string, userId: string): Promise<void> {
     where: { id, userId },
     data: { status: "DELETED" },
   });
+}
+
+export async function listUserExpenses(userId: string): Promise<MonthlyExpenseWithUser[]> {
+  const expenses = await prisma.monthlyExpense.findMany({
+    where: { userId, status: "ACTIVE" },
+    orderBy: { createdAt: "desc" },
+    include: {
+      user: { select: { id: true, name: true, email: true, image: true } },
+      shares: {
+        include: {
+          user: { select: { id: true, name: true, email: true, image: true } },
+        },
+      },
+    },
+  });
+  return expenses as MonthlyExpenseWithUser[];
 }

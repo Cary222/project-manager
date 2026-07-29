@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { AttachmentEditor, type PreviewableFile } from "@/shared/ui/AttachmentEditor";
+import { AttachmentItem } from "@/shared/ui/AttachmentItem";
 import { DocumentPreviewModal } from "@/shared/ui/DocumentPreviewModal";
 import type { FileAttachment } from "@/features/knowledge/lib/pkm";
 import type { MonthlyExpenseWithUser, ExpenseType } from "@/features/reports/monthly-expenses/lib/monthly-expense-store";
@@ -14,6 +15,7 @@ import { fetchJson } from "@/shared/api/fetch-json";
 interface MonthlyExpenseDetailClientProps {
   expense: MonthlyExpenseWithUser;
   isCreator?: boolean;
+  canEdit?: boolean;
 }
 
 function formatDate(d: Date | string): string {
@@ -69,7 +71,7 @@ interface User {
   role: string;
 }
 
-export function MonthlyExpenseDetailClient({ expense, isCreator = false }: MonthlyExpenseDetailClientProps) {
+export function MonthlyExpenseDetailClient({ expense, isCreator = false, canEdit = false }: MonthlyExpenseDetailClientProps) {
   const router = useRouter();
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [previewFile, setPreviewFile] = useState<PreviewableFile | null>(null);
@@ -450,23 +452,40 @@ export function MonthlyExpenseDetailClient({ expense, isCreator = false }: Month
         </div>
 
         {/* 附件 */}
-        {(mode === "edit" || editAttachments.length > 0) && (
-          <div className="mt-4 border-t border-ink-100 pt-4">
-            <h3 className="mb-2 text-sm font-medium text-ink-700">附件</h3>
-            <AttachmentEditor
-              attachments={editAttachments}
-              onChange={setEditAttachments}
-              onError={(msg) => toast.error(msg)}
-              renderPreview={handlePreview}
-            />
-          </div>
+        {canEdit ? (
+          (mode === "edit" || editAttachments.length > 0) && (
+            <div className="mt-4 border-t border-ink-100 pt-4">
+              <h3 className="mb-2 text-sm font-medium text-ink-700">附件</h3>
+              <AttachmentEditor
+                attachments={editAttachments}
+                onChange={setEditAttachments}
+                onError={(msg) => toast.error(msg)}
+                renderPreview={handlePreview}
+              />
+            </div>
+          )
+        ) : (
+          editAttachments.length > 0 && (
+            <div className="mt-4 border-t border-ink-100 pt-4">
+              <h3 className="mb-2 text-sm font-medium text-ink-700">附件</h3>
+              <div className="flex flex-col gap-2">
+                {editAttachments.map((attachment, index) => (
+                  <AttachmentItem
+                    key={attachment.fileId + index}
+                    attachment={attachment}
+                    onPreview={handlePreview}
+                  />
+                ))}
+              </div>
+            </div>
+          )
         )}
 
         {/* 操作按钮 */}
         <div className="mt-6 flex justify-end gap-3 border-t border-ink-100 pt-4">
           {mode === "view" ? (
             <>
-              {isCreator && (
+              {canEdit && (
                 <button
                   type="button"
                   onClick={handleDelete}
@@ -476,7 +495,7 @@ export function MonthlyExpenseDetailClient({ expense, isCreator = false }: Month
                   {deleting ? "删除中..." : "删除"}
                 </button>
               )}
-              {isCreator && (
+              {canEdit && (
                 <button
                   type="button"
                   onClick={() => setMode("edit")}
