@@ -95,7 +95,31 @@ export function MonthlyExpenseDetailClient({ expense, isCreator = false }: Month
 
   // 静态数据
   const shares = expense.shares ?? [];
-  const creatorShareAmount = expense.amount; // 创建者分摊金额（来自数据库）
+
+  // 获取创建者在 shares 中的分摊记录（如果有的话）
+  const creatorShare = shares.find((s) => s.userId === expense.userId);
+  const creatorShareAmount = creatorShare?.shareAmount ?? expense.amount;
+
+  // 计算预览模式下各参与者的分摊金额（按均分处理）
+  function getPreviewShareAmount(total: number, participantCount: number): number {
+    return participantCount > 0 ? Math.round((total / participantCount) * 100) / 100 : total;
+  }
+
+  // 预览模式下的报销人员（过滤掉创建者避免重复显示）
+  const previewShares = shares.filter((s) => s.userId !== expense.userId);
+  const totalParticipants = 1 + previewShares.length;
+  const previewParticipants = [
+    {
+      user: expense.user!,
+      shareAmount: creatorShare ? creatorShare.shareAmount : getPreviewShareAmount(expense.amount, totalParticipants),
+      isCreator: true,
+    },
+    ...previewShares.map((s) => ({
+      user: s.user,
+      shareAmount: s.shareAmount,
+      isCreator: false,
+    })),
+  ];
 
   // 获取用户列表
   useEffect(() => {
@@ -220,14 +244,6 @@ export function MonthlyExpenseDetailClient({ expense, isCreator = false }: Month
       setDeleting(false);
     }
   }
-
-  // 预览模式下的报销人员（过滤掉创建者避免重复显示）
-  const previewParticipants = [
-    { user: expense.user!, shareAmount: creatorShareAmount, isCreator: true },
-    ...shares
-      .filter((s) => s.userId !== expense.userId) // 过滤掉创建者避免重复
-      .map((s) => ({ user: s.user, shareAmount: s.shareAmount, isCreator: false })),
-  ];
 
   // 编辑模式下的均分信息
   const editEqualShare = getEqualShare();
