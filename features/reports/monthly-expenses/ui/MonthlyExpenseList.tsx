@@ -99,7 +99,9 @@ export function MonthlyExpenseList({ initialExpenses }: { initialExpenses: Month
     <div className="space-y-3 pm-fade-in">
       {expenses.map((expense) => {
         const shares = expense.shares ?? [];
-        const participantCount = shares.length + 1; // 创建者 + 关联用户
+        // 过滤掉创建者，只保留其他关联用户（避免重复显示）
+        const otherShares = shares.filter((s) => s.userId !== expense.userId);
+        const participantCount = 1 + otherShares.length; // 创建者 + 其他用户
 
         return (
           <div
@@ -128,7 +130,7 @@ export function MonthlyExpenseList({ initialExpenses }: { initialExpenses: Month
                   <div className="flex items-center gap-1">
                     <div className="flex -space-x-1">
                       <UserAvatar user={expense.user!} />
-                      {shares.slice(0, 3).map((s) => (
+                      {otherShares.slice(0, 3).map((s) => (
                         <UserAvatar key={s.id} user={s.user} />
                       ))}
                     </div>
