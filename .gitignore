@@ -46,3 +46,9 @@ next-env.d.ts
 # embedding
 embedding/__pycache__/
 embedding/api.log
+
+# python
+*.pyc
+*.pyo
+*.pyd
+.Python

@@ -124,6 +124,7 @@ def _extract_text_from_bytes(
     mime_type: str,
     page_from: int | None = None,
     page_to: int | None = None,
+    name: str = "",
 ) -> str:
     normalized = (mime_type or "").split(";")[0].strip().lower()
 
@@ -199,6 +200,26 @@ def _extract_text_from_bytes(
     if normalized == XLS_MIME:
         raise ValueError("xls_not_supported")
 
+    # 图片 OCR
+    if normalized.startswith("image/"):
+        from extractors.image import extract_image_text
+
+        return extract_image_text(raw)
+
+    # .doc (OLE 格式)
+    if normalized == "application/msword" or name.lower().endswith(".doc"):
+        from extractors.doc import extract_doc
+
+        return extract_doc(raw)
+
+    # WPS 文件
+    if normalized in ("application/wpsoffice", "application/wps-office.docx") or name.lower().endswith(
+        (".wps", ".wpt")
+    ):
+        from extractors.wps import extract_wps
+
+        return extract_wps(raw)
+
     raise ValueError(f"unsupported_mime:{normalized}")
 
 
@@ -230,7 +251,9 @@ def extract_attachment_text(
         return {"text": "", "source": "skipped_too_large"}
 
     try:
-        text = _extract_text_from_bytes(raw, mime_type, page_from=page_from, page_to=page_to)
+        text = _extract_text_from_bytes(
+            raw, mime_type, page_from=page_from, page_to=page_to, name=name
+        )
     except Exception as exc:
         print(f"[extract-text] parse failed for {name}: {exc}")
         return {"text": "", "source": "parse_error"}
