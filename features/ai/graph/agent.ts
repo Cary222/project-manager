@@ -1,12 +1,38 @@
 import { StateGraph, Annotation, END, START } from "@langchain/langgraph";
 import type { BaseMessage } from "@langchain/core/messages";
 import type { AgentMode } from "./state";
+import type { DisambiguationCandidate } from "./types";
+import type { QueryType } from "@/features/ai/core/resolvers/query-parser";
+import type { ExtractedUser, ActivityWindow } from "@/features/ai/types/structured";
+
+// ─── Human-in-Loop Types ────────────────────────────────────────────────────
+
+export interface PendingHumanAction {
+  type: "select" | "approve" | "confirm" | "input" | "upload";
+  /** Short alias for entityType */
+  entity?: string;
+  /** Full entity type identifier */
+  entityType: string;
+  reason?: string;
+  candidates?: DisambiguationCandidate[];
+  query?: string;
+  sourceResult?: unknown;
+}
+
 import { detectIntent } from "./nodes/detect-intent";
 import { searchKnowledgeNode } from "./nodes/search-knowledge";
 import { searchStructuredNode } from "./nodes/search-structured";
+import { decision as disambiguateIntentNode, humanConfirmation as humanConfirmationNode } from "./nodes/decision";
 import { webSearchNode } from "./nodes/web-search";
 import { generateResponseNode } from "./nodes/generate-response";
-import { routeByMode } from "./edges/routing";
+import {
+  routeAfterDetectIntent,
+  routeAfterHumanConfirmation,
+  routeAfterSearchKnowledge,
+  routeAfterSearchStructured,
+  routeAfterDecision,
+  routeAfterGenerateResponse,
+} from "./edges/routing";
 
 /**
  * Define state schema using LangGraph's Annotation API.
@@ -47,6 +73,11 @@ const AgentStateAnnotation = Annotation.Root({
     value: (_current, update) => update ?? "",
     default: () => "",
   }),
+  /** User ID for permission checks and personalization */
+  userId: Annotation<string>({
+    value: (_current, update) => update ?? "",
+    default: () => "",
+  }),
   /** User profile for personalization */
   profile: Annotation<Record<string, unknown> | null>({
     value: (_current, update) => update ?? null,
@@ -57,6 +88,56 @@ const AgentStateAnnotation = Annotation.Root({
     value: (_current, update) => update ?? null,
     default: () => null,
   }),
+  /** Human-in-Loop: unified pending action state (replaces pendingConfirmation) */
+  pendingHumanAction: Annotation<PendingHumanAction | null>({
+    value: (current, update) => update === undefined ? current : update,
+    default: () => null,
+  }),
+  /** Human-in-Loop: graph is waiting for user to make a selection */
+  waitingForConfirmation: Annotation<boolean>({
+    value: (current, update) => update === undefined ? current : update,
+    default: () => false,
+  }),
+  /** Human-in-Loop: original query text saved before disambiguation (used after skip) */
+  originalQuery: Annotation<string>({
+    value: (_current, update) => update ?? "",
+    default: () => "",
+  }),
+  /** Human-in-Loop: resolved entities (single source of truth) */
+  resolvedEntities: Annotation<{
+    user?: { id: string; name: string; resolvedBy: "auto" | "confirmation" };
+    project?: { id: string; name: string; resolvedBy: "auto" | "confirmation" };
+    ticket?: { id: string; name: string; resolvedBy: "auto" | "confirmation" };
+    weekly_report?: { id: string; name: string; resolvedBy: "auto" | "confirmation" };
+    originalQueryType?: "ticket" | "project" | "user" | "commit" | "weekly_report";
+    /** Original user query (e.g. "刘工的周报有哪些") — set after disambiguation
+     *  so searchStructuredNode can re-parse it on the follow-up round instead of
+     *  using the selection message ("1" or "cary") as the new query. */
+    originalQuery?: string;
+  } | null>({
+    value: (current, update) => update === undefined ? current : update,
+    default: () => null,
+  }),
+  /** 最近讨论的用户（用于"他/她"等代词指代）。HIL 确认后设置。 */
+  lastMentionedUser: Annotation<{ id: string; name: string } | null>({
+    value: (current, update) => update === undefined ? current : update,
+    default: () => null,
+  }),
+  /** Structured query type (ticket/project/user/commit/weekly_report/note/ambiguous). */
+  queryType: Annotation<QueryType | null>({
+    value: (current, update) => update === undefined ? current : update,
+    default: () => null,
+  }),
+  /** Extracted user identifier from the user message (raw + normalized). */
+  extractedUser: Annotation<ExtractedUser | null>({
+    value: (current, update) => update === undefined ? current : update,
+    default: () => null,
+  }),
+  /** Activity time window (today/yesterday/this_week/this_month/recent). */
+  activityWindow: Annotation<ActivityWindow | null>({
+    value: (current, update) => update === undefined ? current : update,
+    default: () => null,
+  }),
 });
 
 export type AgentState = typeof AgentStateAnnotation.State;
@@ -64,22 +145,25 @@ export type PartialAgentState = typeof AgentStateAnnotation.Update;
 
 /** Node names used in the routing graph */
 export type NextNode =
+  | "detectIntent"
   | "searchKnowledge"
   | "searchStructured"
+  | "decision"
   | "webSearch"
   | "generateResponse"
+  | "humanConfirmation"
   | typeof END;
 
 /**
  * Build the LangGraph StateGraph.
  *
  * Flow:
- *   START → detectIntent → addConditionalEdges ─┬─→ searchKnowledge → searchStructured ─┐
- *                                               ├─→ searchStructured (auto mode)        ┤
- *                                               ├─→ webSearch                           ┤
- *                                               └─→ generateResponse (chat mode)        │
- *                                                                                        ▼
- *                                                                              generateResponse → END
+ *   START → detectIntent → addConditionalEdges ─┬─→ searchKnowledge → searchStructured → decision ─┬─→ humanConfirmation → decision → searchStructured
+ *                                                 ├─→ searchStructured (auto mode)                                  │
+ *                                                 ├─→ webSearch                                                                  │
+ *                                                 └─→ generateResponse (chat mode)                                                     │
+ *                                                                                                                                    ▼
+ *                                                                                                                          generateResponse → END
  */
 function buildWorkflow() {
   const workflow = new StateGraph(AgentStateAnnotation)
@@ -87,24 +171,47 @@ function buildWorkflow() {
     .addNode("detectIntent", detectIntent)
     .addNode("searchKnowledge", searchKnowledgeNode)
     .addNode("searchStructured", searchStructuredNode)
+    .addNode("decision", disambiguateIntentNode)
     .addNode("webSearch", webSearchNode)
     .addNode("generateResponse", generateResponseNode)
+    .addNode("humanConfirmation", humanConfirmationNode)
     // Entry point
     .addEdge(START, "detectIntent")
-    // Conditional edges from detectIntent — routes by mode
-    .addConditionalEdges("detectIntent", routeByMode, {
+    // Conditional edges from detectIntent — routes by mode or pending confirmation
+    .addConditionalEdges("detectIntent", routeAfterDetectIntent, {
+      detectIntent: "detectIntent",
       searchKnowledge: "searchKnowledge",
       searchStructured: "searchStructured",
       webSearch: "webSearch",
       generateResponse: "generateResponse",
+      humanConfirmation: "humanConfirmation",
     })
-    // searchKnowledge → searchStructured → generateResponse
+    // searchKnowledge → searchStructured → (conditional: decision or generateResponse)
     .addEdge("searchKnowledge", "searchStructured")
-    .addEdge("searchStructured", "generateResponse")
+    .addConditionalEdges("searchStructured", routeAfterSearchStructured, {
+      decision: "decision",
+      humanConfirmation: "humanConfirmation",
+      generateResponse: "generateResponse",
+    })
+    // decision conditional edge
+    .addConditionalEdges("decision", routeAfterDecision, {
+      humanConfirmation: "humanConfirmation",
+      searchStructured: "searchStructured",
+      [END]: END,
+    })
+    // Human confirmation: self-loop on invalid, go to decision on valid, END on nothing pending
+    .addConditionalEdges("humanConfirmation", routeAfterHumanConfirmation, {
+      humanConfirmation: "humanConfirmation",
+      decision: "decision",
+      [END]: END,
+    })
     // webSearch → generateResponse
     .addEdge("webSearch", "generateResponse")
-    // generateResponse → END
-    .addEdge("generateResponse", END)
+    // generateResponse → conditional (pending_human_action round 2 → humanConfirmation, else END)
+    .addConditionalEdges("generateResponse", routeAfterGenerateResponse, {
+      humanConfirmation: "humanConfirmation",
+      [END]: END,
+    })
     // Compile (no recursionLimit in JS API — uses defaults)
     .compile();
 

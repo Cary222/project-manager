@@ -2,19 +2,21 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AiChatInput } from "./AiChatInput";
+import { AiCandidatePicker } from "./AiCandidatePicker";
 import { AiMessageBubble } from "./AiMessageBubble";
 import { type SourceReference } from "./AiSourcesList";
 import { AiTypingBubble } from "./AiTypingBubble";
 import { AiThinkingTrace } from "./AiThinkingTrace";
+import { UserProfilePanel, type AiUserProfile } from "./UserProfilePanel";
 import {
   AI_MODE_OPTIONS,
   type AiMode,
   type ThinkingNodeName,
   type ThinkingStep,
   buildStepPlan,
-} from "@/features/ai/lib/types";
-import { shouldUseRag, shouldUseWebSearch } from "@/features/ai/lib/detector";
-import { IconCheck, IconChevronDown, IconEdit, IconPlus, IconSparkles, IconX } from "@/shared/ui/icons";
+} from "@/features/ai/types";
+import { shouldUseRag, shouldUseWebSearch } from "@/features/ai/search/detector";
+import { IconSparkles, IconX } from "@/shared/ui/icons";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -80,11 +82,23 @@ function markPendingAsSkipped(steps: ThinkingStep[]): ThinkingStep[] {
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+export interface CandidateUser {
+  id: string;
+  /** HIL candidates: label from disambiguateIntent (e.g. "cary（刘屹鹏）") */
+  label?: string;
+  summary?: string;
+  /** Legacy assignee format */
+  name?: string;
+  email?: string;
+  sublabel?: string;
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
   sources?: SourceReference[];
+  candidates?: CandidateUser[];
 }
 
 interface AiChatPanelProps {
@@ -99,336 +113,6 @@ interface AiChatPanelProps {
   // Called once a greeting has been triggered (or failed) so the parent can
   // clear the pending flag for this conversation.
   onGreetingConsumed?: (id: string) => void;
-}
-
-// ─── User Profile ─────────────────────────────────────────────────────────────
-
-interface AiUserProfile {
-  roles?: string[];
-  interests?: string[];
-  expertise?: string[];
-  recentTopics?: string[];
-  preferences?: Record<string, string>;
-  // NOTE: projects 字段已移除 — 项目信息通过真实数据库获取
-}
-
-interface UserProfilePanelProps {
-  profile: AiUserProfile | null;
-  onChange?: (next: AiUserProfile) => void;
-}
-
-function ProfileField({ label, value }: { label: string; value?: string | string[] }) {
-  if (!value || (Array.isArray(value) && value.length === 0)) return null;
-  const items = Array.isArray(value) ? value : [value];
-  return (
-    <div className="space-y-1">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-ink-400">{label}</p>
-      <div className="flex flex-wrap gap-1.5">
-        {items.map((item, i) => (
-          <span
-            key={i}
-            className="rounded-full bg-brand-50 px-2.5 py-0.5 text-xs font-medium text-brand-700"
-          >
-            {item}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// Editable variant of ProfileField. Renders each tag with a × delete button
-// and shows an inline input + "+" button at the bottom for adding new items.
-// Items are managed by the parent (UserProfilePanel) so the parent owns the
-// draft → save flow.
-function EditableProfileField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string[] | undefined;
-  onChange: (next: string[]) => void;
-}) {
-  const [draft, setDraft] = useState("");
-
-  const commit = () => {
-    const trimmed = draft.trim();
-    if (!trimmed) return;
-    const current = value ?? [];
-    if (current.includes(trimmed)) {
-      setDraft("");
-      return;
-    }
-    onChange([...current, trimmed]);
-    setDraft("");
-  };
-
-  return (
-    <div className="space-y-1.5">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-ink-400">
-        {label}
-      </p>
-      <div className="flex flex-wrap gap-1.5">
-        {(value ?? []).map((item) => (
-          <span
-            key={item}
-            className="group/etag inline-flex items-center gap-1 rounded-full bg-brand-50 py-0.5 pl-2.5 pr-1 text-xs font-medium text-brand-700"
-          >
-            {item}
-            <button
-              type="button"
-              onClick={() => onChange((value ?? []).filter((x) => x !== item))}
-              className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full text-brand-400 transition hover:bg-brand-200 hover:text-danger"
-              aria-label={`删除 ${item}`}
-              title={`删除 ${item}`}
-            >
-              <IconX className="h-2.5 w-2.5" />
-            </button>
-          </span>
-        ))}
-      </div>
-      <div className="flex items-center gap-1.5">
-        <input
-          type="text"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              commit();
-            } else if (e.key === "Escape") {
-              setDraft("");
-            }
-          }}
-          placeholder={`添加${label}…`}
-          className="min-w-0 flex-1 rounded-md border border-ink-200 bg-white px-2 py-1 text-xs text-ink-900 outline-none transition focus:border-brand-400 focus:ring-1 focus:ring-brand-100"
-          maxLength={50}
-        />
-        <button
-          type="button"
-          onClick={commit}
-          disabled={!draft.trim()}
-          className="inline-flex items-center gap-0.5 rounded-md border border-brand-200 bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700 transition hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <IconPlus className="h-3 w-3" />
-          添加
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function UserProfilePanel({
-  profile,
-  onChange,
-}: UserProfilePanelProps) {
-  const [collapsed, setCollapsed] = useState(true);
-  const [editing, setEditing] = useState(false);
-  // Local draft the user mutates before pressing "保存". Mirrors the `profile`
-  // prop on mount and on any external change.
-  const [draft, setDraft] = useState<AiUserProfile>(profile ?? {});
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  // Keep draft in sync with the latest prop. Only do this when we're NOT
-  // editing, so the user's unsaved edits don't get clobbered by a refetch
-  // (e.g. after switching conversations).
-  useEffect(() => {
-    // 外部画像切换时必须重置未编辑草稿，避免跨会话残留；编辑中则保留用户输入。
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (!editing) setDraft(profile ?? {});
-  }, [profile, editing]);
-
-  const updateField = (field: keyof AiUserProfile, next: string[]) => {
-    setDraft((d) => ({ ...d, [field]: next }));
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    setSaveError(null);
-    try {
-      const res = await fetch("/api/ai/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile: draft }),
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`HTTP ${res.status}${text ? `: ${text}` : ""}`);
-      }
-      const json = await res.json();
-      const saved = json?.data?.profile ?? draft;
-      onChange?.(saved as AiUserProfile);
-      setEditing(false);
-    } catch (err) {
-      console.error("[UserProfilePanel] save error:", err);
-      setSaveError(err instanceof Error ? err.message : "保存失败");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleCancel = () => {
-    setDraft(profile ?? {});
-    setEditing(false);
-    setSaveError(null);
-  };
-
-  if (!profile) {
-    return (
-      <div className="border-b border-ink-100 px-5 py-3">
-        <div className="flex items-center gap-2 rounded-xl border border-dashed border-ink-200 bg-ink-50/50 px-4 py-3">
-          <IconSparkles className="h-4 w-4 shrink-0 text-brand-400" />
-          <p className="text-xs text-ink-400">
-            还没有画像，多和小星聊几句后会自动生成
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  const hasAnyField =
-    profile.roles?.length ||
-    profile.interests?.length ||
-    profile.expertise?.length ||
-    profile.recentTopics?.length ||
-    Object.keys(profile.preferences ?? {}).length > 0;
-
-  if (!hasAnyField && !editing) {
-    return (
-      <div className="border-b border-ink-100 px-5 py-3">
-        <div className="flex items-center gap-2 rounded-xl border border-dashed border-ink-200 bg-ink-50/50 px-4 py-3">
-          <IconSparkles className="h-4 w-4 shrink-0 text-brand-400" />
-          <p className="text-xs text-ink-400">
-            还没有画像，多和小星聊几句后会自动生成
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="border-b border-ink-100">
-      <div className="flex w-full items-center justify-between px-5 py-3 transition hover:bg-ink-50">
-        <button
-          type="button"
-          onClick={() => setCollapsed((c) => !c)}
-          className="flex flex-1 items-center gap-2 text-left"
-        >
-          <IconSparkles className="h-4 w-4 text-brand-500" />
-          <span className="text-xs font-medium text-ink-700">用户画像摘要</span>
-          {editing && (
-            <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
-              编辑中
-            </span>
-          )}
-        </button>
-        <div className="flex items-center gap-1">
-          {!editing && (
-            <button
-              type="button"
-              onClick={() => {
-                setEditing(true);
-                setCollapsed(false);
-              }}
-              className="rounded-md p-1 text-ink-400 transition hover:bg-ink-100 hover:text-ink-700"
-              title="编辑画像"
-              aria-label="编辑画像"
-            >
-              <IconEdit className="h-3.5 w-3.5" />
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setCollapsed((c) => !c)}
-            className="rounded-md p-1 text-ink-400 transition hover:bg-ink-100 hover:text-ink-700"
-            title={collapsed ? "展开" : "折叠"}
-            aria-label={collapsed ? "展开画像" : "折叠画像"}
-          >
-            <IconChevronDown
-              className={`h-4 w-4 text-ink-400 transition ${collapsed ? "" : "rotate-180"}`}
-            />
-          </button>
-        </div>
-      </div>
-
-      {!collapsed && (
-        <div className="max-h-64 overflow-y-auto px-5 pb-3">
-          {editing ? (
-            <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-              <EditableProfileField
-                label="角色"
-                value={draft.roles}
-                onChange={(next) => updateField("roles", next)}
-              />
-              <EditableProfileField
-                label="兴趣"
-                value={draft.interests}
-                onChange={(next) => updateField("interests", next)}
-              />
-              <EditableProfileField
-                label="专业领域"
-                value={draft.expertise}
-                onChange={(next) => updateField("expertise", next)}
-              />
-              <div className="col-span-2">
-                <EditableProfileField
-                  label="近期话题"
-                  value={draft.recentTopics}
-                  onChange={(next) => updateField("recentTopics", next)}
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-              <ProfileField label="角色" value={profile.roles} />
-              <ProfileField label="兴趣" value={profile.interests} />
-              <ProfileField label="专业领域" value={profile.expertise} />
-              <div className="col-span-2">
-                <ProfileField label="近期话题" value={profile.recentTopics} />
-              </div>
-              {profile.preferences &&
-                Object.entries(profile.preferences).map(([key, val]) => (
-                  <ProfileField key={key} label={key} value={val} />
-                ))}
-            </div>
-          )}
-
-          {editing && (
-            <div className="mt-3 flex items-center justify-end gap-2 border-t border-ink-100 pt-3">
-              {saveError && (
-                <p className="mr-auto text-xs text-danger">{saveError}</p>
-              )}
-              <button
-                type="button"
-                onClick={handleCancel}
-                disabled={saving}
-                className="rounded-md border border-ink-200 bg-white px-3 py-1.5 text-xs font-medium text-ink-600 transition hover:bg-ink-50 disabled:opacity-50"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving}
-                className="inline-flex items-center gap-1 rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-brand-700 disabled:opacity-50"
-              >
-                {saving ? (
-                  "保存中…"
-                ) : (
-                  <>
-                    <IconCheck className="h-3.5 w-3.5" />
-                    保存修改
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
 }
 
 // ─── Main Panel ───────────────────────────────────────────────────────────────
@@ -470,6 +154,10 @@ export function AiChatPanel({
     status: "calling" | "done" | "error";
     message?: string;
   } | null>(null);
+  // Pending confirmation candidates — rendered as a detached picker above the input
+  // (not as a message bubble in the conversation).
+  const [pendingCandidates, setPendingCandidates] = useState<CandidateUser[] | null>(null);
+
   // Tracks every tool call in the current stream so the UI can show a full
   // "searchKnowledge → searchStructured" pipeline instead of the last tool only.
   // Use the functional setter form to avoid stale-closure issues when SSE
@@ -499,6 +187,8 @@ export function AiChatPanel({
   // Refs to avoid stale-closure issues in async callbacks
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const conversationVersionRef = useRef(0);
+  const thinkingCollapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevConversationIdRef = useRef<string | null | undefined>(undefined);
   const messagesRef = useRef<Message[]>([]);
   const aiModeRef = useRef<AiMode>("auto");
@@ -513,10 +203,11 @@ export function AiChatPanel({
   // ─── Load conversation messages ─────────────────────────────────────────────
 
   const loadMessages = useCallback(
-    async (convId: string) => {
+    async (convId: string, version: number) => {
       setIsMessagesLoading(true);
       try {
         const res = await fetch(`/api/ai/conversations/${convId}`);
+        if (version !== conversationVersionRef.current) return;
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         const conv = json.data;
@@ -531,10 +222,12 @@ export function AiChatPanel({
           );
         }
       } catch (err) {
-        console.error("[AiChatPanel] load messages error:", err);
-        setMessages([]);
+        if (version === conversationVersionRef.current) {
+          console.error("[AiChatPanel] load messages error:", err);
+          setMessages([]);
+        }
       } finally {
-        setIsMessagesLoading(false);
+        if (version === conversationVersionRef.current) setIsMessagesLoading(false);
       }
     },
     []
@@ -574,7 +267,8 @@ export function AiChatPanel({
   // + `isLoading` state, which the renderer already maps to a single
   // AiMessageBubble + AiTypingBubble pair. Avoid double-rendering.
   const triggerGreeting = useCallback(
-    async (convId: string) => {
+    async (convId: string, version: number) => {
+      if (version !== conversationVersionRef.current) return;
       setIsLoading(true);
       setStreamingContent("");
       setPendingSources([]);
@@ -614,6 +308,7 @@ export function AiChatPanel({
             const data = line.slice(6);
             try {
               const parsed = JSON.parse(data);
+              if (version !== conversationVersionRef.current) return;
               if (parsed.type === "text") {
                 fullContent += parsed.delta;
                 setStreamingContent(fullContent);
@@ -643,9 +338,11 @@ export function AiChatPanel({
         // Silently ignore — the conversation still exists, user can retry
         // by sending a message.
       } finally {
-        setIsLoading(false);
-        setStreamingContent("");
-        setGreetingHint(null);
+        if (version === conversationVersionRef.current) {
+          setIsLoading(false);
+          setStreamingContent("");
+          setGreetingHint(null);
+        }
       }
     },
     [pickGreetingHint]
@@ -670,7 +367,7 @@ export function AiChatPanel({
     "你好！我是小星，恒星研公司内部项目管理系统的 AI 助手，由 cary 开发。我可以帮你查找工单、查看提交记录、回顾笔记。有什么可以帮你的吗？";
 
   const playWelcomeTypewriter = useCallback(
-    (convId: string) => {
+    (convId: string, version: number) => {
       // Tear down any in-flight typewriter (e.g. user re-clicks 新对话).
       if (welcomeTypewriterRef.current?.timerId) {
         clearInterval(welcomeTypewriterRef.current.timerId);
@@ -694,6 +391,10 @@ export function AiChatPanel({
       let revealed = 1;
       const total = WELCOME_CONTENT.length;
       const timerId = setInterval(() => {
+        if (version !== conversationVersionRef.current) {
+          clearInterval(timerId);
+          return;
+        }
         revealed = Math.min(revealed + WELCOME_TYPEWRITER_CHARS_PER_TICK, total);
         const snapshot = WELCOME_CONTENT.slice(0, revealed);
         setMessages((prev) =>
@@ -706,7 +407,7 @@ export function AiChatPanel({
           welcomeTypewriterRef.current = null;
           // Welcome is fully revealed. Now stream the personalized greeting
           // so the second bubble shows up.
-          void triggerGreeting(convId);
+          void triggerGreeting(convId, version);
         }
       }, WELCOME_TYPEWRITER_INTERVAL_MS);
 
@@ -719,6 +420,10 @@ export function AiChatPanel({
   // when the user switches to a different conversation.
   useEffect(() => {
     return () => {
+      abortControllerRef.current?.abort();
+      if (thinkingCollapseTimerRef.current) {
+        clearTimeout(thinkingCollapseTimerRef.current);
+      }
       if (welcomeTypewriterRef.current?.timerId) {
         clearInterval(welcomeTypewriterRef.current.timerId);
       }
@@ -729,19 +434,55 @@ export function AiChatPanel({
   // ─── Respond to conversationId changes ──────────────────────────────────────
 
   useEffect(() => {
-    void (async () => {
-      if (conversationId === prevConversationIdRef.current) return;
-      prevConversationIdRef.current = conversationId;
+    if (conversationId === prevConversationIdRef.current) return;
+    prevConversationIdRef.current = conversationId;
+    const version = ++conversationVersionRef.current;
 
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    if (welcomeTypewriterRef.current?.timerId) {
+      clearInterval(welcomeTypewriterRef.current.timerId);
+    }
+    welcomeTypewriterRef.current = null;
+    if (thinkingCollapseTimerRef.current) {
+      clearTimeout(thinkingCollapseTimerRef.current);
+      thinkingCollapseTimerRef.current = null;
+    }
+
+    setIsLoading(false);
+    setIsMessagesLoading(Boolean(conversationId));
+    setMessages(
+      conversationId
+        ? []
+        : isPage
+          ? []
+          : [
+              {
+                id: "welcome",
+                role: "assistant",
+                content:
+                  "你好！我是小星，恒星研公司内部项目管理系统的 AI 助手，由 cary 开发。我可以帮你查找工单、查看提交记录、回顾笔记。有什么可以帮你的吗？",
+              },
+            ],
+    );
+    setStreamingContent("");
+    setPendingSources([]);
+    setActiveToolCall(null);
+    setToolCallChain([]);
+    setThinkingSteps([]);
+    setThinkingCollapsed(undefined);
+
+    void (async () => {
       if (conversationId) {
-        await loadMessages(conversationId);
+        await loadMessages(conversationId, version);
+        if (version !== conversationVersionRef.current) return;
         if (isPage) await loadProfile();
         // If the parent flagged this conversation as needing an AI greeting
         // (i.e. it was just created via the "新对话" button), play the
         // preset-welcome typewriter, which itself fires triggerGreeting once
         // the welcome text has been fully revealed.
-        if (autoGreet) {
-          playWelcomeTypewriter(conversationId);
+        if (autoGreet && version === conversationVersionRef.current) {
+          playWelcomeTypewriter(conversationId, version);
           onGreetingConsumed?.(conversationId);
         }
       } else {
@@ -782,6 +523,8 @@ export function AiChatPanel({
 
   const handleSend = useCallback(
     async (message: string) => {
+      const conversationVersion = conversationVersionRef.current;
+      const requestController = new AbortController();
       const tempUserId = `user-${Date.now()}`;
 
       // Optimistically add user message immediately so it shows up while the
@@ -809,7 +552,7 @@ export function AiChatPanel({
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
-      abortControllerRef.current = new AbortController();
+      abortControllerRef.current = requestController;
 
       try {
         const conversationHistory = messagesRef.current.slice(-10).map((msg) => ({
@@ -838,6 +581,7 @@ export function AiChatPanel({
         // 无论 intent 分类结果如何，auto/web 模式都尝试获取 VPN 出口 IP 对应的城市
         if (mode === "auto" || mode === "web") {
           const city = await getClientCity();
+          if (conversationVersion !== conversationVersionRef.current) return;
           if (city) body.clientCity = city;
         }
 
@@ -845,7 +589,7 @@ export function AiChatPanel({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
-          signal: abortControllerRef.current.signal,
+          signal: requestController.signal,
         });
 
         if (!response.ok) {
@@ -873,6 +617,7 @@ export function AiChatPanel({
 
             try {
               const parsed = JSON.parse(data);
+              if (conversationVersion !== conversationVersionRef.current) return;
 
               if (parsed.type === "conversation") {
                 // First message in a new conversation: API created the conversation
@@ -944,7 +689,12 @@ export function AiChatPanel({
                   }),
                 );
                 // 1.5s 后让面板自动折叠成单行摘要。
-                setTimeout(() => setThinkingCollapsed(true), 1500);
+                thinkingCollapseTimerRef.current = setTimeout(() => {
+                  if (conversationVersion === conversationVersionRef.current) {
+                    setThinkingCollapsed(true);
+                  }
+                  thinkingCollapseTimerRef.current = null;
+                }, 1500);
               } else if (parsed.type === "tool_call") {
                 console.log("[AI] tool_call received:", parsed);
                 const toolLabel =
@@ -1081,6 +831,22 @@ export function AiChatPanel({
                     })),
                   );
                 }
+              } else if (parsed.type === "pending_confirmation") {
+                // Human-in-Loop: render candidate picker above input (not as a message bubble)
+                setPendingCandidates(parsed.candidates ?? []);
+                // Still add a brief natural-language hint message so the conversation context is clear.
+                // Dynamic label based on entityType to avoid "用户" for weekly_report etc.
+                const entityType = (parsed as { entityType?: string }).entityType ?? "user";
+                const entityLabelMap: Record<string, string> = { user: "用户", weekly_report: "周报", ticket: "工单", project: "项目" };
+                const entityLabel = entityLabelMap[entityType] ?? "匹配项";
+                setIsLoading(false);
+                setStreamingContent("");
+                const hintMsg: Message = {
+                  id: `pending-confirm-${Date.now()}`,
+                  role: "assistant",
+                  content: `找到 ${parsed.candidates?.length} 个${entityLabel}匹配，请在下方选择目标${entityLabel}：`,
+                };
+                setMessages((prev) => [...prev, hintMsg]);
               } else if (parsed.type === "error") {
                 setActiveToolCall(null);
                 setThinkingSteps((prev) =>
@@ -1100,7 +866,10 @@ export function AiChatPanel({
           }
         }
       } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
+        if (
+          error instanceof Error &&
+          (error.name === "AbortError" || conversationVersion !== conversationVersionRef.current)
+        ) {
           return;
         }
         console.error("Chat error:", error);
@@ -1267,6 +1036,8 @@ export function AiChatPanel({
                 role={msg.role}
                 content={msg.content}
                 sources={msg.sources}
+                candidates={msg.candidates}
+                onCandidateSelect={(candidateId) => handleSend(candidateId)}
               />
             ))}
 
@@ -1315,6 +1086,32 @@ export function AiChatPanel({
           <div ref={messagesEndRef} />
         </div>
       </div>
+
+      {/* Human-in-Loop: candidate picker */}
+      {pendingCandidates && pendingCandidates.length > 0 && (
+        <AiCandidatePicker
+          isPage={isPage}
+          options={pendingCandidates}
+          onSelect={(option) => {
+            // Send the candidate's label (user name) instead of the numeric index.
+            // The graph receives this as the new message and uses parseSelection()
+            // to match it against the pending candidates. This is more natural
+            // than sending "1" which would parse as type=user in a fresh round.
+            handleSend((option as CandidateUser).label ?? (option as CandidateUser).name ?? "");
+            setPendingCandidates(null);
+          }}
+          onCancel={() => {
+            handleSend("0");
+            setPendingCandidates(null);
+          }}
+          onCustomInput={(text) => {
+            // 直接发送用户输入的内容，让后端重新解析意图
+            handleSend(text);
+            setPendingCandidates(null);
+          }}
+          customInputPlaceholder="输入用户名或重新描述问题…"
+        />
+      )}
 
       {/* Input */}
       <div className={`border-t border-ink-200 ${isPage ? "p-6" : "p-3"}`}>

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { IconArrowRight, IconSearch } from "@/shared/ui/icons";
 import { KnowledgeSearchResults } from "@/features/knowledge/ui/KnowledgeSearchResults";
-import type { SearchResponse } from "@/shared/lib/search-types";
+import type { SearchResponse } from "@/features/knowledge/lib/search-types";
 
 const EMPTY_RESULTS: SearchResponse = {
   mode: "search",

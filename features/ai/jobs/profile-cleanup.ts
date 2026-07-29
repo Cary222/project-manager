@@ -19,7 +19,7 @@
  */
 
 import { prisma } from "@/shared/db/client";
-import { cleanupUserProfile } from "./summarizer";
+import { cleanupUserProfile } from "@/features/ai/llm/summarizer";
 
 /**
  * 获取本周的周一（00:00:00）

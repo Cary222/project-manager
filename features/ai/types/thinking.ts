@@ -1,48 +1,9 @@
-export type AiMode = "auto" | "search" | "chat" | "web";
-
-export interface AiModeOption {
-  key: AiMode;
-  label: string;
-  icon: string;
-  description: string;
-}
-
-export const AI_MODE_OPTIONS: AiModeOption[] = [
-  {
-    key: "auto",
-    label: "自动",
-    icon: "sparkles",
-    description: "智能检测问题类型，自动选择最佳模式",
-  },
-  {
-    key: "search",
-    label: "知识检索",
-    icon: "search",
-    description: "强制搜索知识库，获取准确的项目相关信息",
-  },
-  {
-    key: "chat",
-    label: "通用对话",
-    icon: "message",
-    description: "纯聊天模式，不检索知识库，快速响应",
-  },
-  {
-    key: "web",
-    label: "联网搜索",
-    icon: "globe",
-    description: "联网搜索最新信息，结合知识库回答",
-  },
-];
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Thinking trace: per-node progress for the LangGraph pipeline
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
- * LangGraph 节点名（与 graph/agent.ts 对齐）。
- * `toolName` 仅当节点是工具节点（searchKnowledge / searchStructured / webSearch）
- * 时填写，其它节点（detectIntent / generateResponse）走 LLM 直接产出。
+ * ThinkingStep and related types for the LangGraph pipeline.
  */
+
+import type { AiMode } from "./modes";
+
 export type ThinkingNodeName =
   | "detectIntent"
   | "searchKnowledge"

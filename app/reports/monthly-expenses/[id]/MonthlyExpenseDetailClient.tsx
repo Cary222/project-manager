@@ -86,7 +86,9 @@ export function MonthlyExpenseDetailClient({ expense, isCreator = false }: Month
   );
   // 分摊用户列表（不含创建者）
   const [editShares, setEditShares] = useState<{ userId: string; shareAmount: number }[]>(
-    (expense.shares ?? []).map((s) => ({ userId: s.userId, shareAmount: s.shareAmount })),
+    (expense.shares ?? [])
+      .filter((s) => s.userId !== expense.userId) // 过滤掉创建者
+      .map((s) => ({ userId: s.userId, shareAmount: s.shareAmount })),
   );
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -111,7 +113,11 @@ export function MonthlyExpenseDetailClient({ expense, isCreator = false }: Month
       setEditAmount(expense.amount.toString());
       setEditDescription(expense.description);
       setEditAttachments((expense.attachments as FileAttachment[] | null | undefined) ?? []);
-      setEditShares((expense.shares ?? []).map((s) => ({ userId: s.userId, shareAmount: s.shareAmount })));
+      setEditShares(
+        (expense.shares ?? [])
+          .filter((s) => s.userId !== expense.userId) // 过滤掉创建者
+          .map((s) => ({ userId: s.userId, shareAmount: s.shareAmount })),
+      );
     }
   }, [mode, expense]);
 
@@ -215,10 +221,12 @@ export function MonthlyExpenseDetailClient({ expense, isCreator = false }: Month
     }
   }
 
-  // 预览模式下的报销人员
+  // 预览模式下的报销人员（过滤掉创建者避免重复显示）
   const previewParticipants = [
     { user: expense.user!, shareAmount: creatorShareAmount, isCreator: true },
-    ...shares.map((s) => ({ user: s.user, shareAmount: s.shareAmount, isCreator: false })),
+    ...shares
+      .filter((s) => s.userId !== expense.userId) // 过滤掉创建者避免重复
+      .map((s) => ({ user: s.user, shareAmount: s.shareAmount, isCreator: false })),
   ];
 
   // 编辑模式下的均分信息

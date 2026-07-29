@@ -8,7 +8,7 @@ export type {
 } from "@/entities/project/model/types";
 
 // Re-export FileAttachment from PKM layer (PR10 四层文件架构)
-export type { FileAttachment } from "@/shared/lib/pkm";
+export type { FileAttachment } from "@/features/knowledge/lib/pkm";
 
 export type CommentItem = {
   id: string;
@@ -16,7 +16,7 @@ export type CommentItem = {
   authorId: string;
   content: string;
   mentionedUserIds: string[];
-  attachments?: import("@/shared/lib/pkm").FileAttachment[];
+  attachments?: import("@/features/knowledge/lib/pkm").FileAttachment[];
   createdAt: string;
   author: { id: string; name: string | null; email: string };
   mentionedUsers?: { id: string; name: string | null; email: string }[];

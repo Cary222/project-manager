@@ -7,7 +7,7 @@
  * - 用户深挖时直接使用缓存，实现秒级响应
  */
 
-import type { RagContext } from "@/features/ai/lib/rag";
+import type { RagContext } from "@/features/ai/search/rag";
 
 interface SpeculationEntry {
   query: string;

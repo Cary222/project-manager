@@ -1,12 +1,19 @@
 import { END } from "@langchain/langgraph";
 import type { AgentState } from "../agent";
+import {
+  isUserActivityQuery,
+  isDeepContentQuery,
+} from "@/features/ai/core/resolvers/query-parser";
 
 /** Node names used in the routing graph */
 export type NextNode =
+  | "detectIntent"
   | "searchKnowledge"
   | "searchStructured"
+  | "decision"
   | "webSearch"
   | "generateResponse"
+  | "humanConfirmation"
   | typeof END;
 
 /**
@@ -17,7 +24,7 @@ export type NextNode =
  *
  * Efficiency-first routing:
  * - search (force deep): always starts with searchKnowledge (RAG)
- *                        → then searchStructured (DB) → generateResponse
+ *                        → then searchStructured (DB) → decision → generateResponse
  * - auto (intelligent):  content/doc/note queries → searchKnowledge (RAG deep)
  *                        exact IDs / stats / vcs queries → searchStructured (fast DB)
  * - web:  webSearch → generateResponse
@@ -29,7 +36,6 @@ export function routeByMode(state: AgentState): NextNode {
     typeof lastMessage?.content === "string"
       ? lastMessage.content
       : "";
-  console.log(`[routeByMode] state.mode=${state.mode} content="${content.slice(0, 60)}"`);
 
   switch (state.mode) {
     case "search":
@@ -38,11 +44,6 @@ export function routeByMode(state: AgentState): NextNode {
       return "searchKnowledge";
 
     case "auto": {
-      const lastMessage = state.messages[state.messages.length - 1];
-      const content =
-        typeof lastMessage?.content === "string"
-          ? lastMessage.content
-          : "";
       // 人员近况 → DB 快查
       if (isUserActivityQuery(content)) return "searchStructured";
       // Deep content / document / note queries → RAG for semantic retrieval
@@ -60,6 +61,64 @@ export function routeByMode(state: AgentState): NextNode {
   }
 }
 
+export function routeAfterDetectIntent(state: AgentState): NextNode {
+  const waiting = state.waitingForConfirmation;
+  const mode = state.mode;
+  console.log(`[routeAfterDetectIntent] waitingForConfirmation=${waiting} mode=${mode}`);
+  // ── Human-in-Loop: always route to humanConfirmation while waiting ──
+  if (waiting) {
+    return "humanConfirmation";
+  }
+  return routeByMode(state);
+}
+
+/**
+ * Route after human confirmation node.
+ *
+ * Decision logic:
+ *   - pendingHumanAction is set → still waiting for valid input → self-loop to humanConfirmation
+ *     (invalid selection case: node already appended error message to messages)
+ *   - resolvedEntities has any entity → valid selection → "回炉" to decision
+ *     to handle the next decision in the chain.
+ *     e.g. Round 1 "刘工的周报有哪些" → user picked "1. cary" → decision picks weekly_report
+ *     e.g. Round 2 weekly_report pick → searchStructured uses resolved id → generateResponse
+ *   - otherwise → END (nothing pending, nothing resolved = end of HIL flow)
+ */
+export function routeAfterHumanConfirmation(state: AgentState): NextNode {
+  if (state.pendingHumanAction) {
+    // Invalid selection or still waiting — self-loop to re-prompt.
+    // The error message is already in state.messages from the node's return.
+    return "humanConfirmation";
+  }
+  if (state.resolvedEntities?.user ||
+      state.resolvedEntities?.project ||
+      state.resolvedEntities?.ticket ||
+      state.resolvedEntities?.weekly_report) {
+    // Valid selection — "回炉" to decision so it can process the next decision
+    // (e.g. cross-type search → user picked type → query that type for specific entity).
+    return "decision";
+  }
+  // No pending, no resolution — end the HIL flow.
+  return END;
+}
+
+/**
+ * Route after decision node.
+ *
+ * - If pendingHumanAction is set → humanConfirmation
+ * - If resolvedEntities is set → searchStructured (redo the query with resolved entity)
+ * - Otherwise → END
+ */
+export function routeAfterDecision(state: AgentState): NextNode {
+  if (state.pendingHumanAction) {
+    return "humanConfirmation";
+  }
+  if (state.resolvedEntities) {
+    return "searchStructured";
+  }
+  return END;
+}
+
 /**
  * Route after searchKnowledge → to structured search or directly to response.
  *
@@ -71,31 +130,79 @@ export function routeAfterSearchKnowledge(_state: AgentState): NextNode {
 }
 
 /**
- * Route after searchStructured or webSearch → to generateResponse.
+ * Route after searchStructured → to decision, humanConfirmation, or generateResponse.
+ *
+ * Priority:
+ * 1. If decision.type === "human" (too many results, need to pick) → decision.
+ *    This fires BEFORE resolvedEntities check so 2nd-round HIL (e.g. weekly_report >= 3)
+ *    is handled even when resolvedEntities.user is set from a previous round.
+ * 2. If queryType === "ambiguous" and no entity resolved yet → decision.
+ *    detectIntent flagged the message as ambiguous; we route to decision so the
+ *    Branch 2 cross-type search can fire. Checked BEFORE resolvedEntities because
+ *    an ambiguous Round 1 has no resolvedEntities.
+ * 3. If resolvedEntities is set (user confirmed something) → generateResponse.
+ *    Only skip decision here when there's no pending decision to process.
+ * 4. If pendingHumanAction is set (not yet confirmed) → humanConfirmation.
+ * 5. Otherwise → generateResponse.
+ */
+export function routeAfterSearchStructured(state: AgentState): NextNode {
+  // Check for decision FIRST — this handles the 2nd HIL round.
+  // Even when resolvedEntities.user is set (user picked from Round 1 candidates),
+  // we still need to process a new decision (e.g. 4 weekly reports need a 2nd pick).
+  const toolResult = state.toolResults?.searchStructured;
+  if (toolResult && typeof toolResult === "object") {
+    const resultObj = toolResult as Record<string, unknown>;
+    const decision = resultObj.decision as { type?: string } | undefined;
+    if (decision?.type === "human") {
+      return "decision";
+    }
+  }
+  // Ambiguous query type — route to decision so Branch 2 cross-type search runs.
+  // Only fire when no entity has been resolved yet (Round 1 ambiguous path).
+  if (state.queryType === "ambiguous" && !state.resolvedEntities) {
+    return "decision";
+  }
+  // No pending decision — check resolvedEntities for a confirmed selection.
+  if (state.resolvedEntities?.user ||
+      state.resolvedEntities?.project ||
+      state.resolvedEntities?.ticket ||
+      state.resolvedEntities?.weekly_report) {
+    return "generateResponse";
+  }
+  // Still waiting for initial confirmation?
+  if (state.pendingHumanAction) {
+    return "humanConfirmation";
+  }
+  return "generateResponse";
+}
+
+/**
+ * Route after webSearch → to generateResponse.
  */
 export function routeToResponse(_state: AgentState): NextNode {
   return "generateResponse";
 }
 
-// ─── Query classification helpers ────────────────────────────────────────────
-
 /**
- * Detects deep content / document / note queries that need RAG.
- * These should trigger searchKnowledge (vector retrieval) in auto mode.
+ * Route after generateResponse → END or back to humanConfirmation.
+ *
+ * Note: waitingForConfirmation state is captured by the API handler via SSE events,
+ * and the pending confirmation is stored in memory. The next user message resumes the flow.
+ *
+ * Edge case: decision node may set a NEW pendingHumanAction after the user has
+ * already confirmed the first round of candidates. For example:
+ *   1. "刘工的周报有哪些" → decision(user, 2) → humanConfirmation
+ *   2. user picks "1" → user confirmed → searchStructured finds 4 weekly reports
+ *   3. decision(weekly_report, 4) sets a NEW pendingHumanAction
+ *      but generateResponse fires first → routeAfterGenerateResponse was called
+ *      and returned END, losing the new pendingHumanAction.
+ *
+ * Fix: always check pendingHumanAction before returning END. If it's still set,
+ * route back to humanConfirmation to present the next round of candidates.
  */
-function isDeepContentQuery(content: string): boolean {
-  return /(?:了解|想了解|详情|详细内容|具体内容|文档|需求文档|设计文档|技术文档|需求说明|PRD|需求内容|笔记|记录|说明|资料|光污染|传感器|硬件|功能设计|接口设计)/i.test(content);
-}
-
-/**
- * Detects people-centric activity queries — "X 最近在干啥 / 本周在做什么".
- * These go to searchStructured (DB) so the agent can resolve user names to IDs
- * and surface weekly reports + recently-updated tickets.
- */
-function isUserActivityQuery(content: string): boolean {
-  const time = "(?:最近|近期|这周|本周|近来|今天|今日|昨天|昨日|前天|上周|这阵子|近几天|前几天)";
-  const activity = "(?:在做什么|在干什么|在干嘛|做了什么|干了什么|做了啥|干了啥|做什么|干什么|开发什么|工作近况|工作内容|工作时间|进展|进度|动态)";
-  return new RegExp(`${time}.{0,12}${activity}`, "i").test(content)
-    || new RegExp(`${activity}.{0,12}${time}`, "i").test(content)
-    || /[\u4e00-\u9fa5A-Za-z0-9_.\-@]{1,30}\s*(?:干了什么|做了啥|做了什么|进展|进度|最近动态)/i.test(content);
+export function routeAfterGenerateResponse(state: AgentState): NextNode {
+  if (state.pendingHumanAction) {
+    return "humanConfirmation";
+  }
+  return END;
 }

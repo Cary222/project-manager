@@ -9,7 +9,7 @@ import {
   IconMinus,
   IconX,
 } from "@/shared/ui/icons";
-import type { ThinkingStep } from "@/features/ai/lib/types";
+import type { ThinkingStep } from "@/features/ai/types";
 
 interface AiThinkingTraceProps {
   /**

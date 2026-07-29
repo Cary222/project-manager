@@ -1,5 +1,5 @@
-import { searchDocuments } from "@/shared/lib/search";
-import type { SearchResultItem } from "@/shared/lib/search-types";
+import { searchDocuments } from "@/features/knowledge/lib/search";
+import type { SearchResultItem } from "@/features/knowledge/lib/search-types";
 
 export interface RagContext {
   results: SearchResultItem[];

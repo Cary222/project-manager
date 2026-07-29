@@ -1,6 +1,17 @@
+/**
+ * searchStructured LangGraph Node
+ *
+ * 职责：复用 core，复用 query-parser，不通过工具层调用
+ * - 直接调用 executeStructuredQuery() 核心逻辑
+ * - ambiguous 类型处理已移到 decision 节点（本节点不再触发 HIL）
+ * - 与 tools/search-structured.ts 共用同一套 formatters 和 resolvers
+ */
+
 import type { AgentState } from "../agent";
-import { searchStructured } from "@/features/ai/tools/search-structured";
+import { executeStructuredQuery } from "@/features/ai/core/search-structured-core";
 import { setSearchStructuredViewer } from "@/features/ai/tools/search-structured";
+import { extractUserIdentifier, extractId, detectActivityWindow } from "@/features/ai/core/resolvers/query-parser";
+import type { QueryType } from "@/features/ai/core/resolvers/query-parser";
 
 /**
  * Inject runtime context into module-scoped closures.
@@ -10,9 +21,19 @@ export function injectSearchStructuredContext(viewerUserId: string) {
   setSearchStructuredViewer(viewerUserId);
 }
 
+// ---------------------------------------------------------------------------
+// Graph Node
+// ---------------------------------------------------------------------------
+
 /**
- * Wraps the existing searchStructured tool as a graph node.
+ * Wraps the core searchStructured logic as a graph node.
  * Executes structured DB queries (tickets, projects, users, commits, reports).
+ *
+ * Decision protocol:
+ *   - Tool returns { decision: { type: "human", candidates: [...] } } when
+ *     result count exceeds the per-entity threshold.
+ *   - Node detects this and sets pendingHumanAction, pausing for human input.
+ *   - Otherwise returns normal search results and proceeds to generateResponse.
  */
 export async function searchStructuredNode(
   state: AgentState
@@ -25,28 +46,142 @@ export async function searchStructuredNode(
       ? lastMessage.content
       : "";
 
+  // Read original query type:
+  // 1. resolvedEntities.originalQuery (set by humanConfirmationNode after disambiguation,
+  //    survives across rounds since pendingHumanAction is cleared here)
+  // 2. pendingHumanAction.sourceResult.queryType (from disambiguateIntent node)
+  // 3. re-parse from content
+  const resolvedOriginalQuery = state.resolvedEntities?.originalQuery;
+  const savedQueryType = state.resolvedEntities?.originalQueryType
+    ?? (state.pendingHumanAction?.sourceResult as { queryType?: string } | undefined)?.queryType;
+
+  console.log(`[searchStructuredNode] pendingHumanAction=${state.pendingHumanAction ? "exists" : "null"} sourceResultQueryType=${(state.pendingHumanAction?.sourceResult as { queryType?: string } | undefined)?.queryType ?? "none"} resolvedEntities.originalQueryType=${state.resolvedEntities?.originalQueryType ?? "none"} savedQueryType=${savedQueryType ?? "none"} content="${content}"`);
+
   try {
-    const queryType = parseQueryType(content);
-    const extractedId = extractId(content);
-    const extractedUser = queryType === "user" || queryType === "weekly_report"
-      ? extractUserIdentifier(content) || extractedId
-      : extractedId;
-    const activityWindow = queryType === "user"
-      ? detectActivityWindow(content)
-      : undefined;
+    const resolvedUser = state.resolvedEntities?.user;
+    const resolvedWeeklyReport = state.resolvedEntities?.weekly_report;
+    const resolvedTicket = state.resolvedEntities?.ticket;
+    const resolvedProject = state.resolvedEntities?.project;
 
-    console.log(`[AI-LangGraph] searchStructured type=${queryType} id=${extractedId} user=${extractedUser ?? "none"} window=${activityWindow ?? "none"} content="${content.slice(0, 50)}"`);
+    // Pending confirmation was set by the first disambiguation round.
+    // originalQuery = pendingHumanAction.query = original user query (e.g. "刘工的周报有哪些")
+    const effectiveQuery = state.originalQuery || content;
 
-    const result = await searchStructured.execute(
+    let queryType: "ticket" | "project" | "user" | "commit" | "weekly_report";
+    let filters: Record<string, unknown> | undefined;
+    let queryText: string;
+
+    if (resolvedUser) {
+      // After disambiguation: use the original query (not the selection message) to
+      // determine the query type and extract the user identifier.
+      const queryForParsing = resolvedOriginalQuery || effectiveQuery;
+      // Prefer state.queryType (set by detectIntent), then savedQueryType (carried
+      // through resolvedEntities / pendingHumanAction), then fall back to nothing.
+      // "ambiguous" / "note" are no longer handled here — decision node owns them.
+      const candidateQueryType: QueryType | string | undefined =
+        state.queryType ?? savedQueryType;
+      queryType = candidateQueryType
+        ? (candidateQueryType as typeof queryType)
+        : "user";
+      const needsUserExtraction = queryType === "user" || queryType === "weekly_report" || queryType === "commit";
+      // Extract user from original query (e.g. "刘工的周报有哪些" → "刘工")
+      const extractedUser = needsUserExtraction ? extractUserIdentifier(queryForParsing) : undefined;
+      const activityWindow = (queryType === "user" || queryType === "commit") ? detectActivityWindow(queryForParsing) : undefined;
+
+      console.log(`[AI-LangGraph] searchStructured: resolvedUser id=${resolvedUser.id} name=${resolvedUser.name} resolvedBy=${resolvedUser.resolvedBy} queryType=${queryType} originalQuery="${resolvedOriginalQuery?.slice(0, 40) ?? "none"}" queryForParsing="${queryForParsing.slice(0, 40)}"`);
+      queryText = `user:${resolvedUser.id}`;
+      filters = needsUserExtraction
+        ? { userId: resolvedUser.id, ...(activityWindow ? { activityWindow } : {}) }
+        : undefined;
+    } else if (resolvedWeeklyReport) {
+      // User selected a specific weekly_report from disambiguation candidates.
+      queryType = "weekly_report";
+      queryText = `weekly_report:${resolvedWeeklyReport.id}`;
+      filters = { id: resolvedWeeklyReport.id };
+      console.log(`[AI-LangGraph] searchStructured: resolvedWeeklyReport id=${resolvedWeeklyReport.id}`);
+    } else if (resolvedTicket) {
+      queryType = "ticket";
+      queryText = `ticket:${resolvedTicket.id}`;
+      filters = { id: resolvedTicket.id };
+      console.log(`[AI-LangGraph] searchStructured: resolvedTicket id=${resolvedTicket.id}`);
+    } else if (resolvedProject) {
+      queryType = "project";
+      queryText = `project:${resolvedProject.id}`;
+      filters = { id: resolvedProject.id };
+      console.log(`[AI-LangGraph] searchStructured: resolvedProject id=${resolvedProject.id}`);
+    } else {
+      // Normal flow: read queryType from state (set by detectIntent) instead of
+      // re-parsing. savedQueryType is still honored as a fallback when the user
+      // is on a HIL follow-up round (state.queryType may be "user" from a previous
+      // round's selection — we want the *original* type).
+      const candidateQueryType: QueryType | string | undefined =
+        state.queryType ?? savedQueryType;
+      queryType = (candidateQueryType as typeof queryType) ?? "user";
+      const extractedId = extractId(content);
+      const needsUserExtraction = queryType === "user" || queryType === "weekly_report" || queryType === "commit";
+      let extractedUser = needsUserExtraction ? extractUserIdentifier(effectiveQuery) : undefined;
+
+      // 检测代词：如果消息是"他/她/这..."等代词，即使不是 user_activity 查询也使用 lastMentionedUser
+      // 放宽判断：只要包含代词相关关键词且消息较短，就是代词查询
+      const pronounKeywords = ["他", "她", "它", "谁", "哪", "怎么样", "怎么", "如何"];
+      const isPronoun = content.length < 15 && pronounKeywords.some(p => content.includes(p));
+
+      // 从 context 加载的 lastMentionedUser（更可靠）
+      const contextUser = state.lastMentionedUser?.name;
+      // 从 detectIntent 返回的 lastMentionedUser（可能是错误的）
+      const detectUser = state.lastMentionedUser?.name;
+
+      // 优先使用 context 中的值（包含完整的用户信息如邮箱）
+      // 提取纯名字：去掉括号内的邮箱/备注部分
+      const extractPureName = (name: string): string => {
+        // 去掉 "（xxx@email.com）" 或 "(xxx@email.com)" 格式
+        return name.replace(/[（(][^）)]+[）)]/g, "").trim();
+      };
+
+      // 如果 context 有效，使用它；否则尝试使用 detect 的值
+      let effectiveUserName: string | undefined;
+      if (contextUser && contextUser.length > 1) {
+        effectiveUserName = extractPureName(contextUser);
+      } else if (detectUser && detectUser.length > 1 && !detectUser.includes("最近")) {
+        effectiveUserName = extractPureName(detectUser);
+      }
+
+      if (effectiveUserName && (isPronoun || needsUserExtraction)) {
+        console.log(`[AI-LangGraph] using lastMentionedUser: ${effectiveUserName}`);
+        extractedUser = { raw: effectiveUserName, normalized: effectiveUserName };
+        // 强制设置为 user 查询类型
+        if (isPronoun && !needsUserExtraction) {
+          queryType = "user";
+        }
+      }
+
+      const activityWindow = (queryType === "user" || queryType === "commit") ? detectActivityWindow(effectiveQuery) : undefined;
+      queryText = extractedUser?.raw ?? extractedId ?? "(未指定)";
+
+      console.log(`[AI-LangGraph] searchStructured type=${queryType} id=${extractedId ?? "none"} extractedUser=${extractedUser ? JSON.stringify(extractedUser) : "none"} window=${activityWindow ?? "none"} content="${effectiveQuery.slice(0, 50)}"${state.originalQuery ? " (from originalQuery)" : ""}`);
+
+      filters = needsUserExtraction || isPronoun
+        ? { ...(extractedUser ? { extractedUser } : {}), ...(activityWindow ? { activityWindow } : {}) }
+        : undefined;
+    }
+
+    // Determine the ID to pass to the core (for specific entity lookups after disambiguation).
+    let resolvedId: string | undefined;
+    if (resolvedWeeklyReport) resolvedId = resolvedWeeklyReport.id;
+    else if (resolvedTicket) resolvedId = resolvedTicket.id;
+    else if (resolvedProject) resolvedId = resolvedProject.id;
+    else if (resolvedUser) resolvedId = resolvedUser.id;
+    else resolvedId = extractId(effectiveQuery ?? content);
+
+    // Directly call the core function, not the tool
+    const result = await executeStructuredQuery(
       {
         type: queryType,
-        id: extractedUser,
-        filters: queryType === "user"
-          ? { ...(extractedUser ? { userId: extractedUser } : {}), activityWindow }
-          : undefined,
+        id: resolvedId,
+        filters,
         limit: 5,
       },
-      { context: {}, messages: [], toolCallId: "lg-search-structured" }
+      undefined // viewerUserId comes from context injection
     );
 
     const resultText =
@@ -56,9 +191,31 @@ export async function searchStructuredNode(
 
     console.log(`[AI-LangGraph] searchStructured result length=${resultText.length}, content=${resultText.slice(0, 200)}`);
 
+    // Return tool result for disambiguateIntent node to handle decision.
+    // queryType is included so disambiguateIntentNode can extract it and carry it
+    // through the pendingHumanAction pipeline (sourceResult), so the subsequent
+    // searchStructuredNode after human confirmation knows the original query type
+    // (e.g. "刘工的周报" → queryType=weekly_report, not queryType=user).
+    //
+    // Clear pendingHumanAction only when:
+    // - result has no decision (user confirmed, no more HIL needed) AND
+    // - resolvedUser is set (user picked from Round 1 candidates)
+    // In all other cases, leave pending alone so routeAfterSearchStructured
+    // can route to the right node based on decision/resolvedEntities.
+    const resultRecord = typeof result === "object" && result !== null
+      ? result as unknown as Record<string, unknown>
+      : null;
+    const hasDecision = Boolean(resultRecord?.decision);
     return {
       searchResults: [resultText],
-      toolResults: { searchStructured: result },
+      toolResults: {
+        searchStructured: {
+          ...result,
+          queryType,
+          _debug: "structured_with_sources"
+        }
+      },
+      pendingHumanAction: (!hasDecision && resolvedUser) ? null : undefined,
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -68,103 +225,4 @@ export async function searchStructuredNode(
       toolResults: { searchStructured: { error: msg } },
     };
   }
-}
-
-/**
- * Extract a user identifier from the user message so we can resolve names
- * like "cary" / "刘屹鹏" / "许敏捷" to a real user record.
- *
- * Strips activity keywords ("最近在干什么"), punctuation, and stopwords so
- * the remaining token is more likely to be a real user name or email prefix.
- */
-function extractUserIdentifier(content: string): string {
-  // 1. 先剥掉所有时间词和动作词，避免“今天干了什么”剩下“今天”。
-  const timeAdverbs = [
-    "最近", "近期", "这周", "本周", "本周内", "近几天", "这几天", "这阵子",
-    "今天", "今天内", "今天呢", "今日", "昨天", "昨日", "前天", "前天呢",
-    "上周", "上礼拜", "本周初", "本周末", "这几天", "前几周",
-  ];
-  const activityVerbs = [
-    "在做什么", "在干什么", "在干嘛", "做了什么", "干了什么", "做了啥",
-    "干什么", "干嘛", "做什么", "开发什么", "工作近况", "工作内容",
-    "工作时间", "工作动态", "进展", "进度", "最近动态", "干了啥",
-  ];
-  const stopPhrases = [
-    "这位", "这位同事", "一下", "问下", "帮我", "请", "谢谢", "请问",
-    "调出", "列出", "查看", "了解", "想了解", "看看", "翻翻",
-  ];
-  const stopRegex = new RegExp(
-    `(${timeAdverbs.concat(activityVerbs, stopPhrases).join("|")})`,
-    "g",
-  );
-  const cleaned = content
-    .replace(stopRegex, " ")
-    // 单独剥掉常见的“工作/事情/任务/项目”泛指词，避免"cary 今天 工作"留下“工作”
-    .replace(/(?:工作|事情|任务|项目|业务|开发)(?=$|\s)/g, " ")
-    .replace(/[，。！？、,.!?:\s]+/g, " ")
-    .trim();
-
-  // 2. 优先挑中文姓名片段（>=2 字）
-  const chinese = cleaned.match(/[\u4e00-\u9fa5]{2,}/g);
-  if (chinese && chinese.length > 0) {
-    return chinese.sort((a, b) => b.length - a.length)[0];
-  }
-
-  // 3. 否则找第一个看起来像用户名的 token（字母/数字/. / _ / - / @）
-  const tokens = cleaned.split(/\s+/).filter(Boolean);
-  for (const token of tokens) {
-    if (/[A-Za-z0-9_.\-@]/.test(token)) {
-      return token;
-    }
-  }
-
-  // 4. 兜底：返回 cleaned 第一个非空片段
-  return tokens[0] ?? cleaned;
-}
-
-/**
- * Extract ID from user content.
- * Handles patterns like "#10156", "工单 10156", "ticket #10156"
- */
-function extractId(content: string): string | undefined {
-  // Match # followed by digits
-  const ticketMatch = content.match(/#(\d+)/);
-  if (ticketMatch) return ticketMatch[1];
-
-  // Match 工单号/工单 followed by digits
-  const gongdanMatch = content.match(/工单[号]?\s*[:：]?\s*(\d+)/i);
-  if (gongdanMatch) return gongdanMatch[1];
-
-  // Match "ticket #123" pattern
-  const ticketWordMatch = content.match(/ticket\s*#?(\d+)/i);
-  if (ticketWordMatch) return ticketWordMatch[1];
-
-  return undefined;
-}
-
-/**
- * Simple heuristic to pick the initial query type.
- * The LLM in generateResponse can refine this.
- */
-function parseQueryType(content: string): "ticket" | "project" | "user" | "commit" | "weekly_report" {
-  if (/工单|ticket|tickets?|#\d+/i.test(content)) return "ticket";
-  if (/项目|module|组件|功能/i.test(content)) return "project";
-  if (/周报|weekly.report/i.test(content)) return "weekly_report";
-  if (/commit|提交/i.test(content)) return "commit";
-  return "user";
-}
-
-/**
- * Detect the activity time window implied by the user message.
- * Returns one of: "today" | "yesterday" | "this_week" | "this_month" | "recent".
- * Returning undefined means "no time filter — show all recent activity".
- */
-function detectActivityWindow(content: string): "today" | "yesterday" | "this_week" | "this_month" | "recent" | undefined {
-  if (/(今天|今日|今早|今晩)/.test(content)) return "today";
-  if (/(昨天|昨日)/.test(content)) return "yesterday";
-  if (/(前天)/.test(content)) return "yesterday";
-  if (/(本周|这周|这礼拜)/.test(content)) return "this_week";
-  if (/(本月|这个月)/.test(content)) return "this_month";
-  if (/(最近|近期|近来|这阵子|近几天|前几天)/.test(content)) return "recent";
-  return undefined;
 }

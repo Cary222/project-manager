@@ -4,7 +4,7 @@ import { requireSession } from "@/shared/lib/permissions";
 import {
   listConversations,
   createConversation,
-} from "@/features/ai/lib/conversation-store";
+} from "@/features/ai/store/conversation-store";
 
 const createSchema = z.object({
   title: z.string().optional(),

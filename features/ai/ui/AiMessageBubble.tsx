@@ -1,15 +1,30 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
 import { IconSparkles } from "@/shared/ui/icons";
+import { MarkdownContent } from "@/shared/ui/MarkdownContent";
 import { AiSourcesList, type SourceReference } from "./AiSourcesList";
+import { MessageCopyButton } from "./MessageCopyButton";
+
+interface CandidateUser {
+  id: string;
+  /** HIL format: label from disambiguateIntent (e.g. "cary（刘屹鹏）") */
+  label?: string;
+  summary?: string;
+  /** Legacy assignee format: name from user record */
+  name?: string;
+  email?: string;
+  sublabel?: string;
+}
 
 interface AiMessageBubbleProps {
   role: "user" | "assistant";
   content: string;
   sources?: SourceReference[];
+  candidates?: CandidateUser[];
   isStreaming?: boolean;
+  /** Called when user clicks a candidate button — sends the selection back to AI */
+  onCandidateSelect?: (candidateId: string) => void;
 }
 
 // Typewriter timing (in milliseconds per character):
@@ -21,12 +36,13 @@ interface AiMessageBubbleProps {
 const TYPEWRITER_MIN_MS_PER_CHAR = 18;
 const TYPEWRITER_MAX_MS_PER_CHAR = 55;
 
-export function AiMessageBubble({ role, content, sources, isStreaming }: AiMessageBubbleProps) {
-  const isUser = role === "user";
+export function AiMessageBubble({ role, content, sources, candidates, isStreaming, onCandidateSelect }: AiMessageBubbleProps) {
+  const isUserMessage = role === "user";
+  const hasCandidates = candidates && candidates.length > 0;
 
   // User messages always render the full content. Assistant messages start
   // empty and are revealed by the typewriter loop below.
-  const [displayed, setDisplayed] = useState(isUser ? content : "");
+  const [displayed, setDisplayed] = useState(isUserMessage ? content : "");
 
   // Keep latest content/streaming flags in refs so the typewriter loop reads
   // fresh values without restarting on every SSE chunk. This eliminates
@@ -60,7 +76,7 @@ export function AiMessageBubble({ role, content, sources, isStreaming }: AiMessa
   useEffect(() => {
     // User messages render the full content directly via the `content` prop
     // and never need the typewriter loop, so this effect is a no-op for them.
-    if (isUser) return;
+    if (isUserMessage) return;
 
     if (!isStreaming) {
       // Snap to whatever content we have so the bubble never shows stale text.
@@ -120,48 +136,48 @@ export function AiMessageBubble({ role, content, sources, isStreaming }: AiMessa
         rafRef.current = null;
       }
     };
-  }, [isStreaming, isUser, content, displayed]);
+  }, [isStreaming, isUserMessage, content, displayed]);
 
   // Pin the bubble height to the final content once it arrives so the
   // surrounding list doesn't reflow each tick (no jitter).
   const finalLength = isStreaming ? displayed.length : content.length;
   const targetLength = content.length;
-  const showCursor = !isUser && isStreaming && finalLength < targetLength;
+  const showCursor = !isUserMessage && isStreaming && finalLength < targetLength;
 
   return (
-    <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
+    <div className={`flex gap-3 ${isUserMessage ? "flex-row-reverse" : ""}`}>
       {/* Avatar */}
       <div
         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
-          isUser
+          isUserMessage
             ? "bg-brand-600 text-white"
             : "bg-gradient-to-br from-brand-400 via-brand-600 to-brand-700 text-white shadow-sm"
         }`}
       >
-        {isUser ? "U" : <IconSparkles width={16} height={16} />}
+        {isUserMessage ? "U" : <IconSparkles width={16} height={16} />}
       </div>
 
       {/* Bubble column */}
-      <div className={`max-w-[75%] ${isUser ? "items-end" : "items-start"} flex flex-col`}>
+      <div className={`max-w-[75%] ${isUserMessage ? "items-end" : "items-start"} flex flex-col`}>
         {/* Chat bubble */}
         <div
           className={`rounded-2xl px-4 py-2.5 ${
-            isUser
+            isUserMessage
               ? "bg-brand-600 text-white rounded-br-md"
               : "bg-ink-100 text-ink-900 rounded-bl-md"
           }`}
         >
-          {isUser ? (
+          {isUserMessage ? (
             <p className="text-sm leading-relaxed whitespace-pre-wrap">{content}</p>
           ) : (
             <div className="relative">
-              {/* Ghost layer — reserves height for final content */}
-              <div aria-hidden="true" className="invisible prose prose-sm max-w-none prose-p:my-1 prose-p:leading-relaxed">
-                <ReactMarkdown>{content}</ReactMarkdown>
+              {/* Ghost layer — reserves height for final content via @shared/ui/MarkdownContent */}
+              <div aria-hidden="true" className="invisible">
+                <MarkdownContent content={content} />
               </div>
-              {/* Active layer — typewriter reveal */}
-              <div className="absolute inset-0 prose prose-sm max-w-none prose-p:my-1 prose-p:leading-relaxed">
-                <ReactMarkdown>{displayed}</ReactMarkdown>
+              {/* Active layer — typewriter reveal, also reuses @shared/ui/MarkdownContent */}
+              <div className="absolute inset-0 overflow-hidden">
+                <MarkdownContent content={displayed} />
                 {showCursor && (
                   <span className="ml-0.5 inline-block h-4 w-1.5 translate-y-0.5 animate-pulse bg-brand-600 align-middle" />
                 )}
@@ -170,15 +186,39 @@ export function AiMessageBubble({ role, content, sources, isStreaming }: AiMessa
           )}
         </div>
 
+        {/* Candidate selection buttons (Human-in-Loop) */}
+        {!isUserMessage && !isStreaming && hasCandidates && onCandidateSelect && (
+          <div className="mt-2 flex flex-col gap-1.5">
+            {candidates!.map((candidate, index) => (
+              <button
+                key={candidate.id}
+                type="button"
+                onClick={() => onCandidateSelect(candidate.id)}
+                className="w-full rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-left text-sm transition-colors hover:border-warning/60 hover:bg-warning/20"
+              >
+                <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded bg-warning/20 text-xs font-medium text-warning-foreground">
+                  {index + 1}
+                </span>
+                <span className="font-medium text-ink-900">{candidate.label ?? candidate.name}</span>
+                {(candidate.email ?? candidate.sublabel) && (
+                  <span className="ml-2 text-xs text-ink-500">{candidate.email ?? candidate.sublabel}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {!isStreaming && <MessageCopyButton content={content} />}
+
         {/* Reference sources — only render after streaming is done to avoid partial flash */}
-        {!isUser && !isStreaming && sources && sources.length > 0 && (
+        {!isUserMessage && !isStreaming && sources && sources.length > 0 && (
           <div className="mt-2">
             <AiSourcesList sources={sources} />
           </div>
         )}
 
         <span className="mt-1 text-[10px] text-ink-400">
-          {isUser ? "你" : "小星"}
+          {isUserMessage ? "你" : "小星"}
         </span>
       </div>
     </div>

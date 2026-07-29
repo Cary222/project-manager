@@ -10,7 +10,7 @@ import {
   type ThinkingNodeName,
   type ThinkingStep,
   buildStepPlan,
-} from "@/features/ai/lib/types";
+} from "@/features/ai/types";
 
 function pendingSteps(mode: "auto" | "search" | "chat" | "web"): ThinkingStep[] {
   return buildStepPlan(mode).map((tpl) => ({

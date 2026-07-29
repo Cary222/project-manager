@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { retrieveContext } from "@/features/ai/lib/rag";
-import { speculationCache } from "@/features/ai/lib/speculation-cache";
+import { retrieveContext } from "@/features/ai/search/rag";
+import { speculationCache } from "@/features/ai/search/speculation-cache";
 
 /**
  * searchKnowledge uses module-scoped viewerUserId and conversationId that are

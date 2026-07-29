@@ -6,8 +6,8 @@ import {
   getConversationsWithMessages,
   deleteConversation,
   renameConversation,
-} from "@/features/ai/lib/conversation-store";
-import { enqueueSummarizeConversation } from "@/features/ai/lib/background-jobs";
+} from "@/features/ai/store/conversation-store";
+import { enqueueSummarizeConversation } from "@/features/ai/jobs/background-jobs";
 
 const patchSchema = z
   .object({

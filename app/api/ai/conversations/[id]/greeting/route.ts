@@ -5,41 +5,9 @@ import {
   appendMessage,
   getConversation,
   getConversationSummaries,
-  getOrCreateProfile,
-} from "@/features/ai/lib/conversation-store";
-import { agnesFlash } from "@/features/ai/lib/agnes-provider";
-
-interface ProfileLike {
-  roles?: string[];
-  interests?: string[];
-  expertise?: string[];
-  recentTopics?: string[];
-  preferences?: Record<string, unknown>;
-  // NOTE: projects 字段已移除 — 项目信息通过真实数据库获取
-}
-
-function formatProfile(profile: ProfileLike): string {
-  const sections: string[] = [];
-  const push = (key: keyof ProfileLike, label: string) => {
-    const v = profile[key];
-    if (Array.isArray(v) && v.length > 0) {
-      sections.push(`${label}：${(v as unknown[]).join("、")}`);
-    }
-  };
-  push("roles", "角色");
-  push("interests", "兴趣");
-  push("expertise", "专长");
-  push("recentTopics", "近期话题");
-  if (profile.preferences && typeof profile.preferences === "object") {
-    const entries = Object.entries(profile.preferences);
-    if (entries.length > 0) {
-      sections.push(
-        `偏好：${entries.map(([k, v]) => `${k}=${String(v)}`).join("、")}`
-      );
-    }
-  }
-  return sections.length > 0 ? sections.join("\n") : "（暂无画像数据）";
-}
+} from "@/features/ai/store/conversation-store";
+import { queryProfile } from "@/features/ai/core/queries/query-profile";
+import { agnesFlash, withStreamTextFallback } from "@/features/ai/llm/agnes-provider";
 
 function buildGreetingSystemPrompt(profileText: string, recentTopics: string[]): string {
   const recentBlock = recentTopics.length
@@ -82,8 +50,8 @@ export async function POST(
       );
     }
 
-    const profileRecord = await getOrCreateProfile(session.user.id);
-    const profileText = formatProfile((profileRecord?.profile ?? {}) as ProfileLike);
+    const profileResult = await queryProfile({ userId: session.user.id });
+    const profileText = profileResult.summary;
 
     const recentTopics: string[] = [];
     try {
@@ -108,12 +76,14 @@ export async function POST(
 
     let fullContent = "";
     try {
-      const result = streamText({
-        model: agnesFlash,
-        system: systemPrompt,
-        messages: [{ role: "user", content: "请基于以上画像生成问候语。" }],
-        stopWhen: stepCountIs(1),
-      });
+      const result = withStreamTextFallback((model) =>
+        streamText({
+          model,
+          system: systemPrompt,
+          messages: [{ role: "user", content: "请基于以上画像生成问候语。" }],
+          stopWhen: stepCountIs(1),
+        })
+      );
 
       for await (const part of result.fullStream) {
         if (part.type === "text-delta") {

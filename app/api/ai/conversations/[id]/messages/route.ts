@@ -6,23 +6,103 @@ import {
   appendMessage,
   getConversation,
   getOrCreateProfile,
-} from "@/features/ai/lib/conversation-store";
-import { retrieveContext, buildRagPrompt, extractSourceReferences } from "@/features/ai/lib/rag";
-import type { SourceReference as RagSourceReference } from "@/features/ai/lib/rag";
-import { speculationCache, shouldSpeculate } from "@/features/ai/lib/speculation-cache";
-import { enqueueSummarizeConversation } from "@/features/ai/lib/background-jobs";
-import { agnesFlash } from "@/features/ai/lib/agnes-provider";
+} from "@/features/ai/store/conversation-store";
+import { getUserProfileAction } from "@/features/profile/lib/profile-actions";
+import { retrieveContext, buildRagPrompt, extractSourceReferences } from "@/features/ai/search/rag";
+import type { SourceReference as RagSourceReference } from "@/features/ai/search/rag";
+import { speculationCache, shouldSpeculate } from "@/features/ai/search/speculation-cache";
+import { enqueueSummarizeConversation } from "@/features/ai/jobs/background-jobs";
+import { agnesFlash, withStreamTextFallback } from "@/features/ai/llm/agnes-provider";
 import { toolsetForMode, maxStepsForMode } from "@/features/ai/tools";
 import { webSearch } from "@/features/ai/tools/web-search";
 import { searchKnowledge, setSearchKnowledgeViewer, setSearchKnowledgeConversationId } from "@/features/ai/tools/search-knowledge";
 import { searchStructured, setSearchStructuredViewer } from "@/features/ai/tools/search-structured";
-import { shouldUseWebSearch, shouldUseRag } from "@/features/ai/lib/detector";
+import { shouldUseWebSearch, shouldUseRag } from "@/features/ai/search/detector";
+import { HumanMessage, AIMessage } from "@langchain/core/messages";
+
+// ─── Human-in-Loop: In-memory state per conversation ───────────────────────
+// Stores pending confirmation between the interrupt and user reply.
+// Not persisted to DB (single-server, short-lived sessions only).
+
+// V3 格式（当前版本）
+interface PendingHumanActionState {
+  pendingHumanAction: {
+    type: "select";
+    entity?: string;
+    reason?: string;
+    entityType: "user" | "ticket" | "project" | "weekly_report";
+    candidates: Array<{ id: string; label: string; summary: string }>;
+    query: string;
+    /** Carries queryType (e.g. "weekly_report") through the HIL pipeline so the next
+     *  round's searchStructuredNode knows the original query type, not what the user
+     *  typed as a selection ("1"). */
+    sourceResult?: { queryType?: string; [key: string]: unknown };
+  };
+  lastAssistantMessage: string;
+  mode: "auto" | "search" | "chat" | "web";
+  /** 最近讨论的用户 — 用于"他/她"等代词指代 */
+  lastMentionedUser?: { id: string; name: string } | null;
+}
+
+// V2 → V3 迁移类型（用于迁移函数签名）
+// 旧格式: { type: "user_disambiguation", candidates: { id, name, email }[] }
+// 新格式: { type: "select", entityType, candidates: { id, label, summary }[] }
+interface V2PendingConfirmation {
+  type: "user_disambiguation";
+  candidates: Array<{ id: string; name: string; email: string }>;
+  query: string;
+}
+
+function migratePendingConfirmation(
+  pending: PendingHumanActionState["pendingHumanAction"] | V2PendingConfirmation
+): PendingHumanActionState["pendingHumanAction"] {
+  if (pending.type === "select") {
+    return pending;
+  }
+  return {
+    type: "select",
+    entityType: "user",
+    candidates: pending.candidates.map((c) => ({
+      id: c.id,
+      label: c.name,
+      summary: c.email,
+    })),
+    query: pending.query,
+  };
+}
+
+const pendingHumanActionStore = new Map<string, PendingHumanActionState>();
+
+// 存储会话上下文（如最近讨论的用户）
+const conversationContextStore = new Map<string, { lastMentionedUser?: { id: string; name: string } | null }>();
+
+function setPendingHumanAction(
+  conversationId: string,
+  state: PendingHumanActionState
+) {
+  pendingHumanActionStore.set(conversationId, state);
+}
+
+function getPendingHumanAction(conversationId: string): PendingHumanActionState | undefined {
+  return pendingHumanActionStore.get(conversationId);
+}
+
+function clearPendingHumanAction(conversationId: string) {
+  pendingHumanActionStore.delete(conversationId);
+}
+
+function getConversationContext(conversationId: string): { lastMentionedUser?: { id: string; name: string } | null } | undefined {
+  return conversationContextStore.get(conversationId);
+}
+
+function setConversationContext(conversationId: string, context: { lastMentionedUser?: { id: string; name: string } | null }) {
+  conversationContextStore.set(conversationId, context);
+}
 
 // LangGraph StateGraph entry point (lazy-loaded)
 import { agentGraph } from "@/features/ai/graph/agent";
 import { injectSearchKnowledgeContext } from "@/features/ai/graph/nodes/search-knowledge";
 import { injectSearchStructuredContext } from "@/features/ai/graph/nodes/search-structured";
-import { HumanMessage, AIMessage } from "@langchain/core/messages";
 
 type Message = {
   id: string;
@@ -43,8 +123,27 @@ function extractSourcesFromToolResults(
   const sources: RagSourceReference[] = [];
   let index = 1;
 
-  // Add RAG sources first
+  // Detect user_activity attribution from searchStructured. When present, the
+  // assistant response is short-circuited to the structured summary, so RAG
+  // sources (notes / docs / tickets / commits that just mention the same
+  // keywords) are NOT the user's actual work — drop them so the reference
+  // list matches the answer.
+  const hasUserActivityAttribution = toolResults.some(({ output }) => {
+    if (!output || typeof output !== "object") return false;
+    const attribution = (output as Record<string, unknown>).attribution;
+    return (
+      attribution &&
+      typeof attribution === "object" &&
+      (attribution as Record<string, unknown>).kind === "user_activity"
+    );
+  });
+
+  // Add RAG sources first (filter if user_activity path)
   for (const src of ragSources) {
+    // RAG sources are only ticket/commit/note/doc — never weekly_report. Drop
+    // them entirely on user_activity short-circuit so the reference list
+    // matches the response.
+    if (hasUserActivityAttribution) continue;
     sources.push({ ...src, index: index++ });
   }
 
@@ -296,22 +395,22 @@ export async function POST(
     setSearchStructuredViewer(session.user.id);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result: any = streamText({
-      model: agnesFlash,
-      system: systemPrompt,
-      messages: [...messages, { id: "current", role: "user", content: message }],
-      tools: resolvedTools,
-      // stopWhen: 在 stepCountIs(N) 时触发停止，此时模型已没有新 step 可用，
-      // 会完成当前 step 的文本生成（不会中断正在生成的文本）
-      stopWhen: stepCountIs(resolvedMaxSteps),
-      onFinish: async ({ text }) => {
-        console.log(`[AI-MSG] onFinish textLen=${text?.length ?? 0} preview="${(text ?? "").slice(0, 80)}"`);
-        const context = await ragPromise;
-        const sources = isRagToolEnabled ? extractSourceReferences(context.results) : [];
-        await appendMessage(conversationId, "assistant", text, sources.length > 0 ? sources : undefined);
-        enqueueSummarizeConversation(conversationId, { force: true });
-      },
-    });
+    const result: any = withStreamTextFallback((model) =>
+      streamText({
+        model,
+        system: systemPrompt,
+        messages: [...messages, { id: "current", role: "user", content: message }],
+        tools: resolvedTools,
+        stopWhen: stepCountIs(resolvedMaxSteps),
+        onFinish: async ({ text }) => {
+          console.log(`[AI-MSG] onFinish textLen=${text?.length ?? 0} preview="${(text ?? "").slice(0, 80)}"`);
+          const context = await ragPromise;
+          const sources = isRagToolEnabled ? extractSourceReferences(context.results) : [];
+          await appendMessage(conversationId, "assistant", text, sources.length > 0 ? sources : undefined);
+          enqueueSummarizeConversation(conversationId, { force: true });
+        },
+      })
+    );
 
     const responseStream = new ReadableStream({
       async start(controller) {
@@ -485,6 +584,24 @@ async function handleLangGraphRequest(
 
   console.log(`[AI-LangGraph] start conv=${conversationId} message="${message.slice(0, 80)}" mode=${mode}`);
 
+  // Check if this conversation has a pending action that needs to be resumed
+  const pendingState = getPendingHumanAction(conversationId);
+  console.log(`[AI-LangGraph] pendingState loaded: ${pendingState ? `entityType=${pendingState.pendingHumanAction?.entityType} candidates=${pendingState.pendingHumanAction?.candidates?.length ?? 0}` : "null"}`);
+
+  // Load conversation context (e.g., last mentioned user for pronoun resolution)
+  const conversationContext = getConversationContext(conversationId);
+  console.log(`[AI-LangGraph] context loaded: lastMentionedUser=${conversationContext?.lastMentionedUser?.name ?? "null"}`);
+
+  // Load user profile for personalization
+  let userProfile: Record<string, unknown> | null = null;
+  try {
+    const profileData = await getUserProfileAction(session.user.id);
+    userProfile = profileData as unknown as Record<string, unknown>;
+    console.log(`[AI-LangGraph] userProfile loaded: id=${profileData.id} name=${profileData.name}`);
+  } catch (err) {
+    console.warn(`[AI-LangGraph] failed to load userProfile: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   // Build message history for LangGraph (BaseMessage array)
   const langgraphMessages: import("@langchain/core/messages").BaseMessage[] = [];
 
@@ -497,14 +614,28 @@ async function handleLangGraphRequest(
       }
     }
   }
+
+  // Keep the confirmation prompt before the current selection message. The
+  // conversation history normally already contains it; the fallback avoids a
+  // missing prompt when a client omits the persisted assistant message.
+  if (pendingState) {
+    const lastMessage = langgraphMessages[langgraphMessages.length - 1];
+    const lastContent =
+      typeof lastMessage?.content === "string" ? lastMessage.content : "";
+    if (lastMessage?.getType() !== "ai" || lastContent !== pendingState.lastAssistantMessage) {
+      langgraphMessages.push(new AIMessage(pendingState.lastAssistantMessage));
+    }
+  }
+
   langgraphMessages.push(new HumanMessage(message));
 
   // Inject viewer context into tool closures
   injectSearchKnowledgeContext(session.user.id, conversationId);
   injectSearchStructuredContext(session.user.id);
 
-  // Override mode from API if forceSearch is set
-  const resolvedMode = forceSearch ? "search" : mode;
+  // Override mode from API if forceSearch is set. A pending confirmation keeps
+  // the original mode when the client omits it on the follow-up message.
+  const resolvedMode = forceSearch ? "search" : pendingState?.mode ?? mode;
 
   const responseStream = new ReadableStream({
     async start(controller) {
@@ -535,6 +666,17 @@ async function handleLangGraphRequest(
         }
       };
 
+      let lastResponse = "";
+      let toolResultCount = 0;
+      const toolResults: Array<{ toolName: string; output: unknown }> = [];
+      // Initialize to null. The first graph.stream() call will set this if a new
+      // pendingHumanAction is emitted. We intentionally do NOT initialize from pendingState
+      // because in the second stream (triggered by the first catching an interrupt),
+      // pendingState is already set from the first stream — using it would overwrite
+      // the new pending that the second stream is about to capture.
+      let capturedPendingHumanAction: PendingHumanActionState | null = null;
+      let resolvedEntitiesResolved = false;
+
       try {
         await appendMessage(conversationId, "user", message);
 
@@ -547,56 +689,191 @@ async function handleLangGraphRequest(
 
         const graph = agentGraph;
 
+        // Build initial state — resolvedEntities is always null here; humanConfirmation sets it
+        // V2 → V3 迁移：把旧格式 pendingConfirmation 转成新格式
+        const migratedPendingHumanAction = pendingState?.pendingHumanAction
+          ? migratePendingConfirmation(pendingState.pendingHumanAction)
+          : null;
+
+        const initialState = {
+          messages: langgraphMessages,
+          mode: resolvedMode,
+          userName: session.user.name ?? "用户",
+          userId: session.user.id,
+          profile: userProfile,
+          clientCity,
+          pendingHumanAction: migratedPendingHumanAction,
+          waitingForConfirmation: Boolean(pendingState),
+          resolvedEntities: null,
+          toolResults: {},
+          originalQuery: pendingState?.pendingHumanAction?.query ?? "",
+          lastMentionedUser: pendingState?.lastMentionedUser ?? conversationContext?.lastMentionedUser ?? null,
+        };
+
         // Stream updates from the graph using the stream() method
-        const graphStream = await graph.stream(
-          {
-            messages: langgraphMessages,
-            mode: resolvedMode,
-            userName: session.user.name ?? "用户",
-            profile: null,
-            clientCity,
-          },
-          {
-            streamMode: "updates",
-            signal: request.signal,
+        let graphStream: AsyncIterable<Record<string, Record<string, unknown>>> | null = null;
+        let interruptReason: string | null = null;
+        // Track the final lastMentionedUser from graph state updates
+        let finalLastMentionedUser: { id: string; name: string } | null = initialState.lastMentionedUser;
+
+        try {
+          const rawStream = await graph.stream(
+            initialState,
+            {
+              streamMode: "updates",
+              signal: request.signal,
+            }
+          );
+          // Cast to the expected type
+          graphStream = rawStream as AsyncIterable<Record<string, Record<string, unknown>>>;
+        } catch (streamError) {
+          const errMsg = streamError instanceof Error ? streamError.message : String(streamError);
+          if (errMsg.includes("interrupt") || errMsg.includes("awaiting")) {
+            // Expected: graph was interrupted, will resume
+            console.log(`[AI-LangGraph] graph interrupted: ${errMsg}`);
+            interruptReason = errMsg;
+            graphStream = null;
+          } else {
+            throw streamError;
           }
-        ) as AsyncIterable<Record<string, Record<string, unknown>>>;
+        }
 
-        let lastResponse = "";
-        let toolResultCount = 0;
-        const toolResults: Array<{ toolName: string; output: unknown }> = [];
+      let lastResponse = "";
+      let toolResultCount = 0;
+      const toolResults: Array<{ toolName: string; output: unknown }> = [];
+      // Deduplication: only send pending_confirmation once per response.
+      // Without this, the second stream() (after the first catches an interrupt) would
+      // re-emit the same pending_confirmation event, causing duplicate candidate pickers.
+      let alreadySentPendingConfirmation = false;
 
-        for await (const chunk of graphStream) {
-          for (const nodeOutput of Object.values(chunk)) {
-            if (nodeOutput.toolResults && typeof nodeOutput.toolResults === "object") {
-              const results = nodeOutput.toolResults as Record<string, unknown>;
-              for (const [toolName, result] of Object.entries(results)) {
-                // Announce the tool call first so the frontend shows "正在使用 xxx"
-                enqueueData({
-                  type: "tool_call",
-                  toolCallId: `lg-${toolName}`,
-                  toolName,
-                  input: {},
-                });
-                // Then immediately send the result so the frontend transitions to "xxx 完成"
-                enqueueData({
-                  type: "tool_result",
-                  toolCallId: `lg-${toolName}`,
-                  toolName,
-                  output: result,
-                });
-                toolResults.push({ toolName, output: result });
-                toolResultCount++;
+      if (!graphStream) {
+          // Graph was interrupted (interruptReason is set) — skip processing,
+          // let the pending_confirmation handler above (line 820) save state.
+          // Note: the first stream() call already sent pending_confirmation via enqueueData.
+        } else {
+          for await (const chunk of graphStream) {
+            const typedChunk = chunk as Record<string, Record<string, unknown>>;
+            for (const [nodeName, nodeOutput] of Object.entries(typedChunk)) {
+              if (nodeOutput.toolResults && typeof nodeOutput.toolResults === "object") {
+                const results = nodeOutput.toolResults as Record<string, unknown>;
+                for (const [toolName, result] of Object.entries(results)) {
+                  // Announce the tool call first so the frontend shows "正在使用 xxx"
+                  enqueueData({
+                    type: "tool_call",
+                    toolCallId: `lg-${toolName}`,
+                    toolName,
+                    input: {},
+                  });
+                  // Then immediately send the result so the frontend transitions to "xxx 完成"
+                  enqueueData({
+                    type: "tool_result",
+                    toolCallId: `lg-${toolName}`,
+                    toolName,
+                    output: result,
+                  });
+                  toolResults.push({ toolName, output: result });
+                  toolResultCount++;
+                }
+              }
+
+              // Capture Human-in-Loop: pending human action from disambiguateIntentNode
+              // Decision is now embedded in pendingHumanAction by disambiguateIntentNode.
+              const pendingHA = nodeOutput.pendingHumanAction;
+              if (
+                pendingHA &&
+                typeof pendingHA === "object" &&
+                (pendingHA as Record<string, unknown>).type === "select"
+              ) {
+                const pha = pendingHA as {
+                  type: "select";
+                  entity?: string;
+                  reason?: string;
+                  entityType: "user" | "ticket" | "project" | "weekly_report";
+                  candidates: Array<{ id: string; label: string; summary: string }>;
+                  query?: string;
+                  sourceResult?: { queryType?: string; [key: string]: unknown };
+                };
+                if (alreadySentPendingConfirmation) {
+                  // Already sent pending_confirmation (from the first stream or a previous node update).
+                  // Skip to prevent duplicate candidate picker on the frontend.
+                  console.log(`[AI-LangGraph] skipping duplicate pending_confirmation`);
+                } else {
+                  alreadySentPendingConfirmation = true;
+                  console.log(`[AI-LangGraph] pending_human_action: ${pha.candidates.length} candidates entityType=${pha.entityType}`);
+                  enqueueData({
+                    type: "pending_confirmation",
+                    entityType: pha.entityType,
+                    candidates: pha.candidates,
+                    // Use originalQuery so the NEXT turn knows the original question
+                    // (e.g. "刘工的周报有哪些"), not just "1" or "2".
+                    query: pha.query ?? "",
+                    sourceResult: pha.sourceResult,
+                  });
+                  // Store pending state for when graph is interrupted.
+                  capturedPendingHumanAction = {
+                    pendingHumanAction: {
+                      type: "select",
+                      entity: pha.entity,
+                      entityType: pha.entityType,
+                      reason: pha.reason,
+                      candidates: pha.candidates,
+                      query: pha.query ?? "",
+                      sourceResult: pha.sourceResult,
+                    },
+                    lastAssistantMessage: String(nodeOutput.response ?? ""),
+                    mode: resolvedMode,
+                  };
+                }
+              }
+
+              if (nodeName === "humanConfirmation") {
+                // resolvedEntities is set by humanConfirmationNode on success (any entity type).
+                // Use it as the signal to clear the pending state.
+                const resEnt = nodeOutput.resolvedEntities as Record<string, unknown> | undefined;
+                if (resEnt?.user || resEnt?.weekly_report || resEnt?.ticket || resEnt?.project) {
+                  resolvedEntitiesResolved = true;
+                }
+                // Capture lastMentionedUser from humanConfirmationNode output
+                const lmu = nodeOutput.lastMentionedUser as { id: string; name: string } | null | undefined;
+                if (lmu) {
+                  finalLastMentionedUser = lmu;
+                  console.log(`[AI-LangGraph] captured lastMentionedUser from humanConfirmation: ${lmu.name}`);
+                }
+              }
+
+              // Capture the response (overwrite reducer — last value is final)
+              if (
+                nodeOutput.response &&
+                typeof nodeOutput.response === "string"
+              ) {
+                lastResponse = nodeOutput.response;
               }
             }
-            // Capture the response (overwrite reducer — last value is final)
-            if (
-              nodeOutput.response &&
-              typeof nodeOutput.response === "string"
-            ) {
-              lastResponse = nodeOutput.response;
-            }
           }
+        }
+
+        // ── Handle interrupt (Human-in-Loop pause) ─────────────────────────────────
+        // If the graph was interrupted, store the pending human action state
+        // and send the pending_confirmation event. The frontend will show selection UI.
+        if (interruptReason) {
+          if (capturedPendingHumanAction) {
+            // Store state so the next message from this conversation resumes it
+            setPendingHumanAction(conversationId, capturedPendingHumanAction);
+            console.log(`[AI-LangGraph] stored pending human action for conv=${conversationId}`);
+          }
+          // The stream was already interrupted — we already sent pending_confirmation above.
+          // Don't send "done" here; wait for the frontend to call again with user selection.
+          closeStream();
+          return;
+        }
+
+        // ── Handle pending human action (Human-in-Loop) ──────────────────────────
+        // resolvedEntities (set by humanConfirmationNode) is the source of truth for success.
+        // Clear pending state on successful selection; keep it for invalid follow-up retries.
+        if (resolvedEntitiesResolved) {
+          clearPendingHumanAction(conversationId);
+        } else if (capturedPendingHumanAction) {
+          setPendingHumanAction(conversationId, capturedPendingHumanAction);
         }
 
         // Extract sources from tool results (for inline action buttons)
@@ -631,7 +908,14 @@ async function handleLangGraphRequest(
           }
         }
 
+        // Don't send sources while waiting for human disambiguation.
+        // The disambiguation candidates are sent separately; RAG sources from searchKnowledge
+        // are irrelevant context at this stage and would confuse the reference list.
+        const isPendingDisambiguation = capturedPendingHumanAction !== null;
+
         // Structured DB sources from searchStructured
+        // Also detect "user_activity" attribution so we can drop unrelated RAG sources.
+        let hasUserActivityAttribution = false;
         for (const { toolName, output } of toolResults) {
           if (!output || typeof output !== "object") continue;
           const o = output as Record<string, unknown>;
@@ -640,8 +924,39 @@ async function handleLangGraphRequest(
               allSources.push({ title: src.title, url: src.url, type: src.type });
             }
           }
+          // Detect user_activity attribution (周报/个人活动归因).
+          // When present, the assistant response is short-circuited to the structured
+          // summary, so RAG-sourced notes/docs/tickets that mention the same keywords
+          // (e.g. "光污染计", "周报") are NOT the user's actual work — they are noise.
+          // Drop them so the reference list matches the response.
+          const attribution = o.attribution;
+          if (
+            attribution &&
+            typeof attribution === "object" &&
+            (attribution as Record<string, unknown>).kind === "user_activity"
+          ) {
+            hasUserActivityAttribution = true;
+          }
         }
-        if (allSources.length > 0) {
+
+        // 过滤:user_activity 归因路径下,只保留 searchStructured 的 sources,丢弃 RAG 的笔记/文档/工单/提交
+        if (hasUserActivityAttribution) {
+          const ragCount = allSources.filter(
+            (s) => s.type === "note" || s.type === "doc" || s.type === "ticket" || s.type === "commit"
+          ).length;
+          const structuredCount = allSources.length - ragCount;
+          if (ragCount > 0) {
+            console.log(
+              `[AI-LangGraph] user_activity attribution detected, dropping ${ragCount} RAG source(s) (keeping ${structuredCount} structured)`
+            );
+            const filtered = allSources.filter(
+              (s) => s.type !== "note" && s.type !== "doc" && s.type !== "ticket" && s.type !== "commit"
+            );
+            allSources.length = 0;
+            allSources.push(...filtered);
+          }
+        }
+        if (allSources.length > 0 && !isPendingDisambiguation) {
           console.log(`[AI-LangGraph] sending ${allSources.length} sources`);
           enqueueData({ type: "sources", sources: allSources });
         }
@@ -649,6 +964,17 @@ async function handleLangGraphRequest(
         console.log(
           `[AI-LangGraph] done. toolResults=${toolResultCount}, textLen=${lastResponse.length}`
         );
+
+        // When waiting for human disambiguation, don't send text/done — the graph is interrupted
+        // and the next user message resumes it. The pending_confirmation event was already sent.
+        if (isPendingDisambiguation) {
+          // Save the pending state so the next turn can resume it.
+          if (capturedPendingHumanAction) {
+            setPendingHumanAction(conversationId, capturedPendingHumanAction);
+          }
+          closeStream();
+          return;
+        }
 
         // Final text response
         enqueueData({ type: "text", delta: lastResponse });
@@ -660,6 +986,12 @@ async function handleLangGraphRequest(
           lastResponse,
           allSources.length > 0 ? allSources : undefined
         );
+
+        // Save conversation context (lastMentionedUser) for pronoun resolution in next round
+        setConversationContext(conversationId, {
+          lastMentionedUser: finalLastMentionedUser,
+        });
+
         enqueueData({ type: "done" });
         closeStream();
       } catch (err) {
@@ -668,9 +1000,20 @@ async function handleLangGraphRequest(
           return;
         }
 
-        console.error(`[AI-LangGraph] stream error:`, err);
-        const msg = err instanceof Error ? err.message : "Stream error";
-        enqueueData({ type: "error", message: msg });
+        const errMsg = err instanceof Error ? err.message : "Stream error";
+        const isRecursion = errMsg.includes("Recursion limit");
+        console.error(`[AI-LangGraph] stream error: ${errMsg}${isRecursion ? " (saving pending state)" : ""}`);
+
+        // On recursion limit, save pending state so user can retry in the next turn.
+        // Prefer captured value (set during stream), fallback to the initial pendingState.
+        if (isRecursion) {
+          const toSave = capturedPendingHumanAction ?? (pendingState ?? null);
+          if (toSave) {
+            setPendingHumanAction(conversationId, toSave);
+          }
+        }
+
+        enqueueData({ type: "error", message: errMsg });
         closeStream();
       }
     },

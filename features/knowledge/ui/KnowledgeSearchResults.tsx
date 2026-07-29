@@ -7,7 +7,7 @@ import {
   IconSearch,
 } from "@/shared/ui/icons";
 import { useRecentVisits } from "@/shared/lib/visits-context";
-import type { SearchResponse, SearchResultItem, SearchResultType } from "@/shared/lib/search-types";
+import type { SearchResponse, SearchResultItem, SearchResultType } from "@/features/knowledge/lib/search-types";
 
 type KnowledgeSearchResultsProps = {
   data: SearchResponse;

@@ -3,7 +3,7 @@ import { requireSession } from "@/shared/lib/permissions";
 import {
   getOrCreateProfile,
   upsertProfile,
-} from "@/features/ai/lib/conversation-store";
+} from "@/features/ai/store/conversation-store";
 
 export async function GET() {
   try {

@@ -1,5 +1,5 @@
 import { prisma } from "@/shared/db/client";
-import { summarizeConversation, updateUserProfile } from "./summarizer";
+import { summarizeConversation, updateUserProfile } from "@/features/ai/llm/summarizer";
 
 // Use globalThis to survive Next.js dev HMR
 const conversationQueue = globalThis as typeof globalThis & {
