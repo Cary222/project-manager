@@ -45,7 +45,7 @@ def extract_doc(raw: bytes) -> str:
             )
             if result.returncode != 0:
                 logger.warning("LibreOffice convert failed: %s", result.stderr)
-                raise ValueError(f"doc_convert_failed:{result.stderr[:200]}")
+                raise ValueError("DOC_CONVERT_FAILED")
         except subprocess.TimeoutExpired:
             raise ValueError("doc_convert_timeout") from None
         except FileNotFoundError:

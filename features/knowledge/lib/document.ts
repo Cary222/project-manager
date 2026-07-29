@@ -103,7 +103,7 @@ export function decodeTextBytes(bytes: Uint8Array): string {
 }
 
 export async function extractDocumentText(
-  fileAsset: { id: string; mimeType: string; bytes: Buffer },
+  fileAsset: { id: string; mimeType: string; bytes: Buffer; originalName?: string },
 ): Promise<{
   text: string;
   pageCount?: number;
@@ -118,12 +118,13 @@ export async function extractDocumentText(
   }
 
   // 其余类型走 embedding 服务的 /extract-text（JSON body + data URL）
-  return extractTextViaService(fileAsset);
+  return extractTextViaService(fileAsset, fileAsset.originalName);
 }
 
 const SUPPORTED_MIME_TYPES = new Set([
   // Office 文档
   "application/pdf",
+  "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -147,12 +148,35 @@ const SUPPORTED_MIME_TYPES = new Set([
  * 调用 embedding 服务的 /extract-text 端点提取文本。
  * 将文件 bytes 转为 data URL，通过 JSON body 发送给服务。
  */
+function getUserFriendlyErrorMessage(code: string, fileName: string): string {
+  const messages: Record<string, string> = {
+    // 存储错误
+    STORAGE_NOT_FOUND: `${fileName} 文件不存在（可能已被删除）`,
+    STORAGE_FETCH_FAILED: `${fileName} 文件读取失败（存储服务异常）`,
+    READ_ERROR: `${fileName} 文件读取失败（可能已损坏）`,
+    // 格式解析错误
+    PARSE_ERROR: `${fileName} 格式解析失败（请确认文件未损坏）`,
+    WPS_CONVERT_FAILED: `${fileName} WPS 文件无法解析，建议转换为 docx 重新上传`,
+    DOC_CONVERT_FAILED: `${fileName} doc 文件转换失败，建议转换为 docx 重新上传`,
+    // OCR 错误
+    OCR_ERROR: `${fileName} 图片 OCR 识别失败`,
+    OCR_EMPTY: `${fileName} 图片无文字内容`,
+    // 格式不支持
+    UNSUPPORTED_MIME: `${fileName} 不支持的文件格式`,
+    // 其他
+    EXTRACTION_EMPTY: `${fileName} 无法提取文本内容`,
+    TIMEOUT: `${fileName} 处理超时（文件可能过大）`,
+  };
+  return messages[code] ?? `${fileName} 处理失败: ${code}`;
+}
+
 async function extractTextViaService(
   fileAsset: { id: string; mimeType: string; bytes: Buffer },
+  originalName?: string,
 ): Promise<{ text: string; pageCount?: number; metadata?: Record<string, unknown> }> {
   const baseUrl = (process.env.EMBEDDING_API_URL ?? "http://localhost:5000").trim();
   const mimeType = normalizeMimeType(fileAsset.mimeType);
-  const name = `file.${getExtension(mimeType)}`;
+  const name = originalName || `file.${getExtension(mimeType)}`;
 
   if (!SUPPORTED_MIME_TYPES.has(mimeType) && !mimeType.startsWith("image/")) {
     throw new Error(`UNSUPPORTED_MIME: ${fileAsset.mimeType}`);
@@ -182,11 +206,15 @@ async function extractTextViaService(
     text?: string;
     source?: string;
     name?: string;
+    error?: string;
   };
 
   // source 为非 ok 表示提取失败
   if (data.source && data.source !== "ok") {
-    throw new Error(`EXTRACT_${data.source.toUpperCase()}: ${data.name ?? fileAsset.mimeType}`);
+    const errorCode = data.source.toUpperCase();
+    const fileName = data.name ?? originalName ?? fileAsset.mimeType;
+    const userMessage = getUserFriendlyErrorMessage(errorCode, fileName);
+    throw new Error(`${errorCode}: ${userMessage}`);
   }
 
   return {
@@ -272,13 +300,29 @@ export async function processFileAssetJob(fileAssetId: string): Promise<void> {
     const { text, pageCount, metadata: extractedMetadata } = await extractDocumentText({
       id: fileAsset.id,
       mimeType: fileAsset.mimeType,
+      originalName: fileAsset.originalName,
       // Prisma Bytes is typed as Uint8Array; runtime is Buffer subclass
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       bytes: fileAsset.bytes as any,
     });
 
     if (!text.trim()) {
-      throw new Error("EXTRACTION_EMPTY: no text extracted from file");
+      const isOcrType = fileAsset.mimeType.startsWith("image/");
+      if (!isOcrType) {
+        throw new Error("EXTRACTION_EMPTY: no text extracted from file");
+      }
+      // 图片空结果：返回 { text: "", extractionStatus: "EMPTY", reason: "OCR_NO_TEXT" }
+      await prisma.document.update({
+        where: { id: document.id },
+        data: {
+          status: "READY",
+          extractedText: "",
+          metadata: { extractionStatus: "EMPTY", reason: "OCR_NO_TEXT" } as Prisma.InputJsonValue,
+          error: Prisma.DbNull,
+          updatedAt: new Date(),
+        },
+      });
+      return;
     }
 
     // Step 3: 切块

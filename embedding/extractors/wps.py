@@ -46,7 +46,7 @@ def extract_wps(raw: bytes) -> str:
             )
             if result.returncode != 0:
                 logger.warning("LibreOffice convert failed: %s", result.stderr)
-                raise ValueError(f"wps_convert_failed:{result.stderr[:200]}")
+                raise ValueError("WPS_CONVERT_FAILED")
         except subprocess.TimeoutExpired:
             raise ValueError("wps_convert_timeout") from None
         except FileNotFoundError:

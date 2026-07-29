@@ -31,6 +31,30 @@ const STATUS_LABEL: Record<string, { label: string; tone: string }> = {
   FAILED: { label: "失败", tone: "bg-rose-50 text-rose-700" },
 };
 
+const STATUS_HINT: Record<string, string> = {
+  // 格式解析失败（可由用户修复）
+  PARSE_ERROR: "建议将文件转换为标准格式（如 docx/xlsx/pptx）后重新上传。",
+  WPS_CONVERT_FAILED: "建议将 WPS 文件另存为 docx 格式后重新上传。",
+  DOC_CONVERT_FAILED: "建议将 doc 文件另存为 docx 格式后重新上传。",
+  // 提取为空（文件本身不适合 OCR）
+  EXTRACTION_EMPTY: "文件可能为纯扫描件或图片，请确认文件内容后再试。",
+  OCR_ERROR: "OCR 识别失败，请确认文件为可识别内容。",
+  // 存储/服务端问题
+  STORAGE_NOT_FOUND: "文件已被删除，请重新上传。",
+  STORAGE_FETCH_FAILED: "存储服务异常，请稍后重试或联系管理员。",
+  // 其他
+  TIMEOUT: "文件可能过大，请尝试压缩或分割文件后重试。",
+};
+
+function getStatusHint(errorMessage: string): string | null {
+  // errorMessage 格式：ERROR_CODE: 用户友好提示，或 ERROR_CODE: 详细描述
+  const code = errorMessage.split(":")[0].trim().toUpperCase();
+  // 只对可用户自助修复的错误给出提示
+  const hints = Object.keys(STATUS_HINT);
+  const match = hints.find((k) => code.includes(k));
+  return match ? STATUS_HINT[match] : null;
+}
+
 export default async function ProjectDocumentDetailPage({ params }: Params) {
   await requireSession();
   const { projectId, fileAssetId } = await params;
@@ -128,9 +152,16 @@ export default async function ProjectDocumentDetailPage({ params }: Params) {
           {statusKey === "FAILED" && errorMessage ? (
             <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
               <p className="font-medium">索引失败：{errorMessage}</p>
-              <p className="mt-1 text-rose-600">
-                请在 Worker 日志查看完整堆栈，或重新上传文件触发重处理。
-              </p>
+              {(() => {
+                const hint = getStatusHint(errorMessage);
+                return hint ? (
+                  <p className="mt-1 text-rose-600">{hint}</p>
+                ) : (
+                  <p className="mt-1 text-rose-600">
+                    请在 Worker 日志查看完整堆栈，或重新上传文件触发重处理。
+                  </p>
+                );
+              })()}
             </div>
           ) : null}
 

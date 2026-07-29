@@ -132,16 +132,8 @@ def _extract_text_from_bytes(
         return raw.decode("utf-8", errors="replace")
 
     if normalized == PDF_MIME:
-        with pdfplumber.open(io.BytesIO(raw)) as pdf:
-            total_pages = len(pdf.pages)
-            start = max(0, (page_from or 1) - 1) if page_from else 0
-            end = min(total_pages, page_to) if page_to else total_pages
-            page_texts = []
-            for idx in range(start, end):
-                page_text = pdf.pages[idx].extract_text() or ""
-                if page_text:
-                    page_texts.append(f"[p{idx + 1}/{total_pages}] {page_text}")
-            return "\n".join(page_texts)
+        from extractors.pdf_ocr import extract_pdf_ocr
+        return extract_pdf_ocr(raw, page_from=page_from, page_to=page_to)
 
     if normalized == PPTX_MIME:
         presentation = Presentation(io.BytesIO(raw))
@@ -243,6 +235,12 @@ def extract_attachment_text(
 
     try:
         raw = _read_bytes(url)
+    except urllib.error.HTTPError as exc:
+        print(f"[extract-text] storage not found for {name}: {exc}")
+        return {"text": "", "source": "storage_not_found"}
+    except urllib.error.URLError as exc:
+        print(f"[extract-text] storage fetch failed for {name}: {exc}")
+        return {"text": "", "source": "storage_fetch_failed"}
     except Exception as exc:
         print(f"[extract-text] read failed for {name}: {exc}")
         return {"text": "", "source": "read_error"}
