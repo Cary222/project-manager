@@ -156,9 +156,9 @@ export function MonthlyExpenseList({ initialExpenses }: { initialExpenses: Month
               <div className="flex shrink-0 items-center gap-2">
                 <Link
                   href={`/reports/monthly-expenses/${expense.id}`}
-                  className="rounded-lg border border-ink-300 bg-white px-4 py-2 text-sm font-medium text-ink-700 transition hover:bg-ink-100"
+                  className="rounded-lg border border-ink-200 bg-ink-50 px-3 py-1.5 text-sm text-ink-600 transition-colors hover:bg-brand-50 hover:text-brand-600"
                 >
-                  查看
+                  查看月报
                 </Link>
                 <button
                   type="button"

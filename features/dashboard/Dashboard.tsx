@@ -164,6 +164,18 @@ export function Dashboard() {
     STALE_SWR_OPTIONS
   );
 
+  // 月度报销汇总
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const {
+    data: monthlyExpensesData,
+  } = useSWR<{ expenses: { amount: number }[] }>(
+    `/api/reports/monthly-expenses?month=${currentMonth}`,
+    fetchJson,
+    STALE_SWR_OPTIONS
+  );
+
+  const monthlyTotal = monthlyExpensesData?.expenses?.reduce((sum, e) => sum + e.amount, 0) ?? 0;
+
   const projects = useMemo(() => projectsData?.projects ?? [], [projectsData]);
   const myTickets = useMemo(() => myTicketsData?.tickets ?? [], [myTicketsData]);
   const notes = useMemo(() => notesData?.notes ?? [], [notesData]);
@@ -367,8 +379,8 @@ export function Dashboard() {
           </div>
         </section>
 
-        {/* 实用预览区：笔记 / 周报 / AI 对话 */}
-        <section className="grid gap-4 md:grid-cols-3">
+        {/* 实用预览区：笔记 / 周报 / AI 对话 / 月度报销 */}
+        <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {/* 最近笔记 */}
           <PreviewCard
             title="最近笔记"
@@ -412,12 +424,30 @@ export function Dashboard() {
             )}
           </PreviewCard>
 
-          {/* 本周周报 */}
-          <PreviewCard
-            title="本周周报"
-            icon={<IconTask className="h-4 w-4" />}
-            href="/reports/weekly-reports"
-          >
+          {/* 本周周报 + 本月报销 */}
+          <div className="rounded-xl border border-ink-200 bg-white p-4 shadow-sm transition-shadow duration-150 hover:shadow lg:p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+                  <IconTask className="h-4 w-4" />
+                </span>
+                <h3 className="text-sm font-medium text-ink-900">本周周报</h3>
+              </div>
+              <div className="flex items-center gap-3">
+                <Link
+                  href="/reports/monthly-expenses"
+                  className="text-xs font-medium text-brand-600 transition-colors duration-200 hover:text-brand-700"
+                >
+                  本月报销
+                </Link>
+                <Link
+                  href="/reports/weekly-reports"
+                  className="text-xs font-medium text-brand-600 transition-colors duration-200 hover:text-brand-700"
+                >
+                  查看全部
+                </Link>
+              </div>
+            </div>
             {weeklyLoading ? (
               <div className="h-16 animate-pulse rounded-lg bg-ink-100" />
             ) : (
@@ -488,9 +518,23 @@ export function Dashboard() {
                     </svg>
                   </Link>
                 )}
+                <div className="border-t border-ink-100 pt-2">
+                  <Link
+                    href="/reports/monthly-expenses"
+                    className="flex items-center justify-between rounded-lg px-2 py-2 text-xs transition-colors hover:bg-ink-50"
+                  >
+                    <span className="font-medium text-ink-600">本月报销</span>
+                    <span className="text-ink-500">{currentMonth}</span>
+                    {monthlyTotal > 0 && (
+                      <span className="font-medium text-brand-600">
+                        ¥{monthlyTotal.toFixed(2)}
+                      </span>
+                    )}
+                  </Link>
+                </div>
               </div>
             )}
-          </PreviewCard>
+          </div>
 
           {/* AI 对话最近问题 */}
           <PreviewCard
@@ -533,6 +577,41 @@ export function Dashboard() {
                 ))}
               </ul>
             )}
+          </PreviewCard>
+
+          {/* 月度报销 */}
+          <PreviewCard
+            title="月度报销"
+            icon={
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            }
+            href="/reports/monthly-expenses"
+          >
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-ink-700">
+                  {currentMonth}
+                </span>
+                {monthlyTotal > 0 ? (
+                  <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-600">
+                    ¥{monthlyTotal.toFixed(2)}
+                  </span>
+                ) : (
+                  <span className="text-xs text-ink-400">暂无报销</span>
+                )}
+              </div>
+              <Link
+                href="/reports/monthly-expenses/new"
+                className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700"
+              >
+                记录报销
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </Link>
+            </div>
           </PreviewCard>
         </section>
 
