@@ -7,7 +7,7 @@ import {
   getConversationSummaries,
 } from "@/features/ai/store/conversation-store";
 import { queryProfile } from "@/features/ai/core/queries/query-profile";
-import { agnesFlash, withStreamTextFallback } from "@/features/ai/llm/agnes-provider";
+import { withStreamAgnesDynamicModel } from "@/features/ai/llm/agnes-provider";
 
 function buildGreetingSystemPrompt(profileText: string, recentTopics: string[]): string {
   const recentBlock = recentTopics.length
@@ -76,7 +76,7 @@ export async function POST(
 
     let fullContent = "";
     try {
-      const result = withStreamTextFallback((model) =>
+      const result: any = await withStreamAgnesDynamicModel((model) =>
         streamText({
           model,
           system: systemPrompt,

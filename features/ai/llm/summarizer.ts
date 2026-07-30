@@ -2,9 +2,11 @@
 
 import { prisma } from "@/shared/db/client";
 import { Prisma } from "@prisma/client";
-import { AGNES_API_CHAT_URL, proxyFetch } from "./proxy";
+import { resolveCredential } from "./credentials/api-key-store";
+import { getProxyFetch } from "./proxy";
 
 const MODEL = "agnes-2.0-flash";
+const AGNES_PROVIDER = "agnes";
 
 /** Status codes that warrant a retry with exponential backoff */
 const RETRYABLE_STATUS_CODES = new Set([404, 429, 500, 502, 503, 504]);
@@ -33,10 +35,16 @@ interface ChatMessage {
 }
 
 export async function callAgnes(messages: ChatMessage[]): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is not set");
+  // Read Agnes credential from DB (SYSTEM provider)
+  const cred = await resolveCredential("__system__", AGNES_PROVIDER);
+  if (!cred) {
+    throw new Error("Agnes API key not configured. Please ask ROOT to configure Agnes in system settings.");
   }
+
+  const apiKey = cred.apiKey;
+  const baseURL = cred.baseURL;
+  const fetchFn = cred.transport === "proxy" ? (getProxyFetch() ?? globalThis.fetch) : globalThis.fetch;
+  const chatURL = `${baseURL.replace(/\/$/, "")}/chat/completions`;
 
   let lastError: Error | null = null;
 
@@ -47,7 +55,7 @@ export async function callAgnes(messages: ChatMessage[]): Promise<string> {
     }
 
     try {
-      const response = await proxyFetch(AGNES_API_CHAT_URL, {
+      const response = await fetchFn(chatURL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

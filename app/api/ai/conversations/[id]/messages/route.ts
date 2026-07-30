@@ -12,7 +12,7 @@ import { retrieveContext, buildRagPrompt, extractSourceReferences } from "@/feat
 import type { SourceReference as RagSourceReference } from "@/features/ai/search/rag";
 import { speculationCache, shouldSpeculate } from "@/features/ai/search/speculation-cache";
 import { enqueueSummarizeConversation } from "@/features/ai/jobs/background-jobs";
-import { agnesFlash, withStreamTextFallback } from "@/features/ai/llm/agnes-provider";
+import { withStreamAgnesDynamicModel } from "@/features/ai/llm/agnes-provider";
 import { toolsetForMode, maxStepsForMode } from "@/features/ai/tools";
 import { webSearch } from "@/features/ai/tools/web-search";
 import { searchKnowledge, setSearchKnowledgeViewer, setSearchKnowledgeConversationId } from "@/features/ai/tools/search-knowledge";
@@ -397,8 +397,7 @@ export async function POST(
     setSearchKnowledgeConversationId(conversationId);
     setSearchStructuredViewer(session.user.id);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result: any = withStreamTextFallback((model) =>
+    const result: any = await withStreamAgnesDynamicModel((model) =>
       streamText({
         model,
         system: systemPrompt,
