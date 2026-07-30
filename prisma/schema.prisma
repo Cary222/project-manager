@@ -44,6 +44,7 @@ model User {
   weeklyReports          WeeklyReport[]
   monthlyExpenses        MonthlyExpense[]
   expenseShares          ExpenseShare[]
+  userApiKeys            UserApiKey[]
 
   @@schema("pm")
 }
@@ -794,5 +795,35 @@ enum ExpenseStatus {
   ACTIVE
   DELETED
 
+  @@schema("pm")
+}
+
+/// 用户自定义 API Key 存储表（加密存储）
+/// SYSTEM ownerType 的记录 userId 为空，仅用于平台级凭证（如 Agnes）
+model UserApiKey {
+  id           String    @id @default(cuid())
+  userId       String?   // 普通用户为真实 userId；SYSTEM 凭证为空
+  ownerType    String    @default("USER") // "SYSTEM" | "USER"
+  transport    String    @default("direct") // "proxy" | "direct"
+  apiFormat    String    @default("openai-chat") // "openai-chat" | "openai-responses" | "anthropic"
+  provider     String    // provider id，如 "deepseek", "agnes", "anthropic"
+  name         String    // 用户给这个 key 的命名
+  baseURL      String?   // 可选的 Base URL，不填则用 provider 默认值
+  encryptedKey String    // AES-256-GCM 加密后的 API Key（hex 编码）
+  iv           String    // 初始化向量（hex 编码，12 字节）
+  authTag      String    // 认证标签（hex 编码，16 字节）
+  keyLast4     String    // 明文后 4 位，用于 UI 显示（如 "sk-...abcd"）
+  keyHash      String    // SHA-256 hash，用于去重校验（hex 编码）
+  lastUsedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime? // 软删除
+
+  // SYSTEM 凭证没有对应的 User 记录，设为可选关系
+  user         User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, provider])
+  @@index([keyHash])
+  @@index([ownerType])
   @@schema("pm")
 }

@@ -1,5 +1,6 @@
 import { StateGraph, Annotation, END, START } from "@langchain/langgraph";
 import type { BaseMessage } from "@langchain/core/messages";
+import type { TaskType, UserRoutingConfig } from "@/features/ai/llm/providers/types";
 import type { AgentMode } from "./state";
 import type { DisambiguationCandidate } from "./types";
 import type { QueryType } from "@/features/ai/core/resolvers/query-parser";
@@ -25,8 +26,10 @@ import { searchStructuredNode } from "./nodes/search-structured";
 import { decision as disambiguateIntentNode, humanConfirmation as humanConfirmationNode } from "./nodes/decision";
 import { webSearchNode } from "./nodes/web-search";
 import { generateResponseNode } from "./nodes/generate-response";
+import { modelSelectNode } from "./nodes/model-select";
 import {
   routeAfterDetectIntent,
+  routeAfterModelSelect,
   routeAfterHumanConfirmation,
   routeAfterSearchKnowledge,
   routeAfterSearchStructured,
@@ -138,6 +141,16 @@ const AgentStateAnnotation = Annotation.Root({
     value: (current, update) => update === undefined ? current : update,
     default: () => null,
   }),
+  /** Model selection context (provider + model chosen for this turn). */
+  modelContext: Annotation<{
+    taskType: TaskType;
+    providerId: string;
+    modelName: string;
+    userConfig?: UserRoutingConfig;
+  } | null>({
+    value: (current, update) => update === undefined ? current : update,
+    default: () => null,
+  }),
 });
 
 export type AgentState = typeof AgentStateAnnotation.State;
@@ -146,6 +159,7 @@ export type PartialAgentState = typeof AgentStateAnnotation.Update;
 /** Node names used in the routing graph */
 export type NextNode =
   | "detectIntent"
+  | "modelSelect"
   | "searchKnowledge"
   | "searchStructured"
   | "decision"
@@ -169,6 +183,7 @@ function buildWorkflow() {
   const workflow = new StateGraph(AgentStateAnnotation)
     // Add all nodes
     .addNode("detectIntent", detectIntent)
+    .addNode("modelSelect", modelSelectNode)
     .addNode("searchKnowledge", searchKnowledgeNode)
     .addNode("searchStructured", searchStructuredNode)
     .addNode("decision", disambiguateIntentNode)
@@ -177,9 +192,10 @@ function buildWorkflow() {
     .addNode("humanConfirmation", humanConfirmationNode)
     // Entry point
     .addEdge(START, "detectIntent")
-    // Conditional edges from detectIntent — routes by mode or pending confirmation
-    .addConditionalEdges("detectIntent", routeAfterDetectIntent, {
-      detectIntent: "detectIntent",
+    // detectIntent → modelSelect (always runs model selection first)
+    .addEdge("detectIntent", "modelSelect")
+    // modelSelect → conditional routing based on mode
+    .addConditionalEdges("modelSelect", routeAfterModelSelect, {
       searchKnowledge: "searchKnowledge",
       searchStructured: "searchStructured",
       webSearch: "webSearch",

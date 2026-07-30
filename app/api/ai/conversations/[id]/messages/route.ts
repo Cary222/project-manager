@@ -182,6 +182,8 @@ const messageSchema = z.object({
   forceSearch: z.boolean().optional().default(false),
   useWebSearch: z.boolean().optional().default(false),
   clientCity: z.string().optional(),
+  /** Manual model override: "providerId:modelName" format (e.g. "deepseek:deepseek-chat") */
+  modelName: z.string().optional(),
 });
 
 function buildSystemPrompt(
@@ -275,7 +277,7 @@ export async function POST(
     const session = await requireSession();
     const { id: conversationId } = await params;
     const body = await request.json();
-    const { message, conversationHistory, mode, forceSearch, useWebSearch, clientCity } =
+    const { message, conversationHistory, mode, forceSearch, useWebSearch, clientCity, modelName } =
       messageSchema.parse(body);
     console.log(`[AI-MSG] parsed message="${message.slice(0, 80)}" mode=${mode}`);
 
@@ -305,6 +307,7 @@ export async function POST(
         session,
         conversation,
         clientCity: geoCity,
+        modelName,
       });
     }
     // ── End LangGraph branch ─────────────────────────────────────────────────
@@ -565,6 +568,7 @@ interface LangGraphRequestOptions {
   session: { user: { id: string; name?: string | null; email?: string | null } };
   conversation: { id: string; title: string };
   clientCity: string | null;
+  modelName?: string;
 }
 
 async function handleLangGraphRequest(
@@ -580,6 +584,7 @@ async function handleLangGraphRequest(
     session,
     conversation,
     clientCity,
+    modelName,
   } = opts;
 
   console.log(`[AI-LangGraph] start conv=${conversationId} message="${message.slice(0, 80)}" mode=${mode}`);
@@ -708,6 +713,18 @@ async function handleLangGraphRequest(
           toolResults: {},
           originalQuery: pendingState?.pendingHumanAction?.query ?? "",
           lastMentionedUser: pendingState?.lastMentionedUser ?? conversationContext?.lastMentionedUser ?? null,
+          // Model selection: use manualOverride from request if provided.
+          // modelSelectNode preserves this via userConfig.manualOverride.
+          // providerId/modelName are required by the Annotation schema but will be
+          // overridden by selectModel() inside modelSelectNode.
+          modelContext: modelName
+            ? {
+                taskType: "chat" as const,
+                providerId: "",
+                modelName: "",
+                userConfig: { manualOverride: modelName } as any,
+              }
+            : null,
         };
 
         // Stream updates from the graph using the stream() method

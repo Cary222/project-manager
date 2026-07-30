@@ -8,6 +8,7 @@ import {
 /** Node names used in the routing graph */
 export type NextNode =
   | "detectIntent"
+  | "modelSelect"
   | "searchKnowledge"
   | "searchStructured"
   | "decision"
@@ -205,4 +206,27 @@ export function routeAfterGenerateResponse(state: AgentState): NextNode {
     return "humanConfirmation";
   }
   return END;
+}
+
+/**
+ * Route after modelSelect → to the appropriate node based on mode.
+ *
+ * This is the new routing entry after modelSelect was inserted between
+ * detectIntent and the tool nodes.
+ */
+export function routeAfterModelSelect(state: AgentState): NextNode {
+  // Always check waitingForConfirmation first (HIL must not be skipped)
+  if (state.waitingForConfirmation) {
+    return "humanConfirmation";
+  }
+
+  const mode = state.mode;
+
+  if (mode === "web") return "webSearch";
+  if (mode === "chat") return "generateResponse";
+  // search and auto both start with searchKnowledge
+  if (mode === "search" || mode === "auto") return "searchKnowledge";
+
+  // Default fallback
+  return "generateResponse";
 }

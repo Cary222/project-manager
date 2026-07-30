@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "context-engineering": {
+      "source": "addyosmani/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/context-engineering/SKILL.md",
+      "computedHash": "bb8864454c5a24636cab86c4b3c4b29e7e7431c80485bfd7c9c0a19a01936510"
+    },
     "conversation-memory": {
       "source": "sickn33/antigravity-awesome-skills",
       "sourceType": "github",

@@ -3,8 +3,56 @@ import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import type { AgentState } from "../agent";
 import { generateText } from "ai";
 import type { ModelMessage, UserModelMessage, AssistantModelMessage } from "ai";
-import { withAgnetModelFallback } from "@/features/ai/llm/agnes-provider";
+import { createModel } from "@/features/ai/llm/providers/registry";
+import { ensureSystemProvider } from "@/features/ai/llm/providers/init";
+import { selectModel } from "@/features/ai/llm/model-routing";
 import { isUserActivityQuery } from "./detect-intent";
+
+/**
+ * Call generateText with a dynamically selected model based on modelContext.
+ * All models (SYSTEM Agnes + user-imported) now go through the unified
+ * resolveCredential() → createModel() pipeline.
+ */
+async function callWithDynamicModel(
+  modelContext: AgentState["modelContext"],
+  systemPrompt: string,
+  messages: ModelMessage[],
+  userId: string
+): Promise<string> {
+  const taskType = modelContext?.taskType ?? "chat";
+  const manualOverride = modelContext?.userConfig?.manualOverride;
+  const userConfig = { manualOverride };
+
+  // Ensure SYSTEM providers (Agnes) exist in DB
+  await ensureSystemProvider();
+
+  try {
+    const { providerId, modelName } = selectModel(taskType, userConfig);
+    const modelRef = `${providerId}:${modelName}`;
+    console.log(`[generateResponseNode] calling model: providerId=${providerId} modelName=${modelName} modelRef=${modelRef}`);
+
+    const model = await createModel({ userId, modelRef });
+    console.log(`[generateResponseNode] using model instance for "${modelRef}", calling generateText...`);
+    const result = await generateText({ model, system: systemPrompt, messages });
+    console.log(`[generateResponseNode] generateText success, textLen=${result.text.length}`);
+    return result.text;
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    const apiError = err as any;
+    const responseBody = apiError.response
+      ? JSON.stringify(apiError.response).slice(0, 300)
+      : undefined;
+    console.error(`[generateResponseNode] model failed:`, {
+      message: err.message,
+      name: err.name,
+      statusCode: apiError.statusCode,
+      responseBody,
+      cause: err.cause,
+    });
+    const msg = err.message || `Unknown error (${err.name || typeof error})`;
+    return `生成回答时出错：${msg}`;
+  }
+}
 
 function buildSystemPrompt(
   userName: string,
@@ -279,14 +327,13 @@ export async function generateResponseNode(
     ];
 
     try {
-      const result = await withAgnetModelFallback((model) =>
-        generateText({
-          model,
-          system: systemPrompt,
-          messages: activityMsgs,
-        })
+      const resultText = await callWithDynamicModel(
+        state.modelContext,
+        systemPrompt,
+        activityMsgs,
+        state.userId
       );
-      return { response: result.text, lastMentionedUser };
+      return { response: resultText, lastMentionedUser };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       // 失败时降级返回原文，保证前端至少能看到内容
@@ -331,17 +378,13 @@ export async function generateResponseNode(
   }
 
   try {
-    const result = await withAgnetModelFallback((model) =>
-      generateText({
-        model,
-        system: systemPrompt,
-        messages,
-      })
+    const resultText = await callWithDynamicModel(
+      state.modelContext,
+      systemPrompt,
+      messages,
+      state.userId
     );
-
-    const responseText = result.text;
-
-    return { response: responseText, lastMentionedUser };
+    return { response: resultText, lastMentionedUser };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return { response: `生成回答时出错：${msg}`, lastMentionedUser };

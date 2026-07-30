@@ -8,6 +8,7 @@ import { type SourceReference } from "./AiSourcesList";
 import { AiTypingBubble } from "./AiTypingBubble";
 import { AiThinkingTrace } from "./AiThinkingTrace";
 import { UserProfilePanel, type AiUserProfile } from "./UserProfilePanel";
+import { ModelSelector } from "@/features/ai/llm/model-selector";
 import {
   AI_MODE_OPTIONS,
   type AiMode,
@@ -157,6 +158,7 @@ export function AiChatPanel({
   // Pending confirmation candidates — rendered as a detached picker above the input
   // (not as a message bubble in the conversation).
   const [pendingCandidates, setPendingCandidates] = useState<CandidateUser[] | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string>("agnes:agnes-2.5-flash");
 
   // Tracks every tool call in the current stream so the UI can show a full
   // "searchKnowledge → searchStructured" pipeline instead of the last tool only.
@@ -176,6 +178,12 @@ export function AiChatPanel({
   const [thinkingCollapsed, setThinkingCollapsed] = useState<boolean | undefined>(
     undefined,
   );
+  // Load preferred model from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("preferredModel");
+    if (saved) setSelectedModel(saved);
+  }, []);
+
   // Tracks whether the static preset-welcome typewriter is currently running
   // for the active conversation. Used to skip auto-scrolling to the typing
   // indicator while the typewriter is mid-animation.
@@ -192,12 +200,14 @@ export function AiChatPanel({
   const prevConversationIdRef = useRef<string | null | undefined>(undefined);
   const messagesRef = useRef<Message[]>([]);
   const aiModeRef = useRef<AiMode>("auto");
+  const selectedModelRef = useRef<string>("agnes:agnes-2.5-flash");
 
   // Keep refs in sync with state — useLayoutEffect runs synchronously after
   // render, avoiding the "Cannot update ref during render" lint error.
   useLayoutEffect(() => {
     messagesRef.current = messages;
     aiModeRef.current = aiMode;
+    selectedModelRef.current = selectedModel;
   });
 
   // ─── Load conversation messages ─────────────────────────────────────────────
@@ -564,6 +574,7 @@ export function AiChatPanel({
         const mode = aiModeRef.current;
         const useSearch = mode === "search" || (mode === "auto" && shouldUseRag(message));
         const useWebSearch = mode === "auto" && shouldUseWebSearch(message);
+        const modelName = selectedModelRef.current;
 
         // Determine endpoint and body
         let url: string;
@@ -571,10 +582,10 @@ export function AiChatPanel({
 
         if (conversationId) {
           url = `/api/ai/conversations/${conversationId}/messages`;
-          body = { message, conversationHistory, mode, forceSearch: useSearch, useWebSearch };
+          body = { message, conversationHistory, mode, forceSearch: useSearch, useWebSearch, modelName };
         } else {
           url = "/api/ai/conversations";
-          body = { firstMessage: message, conversationHistory, mode, forceSearch: useSearch, useWebSearch };
+          body = { firstMessage: message, conversationHistory, mode, forceSearch: useSearch, useWebSearch, modelName };
         }
 
         // 获取客户端城市名（用于天气等实时数据搜索）
@@ -970,6 +981,14 @@ export function AiChatPanel({
           </div>
         </div>
         <div className="flex items-center gap-1">
+          <ModelSelector
+            value={selectedModel}
+            onChange={(model) => {
+              setSelectedModel(model);
+              localStorage.setItem("preferredModel", model);
+            }}
+          />
+          <div className="mx-1 h-4 w-px bg-ink-200" />
           <div className="flex items-center rounded-lg bg-ink-100 p-0.5">
             {AI_MODE_OPTIONS.map((option) => (
               <button

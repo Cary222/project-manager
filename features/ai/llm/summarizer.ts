@@ -2,8 +2,8 @@
 
 import { prisma } from "@/shared/db/client";
 import { Prisma } from "@prisma/client";
+import { AGNES_API_CHAT_URL, proxyFetch } from "./proxy";
 
-const AGNES_API_URL = "https://apihub.agnes-ai.com/v1/chat/completions";
 const MODEL = "agnes-2.0-flash";
 
 /** Status codes that warrant a retry with exponential backoff */
@@ -47,7 +47,7 @@ export async function callAgnes(messages: ChatMessage[]): Promise<string> {
     }
 
     try {
-      const response = await fetch(AGNES_API_URL, {
+      const response = await proxyFetch(AGNES_API_CHAT_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

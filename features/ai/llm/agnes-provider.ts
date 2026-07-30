@@ -1,49 +1,10 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import { ProxyAgent } from "undici";
-
-function buildProxyFetch() {
-  const proxyUrl = process.env.HTTPS_PROXY ?? process.env.HTTP_PROXY;
-  if (!proxyUrl) return undefined;
-
-  const proxyAgent = new ProxyAgent({ uri: proxyUrl });
-
-  return async function proxyFetch(
-    input: RequestInfo | URL,
-    init?: RequestInit
-  ): Promise<Response> {
-    const urlStr =
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.href
-          : String(input);
-
-    const { request } = await import("undici");
-    const response = await request(urlStr, {
-      ...init,
-      dispatcher: proxyAgent,
-    } as Parameters<typeof request>[1]);
-
-    const normalizedHeaders = new Headers();
-    for (const [key, value] of Object.entries(response.headers)) {
-      if (typeof value === "string") {
-        normalizedHeaders.append(key, value);
-      } else if (Array.isArray(value)) {
-        for (const v of value) normalizedHeaders.append(key, v);
-      }
-    }
-
-    return new Response(response.body as unknown as BodyInit, {
-      status: response.statusCode,
-      headers: normalizedHeaders,
-    });
-  };
-}
+import { buildProxyAwareFetch, AGNES_API_BASE_URL } from "./proxy";
 
 export const agnes = createOpenAI({
-  baseURL: process.env.AGNES_API_URL ?? "https://apihub.agnes-ai.com/v1",
+  baseURL: AGNES_API_BASE_URL,
   apiKey: process.env.OPENAI_API_KEY ?? "",
-  fetch: buildProxyFetch(),
+  fetch: buildProxyAwareFetch(),
 });
 
 export const agnesFlash25 = agnes.chat("agnes-2.5-flash");
