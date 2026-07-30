@@ -474,6 +474,9 @@ function ExpenseTabContent({ period }: { period: Period }) {
     count: p.count,
   }));
 
+  // 图表与表格对齐的固定高度
+  const TABLE_HEIGHT = 260;
+
   return (
     <div>
       {isLoading ? (
@@ -533,39 +536,50 @@ function ExpenseTabContent({ period }: { period: Period }) {
               {/* 明细表格 */}
               <div>
                 <p className="mb-2 text-xs text-ink-500">报销明细</p>
-                <div className="rounded-lg border border-ink-200 overflow-hidden">
+                <div
+                  className="rounded-lg border border-ink-200 overflow-hidden flex flex-col bg-white"
+                  style={{ height: TABLE_HEIGHT }}
+                >
                   <table className="w-full text-sm">
-                    <thead>
+                    <thead className="shrink-0">
                       <tr className="bg-ink-50">
                         <th className="px-3 py-2 text-left font-medium text-ink-600">类型</th>
                         <th className="px-3 py-2 text-right font-medium text-ink-600">笔数</th>
                         <th className="px-3 py-2 text-right font-medium text-ink-600">金额</th>
                       </tr>
                     </thead>
-                    <tbody>
-                      {byType.map((t, i) => (
-                        <tr key={t.type} className={i % 2 === 0 ? "bg-white" : "bg-ink-50/50"}>
-                          <td className="px-3 py-2">
-                            <div className="flex items-center gap-1.5">
-                              <span
-                                className="h-2 w-2 rounded-full"
-                                style={{ backgroundColor: PIE_COLORS[byType.indexOf(t) % PIE_COLORS.length] }}
-                              />
-                              <span className="text-ink-700">{t.label}</span>
-                            </div>
-                          </td>
-                          <td className="px-3 py-2 text-right text-ink-600">{t.count}</td>
-                          <td className="px-3 py-2 text-right font-medium text-ink-900">
-                            {formatExpenseAmount(t.total)}
-                          </td>
-                        </tr>
-                      ))}
+                  </table>
+                  <div className="overflow-y-auto flex-1">
+                    <table className="w-full text-sm">
+                      <tbody>
+                        {byType.map((t, i) => (
+                          <tr key={t.type} className={i % 2 === 0 ? "bg-white" : "bg-ink-50/50"}>
+                            <td className="px-3 py-2">
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className="h-2 w-2 rounded-full"
+                                  style={{ backgroundColor: PIE_COLORS[byType.indexOf(t) % PIE_COLORS.length] }}
+                                />
+                                <span className="text-ink-700">{t.label}</span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 text-right text-ink-600">{t.count}</td>
+                            <td className="px-3 py-2 text-right font-medium text-ink-900">
+                              {formatExpenseAmount(t.total)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <table className="w-full text-sm">
+                    <tfoot className="shrink-0">
                       <tr className="border-t border-ink-200 bg-brand-50 font-semibold">
                         <td className="px-3 py-2 text-ink-700">合计</td>
                         <td className="px-3 py-2 text-right text-ink-700">{summary.count}</td>
                         <td className="px-3 py-2 text-right text-brand-700">{formatExpenseAmount(summary.total)}</td>
                       </tr>
-                    </tbody>
+                    </tfoot>
                   </table>
                 </div>
               </div>
@@ -597,38 +611,49 @@ function ExpenseTabContent({ period }: { period: Period }) {
               {/* 人员明细表格 */}
               <div>
                 <p className="mb-2 text-xs text-ink-500">人员报销明细</p>
-                <div className="rounded-lg border border-ink-200 overflow-hidden">
+                <div
+                  className="rounded-lg border border-ink-200 overflow-hidden flex flex-col bg-white"
+                  style={{ height: TABLE_HEIGHT }}
+                >
                   <table className="w-full text-sm">
-                    <thead>
+                    <thead className="shrink-0">
                       <tr className="bg-ink-50">
                         <th className="px-3 py-2 text-left font-medium text-ink-600">人员</th>
                         <th className="px-3 py-2 text-right font-medium text-ink-600">笔数</th>
                         <th className="px-3 py-2 text-right font-medium text-ink-600">金额</th>
                       </tr>
                     </thead>
-                    <tbody>
-                      {byPerson.map((p, i) => (
-                        <tr key={p.userId} className={i % 2 === 0 ? "bg-white" : "bg-ink-50/50"}>
-                          <td className="px-3 py-2">
-                            <div className="flex items-center gap-1.5">
-                              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[10px] font-medium text-brand-600">
-                                {(p.name ?? p.email)[0]?.toUpperCase() ?? "?"}
-                              </span>
-                              <span className="text-ink-700">{p.name ?? p.email}</span>
-                            </div>
-                          </td>
-                          <td className="px-3 py-2 text-right text-ink-600">{p.count}</td>
-                          <td className="px-3 py-2 text-right font-medium text-ink-900">
-                            {formatExpenseAmount(p.total)}
-                          </td>
-                        </tr>
-                      ))}
+                  </table>
+                  <div className="overflow-y-auto flex-1">
+                    <table className="w-full text-sm">
+                      <tbody>
+                        {byPerson.map((p, i) => (
+                          <tr key={p.userId} className={i % 2 === 0 ? "bg-white" : "bg-ink-50/50"}>
+                            <td className="px-3 py-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[10px] font-medium text-brand-600">
+                                  {(p.name ?? p.email)[0]?.toUpperCase() ?? "?"}
+                                </span>
+                                <span className="text-ink-700">{p.name ?? p.email}</span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 text-right text-ink-600">{p.count}</td>
+                            <td className="px-3 py-2 text-right font-medium text-ink-900">
+                              {formatExpenseAmount(p.total)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <table className="w-full text-sm">
+                    <tfoot className="shrink-0">
                       <tr className="border-t border-ink-200 bg-brand-50 font-semibold">
                         <td className="px-3 py-2 text-ink-700">合计</td>
                         <td className="px-3 py-2 text-right text-ink-700">{summary.count}</td>
                         <td className="px-3 py-2 text-right text-brand-700">{formatExpenseAmount(summary.total)}</td>
                       </tr>
-                    </tbody>
+                    </tfoot>
                   </table>
                 </div>
               </div>
