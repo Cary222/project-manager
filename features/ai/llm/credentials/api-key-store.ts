@@ -92,6 +92,79 @@ export async function resolveCredential(
 }
 
 /**
+ * 三级降级凭证解析。
+ * 查找顺序：
+ *  1. SYSTEM provider（ROOT 配置的系统默认）— 优先
+ *  2. USER provider（用户个人配置）— 其次
+ *  3. ENV fallback（环境变量兜底）— 最后
+ *
+ * 每级配置失败（无配置或无明文 key）才降级到下一级。
+ */
+export async function resolveCredentialWithFallback(
+  userId: string,
+  provider: string,
+  envVarMap?: Record<string, string>
+): Promise<CredentialRecord | null> {
+  // 1. SYSTEM provider
+  const systemRecord = await prisma.userApiKey.findFirst({
+    where: { userId: null, ownerType: "SYSTEM", provider, deletedAt: null },
+  });
+  if (systemRecord) {
+    const apiKey = decrypt(systemRecord.encryptedKey, systemRecord.iv, systemRecord.authTag);
+    if (apiKey) {
+      return {
+        provider: systemRecord.provider,
+        baseURL: systemRecord.baseURL
+          ? normalizeBaseURL(systemRecord.baseURL)
+          : getEffectiveBaseURL(provider, null),
+        apiKey,
+        transport: (systemRecord.transport as "proxy" | "direct") ?? "proxy",
+        apiFormat: (systemRecord.apiFormat as ApiFormat) ?? "openai-chat",
+        ownerType: "SYSTEM",
+      };
+    }
+  }
+
+  // 2. USER provider
+  const userRecord = await prisma.userApiKey.findFirst({
+    where: { userId, provider, deletedAt: null },
+  });
+  if (userRecord) {
+    const apiKey = decrypt(userRecord.encryptedKey, userRecord.iv, userRecord.authTag);
+    if (apiKey) {
+      return {
+        provider: userRecord.provider,
+        baseURL: userRecord.baseURL
+          ? normalizeBaseURL(userRecord.baseURL)
+          : getEffectiveBaseURL(provider, null),
+        apiKey,
+        transport: (userRecord.transport as "proxy" | "direct") ?? "direct",
+        apiFormat: (userRecord.apiFormat as ApiFormat) ?? "openai-chat",
+        ownerType: "USER",
+      };
+    }
+  }
+
+  // 3. ENV fallback
+  if (envVarMap) {
+    const apiKey = envVarMap.apiKey;
+    const baseURL = envVarMap.baseURL;
+    if (apiKey) {
+      return {
+        provider,
+        baseURL: baseURL ? normalizeBaseURL(baseURL) : getEffectiveBaseURL(provider, null),
+        apiKey,
+        transport: "proxy",
+        apiFormat: "openai-chat",
+        ownerType: "SYSTEM",
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
  * 保存用户 API Key（加密后存 DB）
  * - 若同一 provider 已存在则更新（upsert via find + create/update）
  * - 明文 key 不会返回给调用方

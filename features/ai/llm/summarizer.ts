@@ -2,8 +2,8 @@
 
 import { prisma } from "@/shared/db/client";
 import { Prisma } from "@prisma/client";
-import { resolveCredential } from "./credentials/api-key-store";
-import { getProxyFetch } from "./proxy";
+import { resolveCredentialWithFallback } from "./credentials/api-key-store";
+import { getProxyFetch, AGNES_API_BASE_URL } from "./proxy";
 
 const MODEL = "agnes-2.0-flash";
 const AGNES_PROVIDER = "agnes";
@@ -35,8 +35,12 @@ interface ChatMessage {
 }
 
 export async function callAgnes(messages: ChatMessage[]): Promise<string> {
-  // Read Agnes credential from DB (SYSTEM provider)
-  const cred = await resolveCredential("__system__", AGNES_PROVIDER);
+  // Three-level credential fallback: SYSTEM → USER → ENV
+  const envFallback = {
+    apiKey: process.env.AGNES_API_KEY ?? process.env.OPENAI_API_KEY ?? "",
+    baseURL: process.env.AGNES_API_URL ?? AGNES_API_BASE_URL,
+  };
+  const cred = await resolveCredentialWithFallback("__system__", AGNES_PROVIDER, envFallback);
   if (!cred) {
     throw new Error("Agnes API key not configured. Please ask ROOT to configure Agnes in system settings.");
   }

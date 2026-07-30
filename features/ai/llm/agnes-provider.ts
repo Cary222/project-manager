@@ -1,57 +1,61 @@
 /**
  * Agnes LLM Provider — Dynamic factory based on DB credentials.
  *
- * Previously hardcoded OPENAI_API_KEY from env. Now reads SYSTEM Agnes
- * credentials from DB via resolveCredential(), matching user provider flow.
+ * Credential resolution chain (system → user → env):
+ *  1. SYSTEM Agnes provider (ROOT configured) — highest priority
+ *  2. USER Agnes provider (personal) — fallback
+ *  3. ENV vars (AGNES_API_KEY / AGNES_API_URL) — last resort
  */
-import { resolveCredential } from "./credentials/api-key-store";
+import { resolveCredentialWithFallback } from "./credentials/api-key-store";
 import { AGNES_API_BASE_URL, getProxyFetch } from "./proxy";
 import { normalizeBaseURL } from "./providers/registry";
 
 export const AGNES_PROVIDER = "agnes";
 
 /**
- * Create an Agnes model instance using credentials from DB (SYSTEM provider).
- * Falls back to env vars if DB has no SYSTEM Agnes key.
+ * Agnes env fallback map (last resort after DB lookups fail).
+ */
+function getAgnesEnvFallback(): { apiKey: string; baseURL: string } {
+  return {
+    apiKey: process.env.AGNES_API_KEY ?? process.env.OPENAI_API_KEY ?? "",
+    baseURL: process.env.AGNES_API_URL ?? AGNES_API_BASE_URL,
+  };
+}
+
+/**
+ * Create an Agnes model instance.
+ * Uses three-level fallback: SYSTEM → USER → ENV
  */
 export async function createAgnesModel(
-  modelName: string = "agnes-2.5-flash"
+  modelName: string = "agnes-2.5-flash",
+  userId?: string
 ): Promise<ReturnType<typeof import("@ai-sdk/openai").createOpenAI> extends (name: string) => infer R ? R : never> {
   const { createOpenAI } = await import("@ai-sdk/openai");
 
-  // Try DB first (SYSTEM provider)
-  const cred = await resolveCredential("__system__", AGNES_PROVIDER);
+  // Resolve credential with three-level fallback
+  const uid = userId ?? "__system__";
+  const envFallback = getAgnesEnvFallback();
+  const cred = await resolveCredentialWithFallback(uid, AGNES_PROVIDER, envFallback);
 
-  let apiKey: string;
-  let baseURL: string;
-  let transport: "proxy" | "direct" = "proxy";
-
-  if (cred) {
-    apiKey = cred.apiKey;
-    baseURL = cred.baseURL;
-    transport = cred.transport;
-  } else {
-    // Fallback to env vars (for migration/dev)
-    apiKey = process.env.AGNES_API_KEY ?? process.env.OPENAI_API_KEY ?? "";
-    baseURL = process.env.AGNES_API_URL ?? AGNES_API_BASE_URL;
-    console.warn("[Agnes] SYSTEM provider not in DB, falling back to env AGNES_API_KEY");
-  }
-
-  if (!apiKey) {
+  if (!cred) {
     throw new Error(
       "Agnes API key not configured. ROOT can configure it in System Settings (API Key Management)."
     );
   }
 
-  const normalizedBaseURL = normalizeBaseURL(baseURL);
+  const normalizedBaseURL = normalizeBaseURL(cred.baseURL);
   const rawFetch =
-    transport === "proxy" ? (getProxyFetch() ?? globalThis.fetch) : globalThis.fetch;
+    cred.transport === "proxy" ? (getProxyFetch() ?? globalThis.fetch) : globalThis.fetch;
 
   const openai = createOpenAI({
     baseURL: normalizedBaseURL,
-    apiKey,
+    apiKey: cred.apiKey,
     fetch: rawFetch,
   });
+
+  if (cred.ownerType !== "SYSTEM" && userId) {
+    console.log(`[Agnes] using USER credential for user=${userId}`);
+  }
 
   return openai(modelName) as ReturnType<typeof createOpenAI> extends (name: string) => infer R ? R : never;
 }
@@ -59,26 +63,27 @@ export async function createAgnesModel(
 /**
  * Agnes 2.5 flash model (primary)
  */
-export async function getAgnesFlash25() {
-  return createAgnesModel("agnes-2.5-flash");
+export async function getAgnesFlash25(userId?: string) {
+  return createAgnesModel("agnes-2.5-flash", userId);
 }
 
 /**
  * Agnes 2.0 flash model (fallback)
  */
-export async function getAgnesFlash() {
-  return createAgnesModel("agnes-2.0-flash");
+export async function getAgnesFlash(userId?: string) {
+  return createAgnesModel("agnes-2.0-flash", userId);
 }
 
 /**
- * Backward-compatible: wraps a function that takes a model and returns T.
- * Calls createAgnesModel() each time to get fresh credentials.
+ * Wrapper: tries agnes-2.5-flash first, falls back to agnes-2.0-flash on error.
+ * Uses three-level credential fallback for each attempt.
  */
 export async function withAgnesDynamicModel<T>(
-  fn: (model: Awaited<ReturnType<typeof createAgnesModel>>) => T | Promise<T>
+  fn: (model: Awaited<ReturnType<typeof createAgnesModel>>) => T | Promise<T>,
+  userId?: string
 ): Promise<T> {
-  const model = await createAgnesModel("agnes-2.5-flash");
   try {
+    const model = await createAgnesModel("agnes-2.5-flash", userId);
     return await fn(model);
   } catch (error) {
     if (isAbortError(error)) throw error;
@@ -87,20 +92,21 @@ export async function withAgnesDynamicModel<T>(
     console.warn(
       `[Agnes] agnes-2.5-flash failed (${msg}), falling back to agnes-2.0-flash`
     );
-    const fallback = await createAgnesModel("agnes-2.0-flash");
+    const fallback = await createAgnesModel("agnes-2.0-flash", userId);
     return fn(fallback);
   }
 }
 
 /**
- * Stream variant: wraps a function that takes a model and returns T.
- * Creates model inside the try block so fallback can retry with different model.
+ * Stream variant: tries agnes-2.5-flash first, falls back to agnes-2.0-flash.
+ * Creates model inside try block so fallback can retry with different model.
  */
 export async function withStreamAgnesDynamicModel<T>(
-  fn: (model: Awaited<ReturnType<typeof createAgnesModel>>) => T
+  fn: (model: Awaited<ReturnType<typeof createAgnesModel>>) => T,
+  userId?: string
 ): Promise<T> {
   try {
-    const model = await createAgnesModel("agnes-2.5-flash");
+    const model = await createAgnesModel("agnes-2.5-flash", userId);
     return fn(model);
   } catch (error) {
     if (isAbortError(error)) throw error;
@@ -109,7 +115,7 @@ export async function withStreamAgnesDynamicModel<T>(
     console.warn(
       `[Agnes] agnes-2.5-flash stream failed (${msg}), falling back to agnes-2.0-flash`
     );
-    const fallback = await createAgnesModel("agnes-2.0-flash");
+    const fallback = await createAgnesModel("agnes-2.0-flash", userId);
     return fn(fallback);
   }
 }
