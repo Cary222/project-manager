@@ -29,7 +29,7 @@ export function useApiKeys() {
     data: { userKeys: UserKeyInfo[]; systemKeys: UserKeyInfo[] };
   }>("/api/ai/providers", fetcher, {
     revalidateOnFocus: false,
-    dedupingInterval: 30_000,
+    dedupingInterval: 2_000,
   });
 
   const userKeys = data?.data?.userKeys ?? [];
@@ -53,10 +53,9 @@ export function useApiKeys() {
       if (!res.ok) {
         return false;
       }
-      // Invalidate SWR cache → 所有 useApiKeys 实例自动 revalidate
+      // Invalidate both caches so the model catalog refreshes immediately
       mutate("/api/ai/providers");
-      // Signal model catalog to refresh
-      localStorage.setItem("__modelCatalogRefresh", Date.now().toString());
+      mutate("/api/ai/models");
       return true;
     } catch {
       return false;
@@ -101,6 +100,7 @@ export function useApiKeys() {
       });
       if (!res.ok) return false;
       mutate("/api/ai/providers");
+      mutate("/api/ai/models");
       return true;
     } catch {
       return false;

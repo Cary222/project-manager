@@ -7,6 +7,7 @@
  * 生成结构化 JSON：highlights / tasks / nextPlan / rawMarkdown。
  */
 
+import { prisma } from "@/shared/db/client";
 import { callAgnes } from "@/features/ai/llm/summarizer";
 import type { WeeklyContext } from "./context-aggregator";
 
@@ -185,7 +186,7 @@ function extractJsonFromResponse(text: string): string {
 // ============================================================
 
 export async function generateWeeklyDraftSummary(
-  _userId: string,
+  userId: string,
   _weekStart: Date,
   _weekEnd: Date,
   formDraft?: FormDraft,
@@ -218,8 +219,17 @@ export async function generateWeeklyDraftSummary(
     { role: "user", content: promptUser },
   ];
 
+  // 获取用户的 AI 模型偏好
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { preferredAiModel: true },
+  });
+
   try {
-    const responseText = await callAgnes(messages);
+    const responseText = await callAgnes(messages, {
+      userId,
+      preferredModelRef: user?.preferredAiModel,
+    });
     const jsonStr = extractJsonFromResponse(responseText);
     const result = JSON.parse(jsonStr) as WeeklyDraftSummary;
 

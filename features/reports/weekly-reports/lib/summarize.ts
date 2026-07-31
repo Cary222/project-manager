@@ -38,14 +38,24 @@ function buildSummaryPrompt(title: string, content: string): string {
 
 async function callAgnesForSummary(
   title: string,
-  content: string
+  content: string,
+  userId: string
 ): Promise<string> {
+  // 获取用户的 AI 模型偏好
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { preferredAiModel: true },
+  });
+
   const prompt = buildSummaryPrompt(title, content);
   const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
     { role: "system", content: SUMMARY_INSTRUCTION },
     { role: "user", content: prompt },
   ];
-  return callAgnes(messages);
+  return callAgnes(messages, {
+    userId,
+    preferredModelRef: user?.preferredAiModel,
+  });
 }
 
 /**
@@ -88,7 +98,7 @@ export async function summarizeWeeklyReport(reportId: string): Promise<void> {
 
     let aiSummary: string;
     try {
-      aiSummary = await callAgnesForSummary(report.title, truncatedContent);
+      aiSummary = await callAgnesForSummary(report.title, truncatedContent, report.userId);
     } catch (err) {
       console.warn(`[summarizeWeeklyReport] LLM call failed for ${reportId}:`, err);
       // LLM 失败，写 fallback 并确保 partial=false，避免永远卡住

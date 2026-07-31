@@ -12,13 +12,7 @@ import {
   updateSystemSettingsAction,
   type SystemSettingSummary,
 } from "@/features/admin/settings";
-import {
-  IconCheck,
-  IconShield,
-  IconSettings,
-  IconTeam,
-  IconTrend,
-} from "@/shared/ui/icons";
+import { IconCheck, IconShield, IconSettings, IconTeam, IconTrend } from "@/shared/ui/icons";
 
 type ProfileState = {
   id: string;
@@ -228,6 +222,7 @@ export function SettingsCenter() {
 
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
 
+
   useEffect(() => {
     let active = true;
 
@@ -402,6 +397,7 @@ export function SettingsCenter() {
                     </div>
                   </div>
                 </div>
+
                 <div className="flex justify-end">
                   <button
                     type="submit"

@@ -11,6 +11,7 @@ import { useModelSortAndFilter } from "@/features/ai/ui/model-select/useModelSor
 import { useModelCatalog } from "@/features/ai/ui/model-select/useModelCatalog";
 import { SearchInput } from "@/shared/ui/SearchInput";
 import { IconCheck, IconLoader, IconSettings, IconTrash } from "@/shared/ui/icons";
+import { updatePreferredAiModelAction } from "@/features/admin/settings";
 import type { AiModel } from "@/features/ai/ui/model-select/types";
 
 /* ------------------------------------------------------------------ */
@@ -30,7 +31,12 @@ function getProviderLabel(provider: string) {
 /* ------------------------------------------------------------------ */
 /*  Inner — must be inside ModelSelectionProvider                      */
 /* ------------------------------------------------------------------ */
-function ModelConfigPanelInner() {
+interface ModelConfigPanelInnerProps {
+  preferredAiModel?: string | null;
+  availableModels: AiModel[];
+}
+
+function ModelConfigPanelInner({ preferredAiModel, availableModels }: ModelConfigPanelInnerProps) {
   const { data: session } = useSession();
   const isRoot = session?.user?.role === "ROOT";
 
@@ -38,6 +44,13 @@ function ModelConfigPanelInner() {
     selectAll, deselectAll, resetToDefault } = useModelSelection();
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState<"user" | "system">("user");
+
+  // 对话总结用模型偏好
+  const [selectedPreferredModel, setSelectedPreferredModel] = useState<string>(
+    preferredAiModel ?? "default"
+  );
+  const [preferredFlash, setPreferredFlash] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [preferredSaving, setPreferredSaving] = useState(false);
 
   const {
     userKeys,
@@ -61,6 +74,20 @@ function ModelConfigPanelInner() {
     searchTerm
   );
 
+  async function handlePreferredModelSave() {
+    setPreferredSaving(true);
+    setPreferredFlash(null);
+    const result = await updatePreferredAiModelAction(
+      selectedPreferredModel === "default" ? null : selectedPreferredModel
+    );
+    setPreferredSaving(false);
+    if (result.error) {
+      setPreferredFlash({ type: "error", message: result.error });
+    } else {
+      setPreferredFlash({ type: "success", message: "AI 模型偏好已保存" });
+    }
+  }
+
   const handleToggleProvider = (provider: string, checked: boolean) => {
     toggleProvider(provider, checked);
   };
@@ -80,6 +107,53 @@ function ModelConfigPanelInner() {
 
   return (
     <div className="space-y-5">
+      {/* 对话总结用 AI 模型偏好 — 放在配置面板顶部 */}
+      <div className="rounded-xl border border-brand-200 bg-brand-50 px-4 py-3">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-medium uppercase tracking-wide text-brand-600">对话总结模型</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <select
+            value={selectedPreferredModel}
+            onChange={(e) => setSelectedPreferredModel(e.target.value)}
+            className="flex-1 rounded-md border border-brand-300 bg-white px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+          >
+            <option value="default">系统默认（Agnes）</option>
+            {availableModels
+              .filter((m) => m.provider !== "agnes")
+              .map((model) => (
+                <option key={model.value} value={model.value}>
+                  {model.model}
+                </option>
+              ))}
+          </select>
+          <button
+            type="button"
+            onClick={handlePreferredModelSave}
+            disabled={preferredSaving}
+            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {preferredSaving ? "保存中…" : "保存"}
+          </button>
+        </div>
+        {preferredFlash && (
+          <p
+            className={`mt-2 rounded-md border px-3 py-2 text-xs ${
+              preferredFlash.type === "success"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-red-200 bg-red-50 text-red-700"
+            }`}
+          >
+            {preferredFlash.message}
+          </p>
+        )}
+        <p className="mt-2 text-xs text-ink-500">
+          {selectedPreferredModel === "default"
+            ? "使用系统默认的 Agnes 模型进行对话总结"
+            : "使用你配置的模型进行对话总结"}
+        </p>
+      </div>
+
       <SearchInput
         value={searchTerm}
         onChange={setSearchTerm}
@@ -568,7 +642,7 @@ function ApiKeyConfigPanel({
 /* ------------------------------------------------------------------ */
 /*  Public component                                                   */
 /* ------------------------------------------------------------------ */
-export function ModelConfigPanel() {
+export function ModelConfigPanel(props: { preferredAiModel?: string | null }) {
   const { models, loading, error } = useModelCatalog();
 
   if (loading) {
@@ -603,7 +677,10 @@ export function ModelConfigPanel() {
       configurableModels={models}
       initialModel={defaultModel}
     >
-      <ModelConfigPanelInner />
+      <ModelConfigPanelInner
+        preferredAiModel={props.preferredAiModel}
+        availableModels={models}
+      />
     </ModelSelectionProvider>
   );
 }

@@ -28,6 +28,7 @@ export async function getProfileAction() {
       role: true,
       createdAt: true,
       passwordHash: true,
+      preferredAiModel: true,
     },
   });
   if (!user) throw new Error("用户不存在");
@@ -38,6 +39,7 @@ export async function getProfileAction() {
     role: user.role,
     createdAt: user.createdAt.toISOString(),
     hasPassword: !!user.passwordHash,
+    preferredAiModel: user.preferredAiModel,
   };
 }
 
@@ -140,6 +142,24 @@ export async function changePasswordAction(
   });
 
   revalidatePath("/admin/settings");
+  return { success: true };
+}
+
+/** 更新用户偏好的 AI 模型
+ * @param modelRef 模型引用，如 "agnes:agnes-2.0-flash" 或 "deepseek:deepseek-chat"
+ *                  传 null 表示使用系统默认（Agnes）
+ */
+export async function updatePreferredAiModelAction(
+  modelRef: string | null
+): Promise<{ success?: boolean; error?: string }> {
+  const session = await requireSession();
+
+  await prisma.user.update({
+    where: { id: session.user.id },
+    data: { preferredAiModel: modelRef },
+  });
+
+  revalidatePath("/settings");
   return { success: true };
 }
 

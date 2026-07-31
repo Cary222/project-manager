@@ -2,10 +2,10 @@
 
 import { prisma } from "@/shared/db/client";
 import { Prisma } from "@prisma/client";
-import { resolveCredentialWithFallback } from "./credentials/api-key-store";
+import { resolveCredential, resolveCredentialWithFallback } from "./credentials/api-key-store";
 import { getProxyFetch, AGNES_API_BASE_URL } from "./proxy";
 
-const MODEL = "agnes-2.0-flash";
+const AGNES_MODEL = "agnes-2.0-flash";
 const AGNES_PROVIDER = "agnes";
 
 /** Status codes that warrant a retry with exponential backoff */
@@ -34,7 +34,110 @@ interface ChatMessage {
   content: string;
 }
 
-export async function callAgnes(messages: ChatMessage[]): Promise<string> {
+export async function callAgnes(
+  messages: ChatMessage[],
+  options?: { userId?: string; preferredModelRef?: string | null }
+): Promise<string> {
+  const { userId, preferredModelRef } = options ?? {};
+
+  // 用户在设置中明确选择了一个模型：尝试用户模型，失败回落到系统默认 Agnes
+  if (preferredModelRef && preferredModelRef !== "default") {
+    if (!userId) {
+      console.warn("[callAgnes] preferredModelRef set but userId missing, using Agnes");
+    } else {
+      try {
+        return await callWithUserModel(userId, preferredModelRef, messages);
+      } catch (err) {
+        console.warn("[callAgnes] User model failed, falling back to Agnes:", err);
+      }
+    }
+  }
+
+  return callWithAgnes(messages);
+}
+
+/**
+ * 使用用户在 Settings 里选择的模型进行调用。
+ * 凭证走用户自己配置的 API Key（USER key），fallback 到 SYSTEM key（与 AI 聊天链路一致）。
+ * fetch 行为依据 cred.transport 决定走代理还是直连。
+ */
+async function callWithUserModel(
+  userId: string,
+  modelRef: string,
+  messages: ChatMessage[]
+): Promise<string> {
+  const [provider, model] = modelRef.split(":");
+  if (!provider || !model) {
+    throw new Error(`Invalid modelRef: ${modelRef}`);
+  }
+
+  const cred = await resolveCredential(userId, provider);
+  if (!cred) {
+    throw new Error(`No credential found for provider "${provider}"`);
+  }
+  if (cred.apiFormat !== "openai-chat") {
+    // 当前实现只覆盖 OpenAI 兼容 chat completions；其他格式（anthropic / agnes responses）
+    // 应继续走系统默认链路。等后续 PR 扩展。
+    throw new Error(`Unsupported apiFormat "${cred.apiFormat}" for user model`);
+  }
+
+  const fetchFn = cred.transport === "proxy" ? (getProxyFetch() ?? globalThis.fetch) : globalThis.fetch;
+  const chatURL = `${cred.baseURL.replace(/\/$/, "")}/chat/completions`;
+
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delayMs = Math.pow(2, attempt - 1) * 1000;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+
+    try {
+      const response = await fetchFn(chatURL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${cred.apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          stream: false,
+          temperature: 0.3,
+          max_tokens: 2048,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return data.choices?.[0]?.message?.content ?? "";
+      }
+
+      // 401/403 — 鉴权问题，不重试
+      if (response.status === 401 || response.status === 403) {
+        throw new Error(`User model API auth error: ${response.status}`);
+      }
+
+      lastError = new Error(`User model API error: ${response.status}`);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      const statusMatch = lastError.message.match(/(?:User model API|API) error: (\d+)/);
+      const status = statusMatch ? parseInt(statusMatch[1], 10) : 0;
+
+      if (attempt < MAX_RETRIES && status > 0 && RETRYABLE_STATUS_CODES.has(status)) {
+        continue;
+      }
+      throw lastError;
+    }
+  }
+
+  throw lastError ?? new Error("User model API error: unknown");
+}
+
+/**
+ * 使用 Agnes 模型进行调用
+ */
+async function callWithAgnes(messages: ChatMessage[]): Promise<string> {
   // Three-level credential fallback: SYSTEM → USER → ENV
   const envFallback = {
     apiKey: process.env.AGNES_API_KEY ?? process.env.OPENAI_API_KEY ?? "",
@@ -66,7 +169,7 @@ export async function callAgnes(messages: ChatMessage[]): Promise<string> {
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: MODEL,
+          model: AGNES_MODEL,
           messages,
           stream: false,
           temperature: 0.3,
@@ -230,6 +333,25 @@ function buildProfilePrompt(
 export async function summarizeConversation(
   conversationId: string
 ): Promise<ConversationSummary | null> {
+  // 获取对话和用户的 AI 模型偏好
+  const conversation = await prisma.aiConversation.findUnique({
+    where: { id: conversationId },
+    select: {
+      summary: true,
+      userId: true,
+    },
+  });
+
+  if (!conversation) {
+    return null;
+  }
+
+  // 获取用户的 AI 模型偏好
+  const user = await prisma.user.findUnique({
+    where: { id: conversation.userId },
+    select: { preferredAiModel: true },
+  });
+
   const messages = await prisma.aiChatMessage.findMany({
     where: { conversationId },
     orderBy: { createdAt: "desc" },
@@ -240,13 +362,8 @@ export async function summarizeConversation(
     return null;
   }
 
-  const conversation = await prisma.aiConversation.findUnique({
-    where: { id: conversationId },
-    select: { summary: true },
-  });
-
   const reversedMessages = messages.reverse();
-  const promptUser = buildSummaryPrompt(reversedMessages, conversation?.summary ?? null);
+  const promptUser = buildSummaryPrompt(reversedMessages, conversation.summary ?? null);
   const promptMessages: ChatMessage[] = [
     { role: "system", content: SUMMARY_INSTRUCTION },
     // Agnes API rejects prompts that contain only a system message
@@ -256,7 +373,10 @@ export async function summarizeConversation(
   ];
 
   try {
-    const responseText = await callAgnes(promptMessages);
+    const responseText = await callAgnes(promptMessages, {
+      userId: conversation.userId,
+      preferredModelRef: user?.preferredAiModel,
+    });
     const jsonStr = extractJsonFromResponse(responseText);
     const summary: ConversationSummary = JSON.parse(jsonStr);
 
@@ -351,8 +471,17 @@ export async function updateUserProfile(
     { role: "user", content: promptUser },
   ];
 
+  // 获取用户的 AI 模型偏好
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { preferredAiModel: true },
+  });
+
   try {
-    const responseText = await callAgnes(promptMessages);
+    const responseText = await callAgnes(promptMessages, {
+      userId,
+      preferredModelRef: user?.preferredAiModel,
+    });
     const jsonStr = extractJsonFromResponse(responseText);
     const profile: UserProfileData = JSON.parse(jsonStr);
 
@@ -441,8 +570,17 @@ export async function cleanupUserProfile(
     { role: "user", content: promptUser },
   ];
 
+  // 获取用户的 AI 模型偏好
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { preferredAiModel: true },
+  });
+
   try {
-    const responseText = await callAgnes(promptMessages);
+    const responseText = await callAgnes(promptMessages, {
+      userId,
+      preferredModelRef: user?.preferredAiModel,
+    });
     const jsonStr = extractJsonFromResponse(responseText);
     const profile: UserProfileData = JSON.parse(jsonStr);
 

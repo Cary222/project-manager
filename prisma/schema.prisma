@@ -21,6 +21,7 @@ model User {
   updatedAt              DateTime                @updatedAt
   bannedAt               DateTime?
   bio                    String?
+  preferredAiModel       String?  // 用户偏好的 AI 模型，null 表示使用系统默认（Agnes）
   accounts               Account[]
   aiConversations        AiConversation[]
   aiProfile              AiUserProfile?

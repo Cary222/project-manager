@@ -39,6 +39,8 @@ export async function GET(request: NextRequest) {
           lastUsedAt: k.lastUsedAt,
           createdAt: k.createdAt,
           ownerType: k.ownerType,
+          transport: k.transport,
+          apiFormat: k.apiFormat,
         })),
         systemKeys: systemKeys.map((k) => ({
           id: k.id,

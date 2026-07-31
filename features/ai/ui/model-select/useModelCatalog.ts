@@ -27,7 +27,7 @@ export function useModelCatalog() {
     {
       revalidateOnFocus: false,
       revalidateOnReconnect: true,
-      dedupingInterval: 60_000,
+      dedupingInterval: 2_000,
     }
   );
 
