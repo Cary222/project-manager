@@ -6,8 +6,12 @@ import { prisma } from "@/shared/db/client";
 import type {
   StructuredResult,
   SourceReference,
+  ActivityWindow,
+  ExtractedUser,
 } from "@/features/ai/types/structured";
 import { DISAMBIGUATION_THRESHOLDS } from "@/features/ai/types/structured";
+import { getWindowStart } from "@/features/ai/core/formatters";
+import { resolveUser } from "@/features/ai/core/resolvers/user-resolver";
 
 export interface TicketQueryInput {
   id?: string;
@@ -16,8 +20,11 @@ export interface TicketQueryInput {
     priority?: number;
     userId?: string;
     projectId?: string;
+    activityWindow?: ActivityWindow;
+    extractedUser?: ExtractedUser;
   };
   limit?: number;
+  viewerUserId?: string;
 }
 
 /**
@@ -122,8 +129,59 @@ export async function queryTicket(
   if (filters?.status) where.status = filters.status;
   if (filters?.priority) where.priority = filters.priority;
   if (filters?.projectId) where.projectId = filters.projectId;
-  if (filters?.userId) {
-    where.assignees = { some: { userId: filters.userId } };
+
+  // 用户过滤：优先使用 extractedUser（包含 raw + normalized），其次使用 userId
+  const extractedUser = filters?.extractedUser;
+  const targetUserId = filters?.userId;
+
+  // 如果有 extractedUser，通过 resolveUser 解析用户
+  let resolvedUserId: string | null = null;
+  if (extractedUser) {
+    const resolved = await resolveUser(extractedUser, input.viewerUserId);
+    if (resolved?.user) {
+      resolvedUserId = resolved.user.id;
+    } else if (resolved?.candidates && resolved.candidates.length > 0) {
+      // 多个候选用户 → 返回消歧列表（与 queryWeeklyReport 一致）
+      const userCandidates = resolved.candidates.map((u) => ({
+        id: u.id,
+        label: `${u.name ?? u.id}（${u.email}）`,
+        summary: "",
+      }));
+      return {
+        summary: `找到多个与"${extractedUser.raw}"相关的用户，请确认目标用户：\n${
+          resolved.candidates.map((u, i) => `${i + 1}. ${u.name}（${u.email}）`).join("\n")
+        }\n\n请输入数字或姓名确认。`,
+        sources: [],
+        attribution: {
+          kind: "disambiguation" as const,
+          entityType: "user" as const,
+          candidates: userCandidates,
+          count: resolved.candidates.length,
+        },
+        decision: {
+          type: "human" as const,
+          reason: `找到 ${resolved.candidates.length} 个匹配用户，需要人工确认`,
+          entityType: "user",
+          candidates: userCandidates,
+        },
+      };
+    }
+  } else if (targetUserId) {
+    resolvedUserId = targetUserId;
+  }
+
+  // 应用用户过滤（指派给该用户的工单）
+  if (resolvedUserId) {
+    where.assignees = { some: { userId: resolvedUserId } };
+  }
+
+  // 时间窗口过滤：支持 "最近" → 本周
+  // "最近的工单"语义：最近有活动的工单 → 用 updatedAt 而非 createdAt
+  if (filters?.activityWindow) {
+    const windowStart = getWindowStart(filters.activityWindow);
+    if (windowStart) {
+      where.updatedAt = { gte: windowStart };
+    }
   }
 
   const tickets = await prisma.ticket.findMany({

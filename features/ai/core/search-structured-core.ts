@@ -36,7 +36,7 @@ export const searchStructuredInputSchema = z.object({
       activityWindow: z
         .enum(["today", "yesterday", "this_week", "this_month", "recent"])
         .optional()
-        .describe("user: 工作近况时间范围；today/昨日/本周/本月/最近"),
+        .describe("ticket/user/commit: 工作近况时间范围；today/昨日/本周/本月/最近"),
       extractedUser: z
         .object({
           raw: z.string().describe("原始输入"),
@@ -76,7 +76,7 @@ export async function executeStructuredQuery(
 
     switch (type) {
       case "ticket":
-        result = await queryTicket({ id, filters });
+        result = await queryTicket({ id, filters, viewerUserId });
         break;
       case "project":
         result = await queryProject({ id, filters });
