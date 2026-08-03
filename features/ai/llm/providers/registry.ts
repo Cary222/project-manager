@@ -13,7 +13,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createDeepSeek } from "@ai-sdk/deepseek";
 import { proxyFetch, getProxyFetch } from "../proxy";
 import { resolveCredential } from "../credentials/api-key-store";
-import { getUserProviderRecords } from "../credentials/api-key-store";
+import { getUserProviderRecords, getSystemCredentials } from "../credentials/api-key-store";
 import type { ModelCatalogEntry, ApiFormat } from "./types";
 import { inferApiFormat } from "./types";
 
@@ -83,6 +83,16 @@ const KNOWN_DEFAULTS: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Hardcoded providers — models defined in code, skip dynamic discovery
+// ---------------------------------------------------------------------------
+const HARDCODED_PROVIDERS = ["agnes"] as const;
+type HardcodedProvider = (typeof HARDCODED_PROVIDERS)[number];
+
+function isHardcodedProvider(p: string): p is HardcodedProvider {
+  return (HARDCODED_PROVIDERS as unknown as string[]).includes(p);
+}
+
+// ---------------------------------------------------------------------------
 // Agnes model list — hardcoded, initialized to DB by ensureSystemProvider()
 // ---------------------------------------------------------------------------
 const AGNES_MODELS: ModelCatalogEntry[] = [
@@ -140,8 +150,9 @@ export async function discoverModelsFromAPI(options: {
   baseURL: string;
   apiKey: string;
   transport?: "proxy" | "direct";
+  ownerType?: "SYSTEM" | "USER";
 }): Promise<ModelCatalogEntry[]> {
-  const { provider, baseURL, apiKey, transport = "direct" } = options;
+  const { provider, baseURL, apiKey, transport = "direct", ownerType = "USER" } = options;
 
   const endpoint = normalizeBaseURL(baseURL);
   console.log(`[discoverModelsFromAPI] provider=${provider} baseURL=${baseURL} → endpoint=${endpoint} transport=${transport}`);
@@ -196,7 +207,7 @@ export async function discoverModelsFromAPI(options: {
     enabled: true,
     provider,
     apiFormat,
-    ownerType: "USER",
+    ownerType,
   }));
 }
 
@@ -218,39 +229,75 @@ function inferCapabilities(modelId: string): ModelCatalogEntry["capabilities"] {
 }
 
 // ---------------------------------------------------------------------------
-// Get all enabled models for a user (SYSTEM Agnes + dynamically discovered user providers)
+// Get all enabled models for a user (SYSTEM + USER providers)
 // ---------------------------------------------------------------------------
 export async function getEnabledModels(userId?: string): Promise<ModelCatalogEntry[]> {
   const enabledModels: ModelCatalogEntry[] = [];
+  const systemProviderSet = new Set<string>();
 
-  // SYSTEM provider — Agnes hardcoded models (from DB, initialized by ensureSystemProvider)
+  // 1. SYSTEM providers — ROOT-configured default providers (discovered dynamically)
+  const systemCreds = await getSystemCredentials();
+  for (const cred of systemCreds) {
+    systemProviderSet.add(cred.provider);
+    // Hardcoded providers skip dynamic discovery — they have their own model lists
+    if (isHardcodedProvider(cred.provider)) continue;
+    try {
+      const models = await discoverModelsFromAPI({
+        provider: cred.provider,
+        baseURL: cred.baseURL,
+        apiKey: cred.apiKey,
+        transport: cred.transport,
+        ownerType: "SYSTEM",
+      });
+      console.log(`[getEnabledModels] SYSTEM provider "${cred.provider}": discovered ${models.length} models`, models.map((m) => m.modelName));
+      enabledModels.push(...models);
+    } catch (err) {
+      console.warn(`[registry] SYSTEM provider "${cred.provider}" model discovery failed:`, err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  // 2. Agnes hardcoded models (always available as fallback)
   for (const model of AGNES_MODELS) {
     if (model.enabled) {
       enabledModels.push(model);
     }
   }
 
-  // User providers — dynamically discover models from their API
+  // 3. User providers — dynamically discover models from their API
   if (userId) {
     const userProviders = await getUserProviderRecords(userId);
     for (const record of userProviders) {
-      const cred = await resolveCredential(userId, record.provider);
-      if (!cred) continue;
+      // Skip hardcoded providers (e.g. agnes)
+      if (isHardcodedProvider(record.provider)) continue;
+
+      const userCred = await resolveCredential(userId, record.provider);
+      if (!userCred) continue;
+
+      // If SYSTEM also covers this provider, compare API keys
+      if (systemProviderSet.has(record.provider)) {
+        const sysCred = systemCreds.find((c) => c.provider === record.provider);
+        if (sysCred) {
+          // Key identical → skip USER, use SYSTEM only
+          if (sysCred.apiKey === userCred.apiKey) {
+            console.log(`[getEnabledModels] USER provider "${record.provider}" skipped (same key as SYSTEM)`);
+            continue;
+          }
+          // Key different → USER overrides, mark as USER
+          console.log(`[getEnabledModels] USER provider "${record.provider}" has different key — using USER version`);
+        }
+      }
 
       try {
         const models = await discoverModelsFromAPI({
           provider: record.provider,
-          baseURL: cred.baseURL,
-          apiKey: cred.apiKey,
-          transport: cred.transport,
+          baseURL: userCred.baseURL,
+          apiKey: userCred.apiKey,
+          transport: userCred.transport,
         });
-        console.log(`[getEnabledModels] discovered ${models.length} models for provider "${record.provider}":`, models.map((m) => m.modelName));
+        console.log(`[getEnabledModels] USER provider "${record.provider}": discovered ${models.length} models`, models.map((m) => m.modelName));
         enabledModels.push(...models);
       } catch (err) {
-        console.warn(
-          `[registry] Failed to discover models for provider "${record.provider}":`,
-          err instanceof Error ? err.message : String(err)
-        );
+        console.warn(`[registry] USER provider "${record.provider}" model discovery failed:`, err instanceof Error ? err.message : String(err));
       }
     }
   }
