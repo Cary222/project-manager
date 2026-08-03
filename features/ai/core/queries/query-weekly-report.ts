@@ -34,7 +34,20 @@ export async function queryWeeklyReport(
 
   // 构建 resolveUser 需要的 identifier
   const identifier = extractedUser ?? (targetId ? { raw: targetId, normalized: targetId } : undefined);
-  const resolved = identifier ? await resolveUser(identifier, viewerUserId) : null;
+  let resolved = identifier ? await resolveUser(identifier, viewerUserId) : null;
+
+  // 如果 extractUserIdentifier 没解析出名字（如 "最近周报提交怎么样" 被误识别成 "提交怎么样"），
+  // 或者 confidence=0，回退到 viewer（用户自己）。
+  const hasNoResolvedUser = !resolved?.user;
+  const hasZeroConfidence = resolved?.confidence === 0;
+  if (hasNoResolvedUser || hasZeroConfidence) {
+    if (viewerUserId) {
+      console.log(
+        `[queryWeeklyReport] falling back to viewer ${viewerUserId} (was: extractedUser=${extractedUser?.raw ?? "none"} confidence=${resolved?.confidence ?? "n/a"})`
+      );
+      resolved = await resolveUser({ raw: viewerUserId, normalized: viewerUserId }, viewerUserId);
+    }
+  }
 
   console.log(`[queryWeeklyReport] extractedUser=${extractedUser ? JSON.stringify(extractedUser) : "none"} resolved=${JSON.stringify(resolved)}`);
 

@@ -213,6 +213,7 @@ function buildWorkflow() {
     .addConditionalEdges("decision", routeAfterDecision, {
       humanConfirmation: "humanConfirmation",
       searchStructured: "searchStructured",
+      generateResponse: "generateResponse",
       [END]: END,
     })
     // Human confirmation: self-loop on invalid, go to decision on valid, END on nothing pending

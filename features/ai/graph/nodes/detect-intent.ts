@@ -4,6 +4,7 @@ import {
   parseQueryType,
   extractUserIdentifier,
   detectActivityWindow,
+  stripLeadInVerbs,
   type QueryType,
 } from "@/features/ai/core/resolvers/query-parser";
 import type { ExtractedUser, ActivityWindow } from "@/features/ai/types/structured";
@@ -69,6 +70,11 @@ const SEARCH_KEYWORDS: { pattern: RegExp; category: string }[] = [
     pattern: /[\u4e00-\u9fa5A-Za-z0-9_.\-@]{1,60}\s*(?:在干嘛|在干啥|在做什么|在干什么|干嘛|干啥|干了什么|做了啥|做了什么|进展|进度|最近动态)/i,
     category: "user_activity",
   },
+  {
+    // "我最近干了什么 / 他最近做了什么" — 代词/简名 + 时间词 + 活动词
+    pattern: /^[\u4e00-\u9fa5A-Za-z0-9_.\-]{1,20}\s*(?:最近|近期|这周|本周|近来|今天|昨天|前天|上周|这阵子|近几天)\s*(?:干了|干了什么|做了什么|干了啥|在干|在干什么|在干嘛|在干啥|在做什么|干了些)/i,
+    category: "user_activity",
+  },
   // 内容/文档/需求类 — 隐含检索意图
   {
     pattern: /(?:详情|详细内容|具体内容|文档|需求文档|设计文档|技术文档|需求说明|PRD|需求内容)/i,
@@ -128,7 +134,7 @@ const PURE_CHAT_PATTERNS: RegExp[] = [
   /^[!！.?。~～]{1,3}\s*$/,
   /^(?:👍|😊|😄|🙂|👌|✌️|👏)\s*$/,
   // 问 AI 本身的问题
-  /^(?:你是谁|你叫什么|你叫什么名字|你是小星吗|你是谁开发|你是做什么的)\s*[?？]*$/i,
+  /^(?:你是谁|你叫什么|你叫什么名字|你是小星吗|你是谁开发|你是做什么的|你是什么|你是什么模型|你的名字是)\s*[?？]*$/i,
 ];
 
 function isPureChat(message: string): boolean {
@@ -188,10 +194,27 @@ export async function detectIntent(
     return {};
   }
 
-  // For non-auto mode, just pass through — the mode was set by the API (pending round).
+  // For non-auto mode, check if the message contains user_activity keywords.
+  // If so, override to "search" mode — frontend may send "chat" for casual messages,
+  // but "我最近干了什么" should always go through structured search.
   if (state.mode !== "auto") {
+    const lastMessage = state.messages[state.messages.length - 1];
+    const content = typeof lastMessage?.content === "string"
+      ? lastMessage.content.trim()
+      : "";
+
+    // If it's a user activity query, force search mode
+    if (isUserActivityQuery(content)) {
+      console.log(`[detectIntent] user activity detected, forcing search mode (was: ${state.mode})`);
+      return { mode: "search" };
+    }
+
     console.log(`[detectIntent] mode=${state.mode} !== auto, passing through`);
-    return { mode: state.mode };
+    // Always re-parse the message so queryType/extractedUser/activityWindow stay
+    // fresh for downstream nodes (searchStructured uses these to decide which
+    // query to run). Otherwise the previous round's stale queryType keeps firing
+    // disambiguation against an unrelated follow-up message.
+    return { mode: state.mode, ...detectParserFields(content) };
   }
 
   const lastMessage = state.messages[state.messages.length - 1];
@@ -216,8 +239,19 @@ export async function detectIntent(
     /^[\u4e00-\u9fa5]{1,4}[?？]?$/.test(content)
   );
 
+  // 自我引用保护：在检测"张工"/"李工"等显式用户名之前，
+  // 排除"我"、"我最近的..."、"我的..."等自我引用输入。
+  // 否则"我最近的工"会被正则捕获为"我最近的工"并写入 lastMentionedUser。
+  const isSelfReference = /^我/.test(content) && !/^[^我]{2,}工/.test(content);
+  if (isSelfReference) {
+    // 只返回模式检测，不更新 lastMentionedUser
+    return { mode: detectMode(content), ...detectParserFields(content) };
+  }
+
   // 检测消息是否明确包含新用户引用（如"张工"、"李工"、"王经理"）
-  const explicitUserMatch = content.match(/([\u4e00-\u9fa5]{1,4}(?:工|经理|总|老板|同事))/);
+  // 先剥掉"帮我查一下"等前缀动词短语，再用非贪婪量词匹配，避免把
+  // "查一下刘工"整段误当成姓名（贪婪 {1,4} 会尽量往前吃满 4 个汉字）。
+  const explicitUserMatch = stripLeadInVerbs(content).match(/([\u4e00-\u9fa5]{1,4}?(?:工|经理|总|老板|同事))/);
   const hasExplicitUser = !!explicitUserMatch;
 
   // 如果有明确的新用户引用，更新上下文
@@ -243,7 +277,8 @@ export async function detectIntent(
       const msgContent = typeof msg.content === "string" ? msg.content : "";
 
       // 优先匹配"XX工"（如许工、张工、刘工）
-      const workerMatch = msgContent.match(/([\u4e00-\u9fa5]{1,4}工)/);
+      // 同样先剥前缀动词再用非贪婪量词，避免"查一下刘工"误匹配
+      const workerMatch = stripLeadInVerbs(msgContent).match(/([\u4e00-\u9fa5]{1,4}?工)/);
       if (workerMatch) {
         const mentionedName = workerMatch[1];
         console.log(`[detectIntent] detected worker reference to "${mentionedName}" from history`);

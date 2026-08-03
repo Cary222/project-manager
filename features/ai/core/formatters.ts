@@ -8,34 +8,41 @@ import type { ActivityWindow } from "@/features/ai/types/structured";
 /**
  * Map activityWindow enum to the inclusive lower bound of the time window.
  * Returns undefined to disable filtering.
+ * 
+ * IMPORTANT: Returns UTC Date to match database updatedAt column timezone.
+ * Uses Date.UTC() to avoid local timezone offset issues.
  */
 export function getWindowStart(
   window: ActivityWindow | undefined
 ): Date | undefined {
   if (!window) return undefined;
   const now = new Date();
+  
   switch (window) {
-    case "today":
-      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    case "today": {
+      const utc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      return utc;
+    }
     case "yesterday": {
-      const y = new Date(now);
-      y.setDate(y.getDate() - 1);
-      return new Date(y.getFullYear(), y.getMonth(), y.getDate());
+      const utc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      utc.setUTCDate(utc.getUTCDate() - 1);
+      return utc;
     }
     case "this_week": {
-      const d = new Date(now);
-      const day = (d.getDay() + 6) % 7; // 把周一当作一周开始
-      d.setDate(d.getDate() - day);
-      return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      const utc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      const day = (utc.getUTCDay() + 6) % 7; // 把周一当作一周开始
+      utc.setUTCDate(utc.getUTCDate() - day);
+      return utc;
     }
-    case "this_month":
-      return new Date(now.getFullYear(), now.getMonth(), 1);
-    case "recent":
-      // "最近" 语义上等同于"本周"，按周一至今计算
-      const d = new Date(now);
-      const day = (d.getDay() + 6) % 7; // 把周一当作一周开始
-      d.setDate(d.getDate() - day);
-      return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    case "this_month": {
+      return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    }
+    case "recent": {
+      // "最近" 语义：最近 7 天（包括今天），避免周一早上查不到昨天工单的问题
+      const utc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      utc.setUTCDate(utc.getUTCDate() - 6); // 往前推 6 天 + 今天 = 7 天
+      return utc;
+    }
     default:
       return undefined;
   }

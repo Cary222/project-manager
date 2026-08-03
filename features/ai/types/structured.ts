@@ -2,7 +2,7 @@
  * Structured query result types for search-structured operations.
  */
 
-export type MatchType = "id" | "name" | "searchName" | "alias" | "fuzzy";
+export type MatchType = "id" | "name" | "searchName" | "alias" | "fuzzy" | "self";
 
 export interface ResolveResult {
   user: { id: string; name: string } | null;
@@ -62,6 +62,8 @@ export interface StructuredResult {
 export interface ExtractedUser {
   raw: string;
   normalized: string;
+  /** 标记自我引用，当前用户查询 "我最近干了什么" 等 */
+  isSelf?: boolean;
 }
 
 /** Per-entity-type disambiguation thresholds */

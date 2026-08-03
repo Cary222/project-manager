@@ -117,7 +117,10 @@ export function routeAfterDecision(state: AgentState): NextNode {
   if (state.resolvedEntities) {
     return "searchStructured";
   }
-  return END;
+  // Fallback: ambiguous query with no candidates matched → bail out to
+  // generateResponse so the chat layer can answer conversationally instead
+  // of returning an empty bubble.
+  return "generateResponse";
 }
 
 /**
@@ -147,11 +150,11 @@ export function routeAfterSearchKnowledge(_state: AgentState): NextNode {
  * 5. Otherwise → generateResponse.
  */
 export function routeAfterSearchStructured(state: AgentState): NextNode {
-  // Check for decision FIRST — this handles the 2nd HIL round.
-  // Even when resolvedEntities.user is set (user picked from Round 1 candidates),
-  // we still need to process a new decision (e.g. 4 weekly reports need a 2nd pick).
+  // Check for decision — but only if the user has not yet picked from a previous round.
+  // If resolvedEntities is set, the selection is complete and we should generate
+  // the response, NOT route to decision (which would re-trigger HIL).
   const toolResult = state.toolResults?.searchStructured;
-  if (toolResult && typeof toolResult === "object") {
+  if (toolResult && typeof toolResult === "object" && !state.resolvedEntities) {
     const resultObj = toolResult as Record<string, unknown>;
     const decision = resultObj.decision as { type?: string } | undefined;
     if (decision?.type === "human") {

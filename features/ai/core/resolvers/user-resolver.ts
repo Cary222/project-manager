@@ -18,6 +18,17 @@ export async function resolveUser(
 ): Promise<ResolveResult> {
   if (!identifier) return { user: null, confidence: 0, matchType: null };
 
+  // === 自我引用处理：用户输入 "我"，直接返回当前登录用户 ===
+  if (identifier.isSelf && viewerUserId) {
+    const viewerUser = await prisma.user.findUnique({
+      where: { id: viewerUserId },
+      select: { id: true, name: true },
+    });
+    if (viewerUser) {
+      return { user: { id: viewerUser.id, name: viewerUser.name ?? viewerUser.id }, confidence: 1.0, matchType: "self" };
+    }
+  }
+
   const { raw, normalized } = identifier;
   const rawTrimmed = raw.trim();
   const normTrimmed = normalized.trim();

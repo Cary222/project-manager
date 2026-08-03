@@ -21,3 +21,16 @@ export type {
   ActivityWindow,
 } from "./structured";
 export { DISAMBIGUATION_THRESHOLDS } from "./structured";
+
+export type {
+  TaskStatus,
+  TaskCategory,
+  TaskRecord,
+  TimelineCommand,
+} from "./timeline";
+export {
+  NODE_CATEGORY_MAP,
+  NODE_STEP_LABELS,
+  NODE_DISPLAY_TITLES,
+  mapThinkingStatus,
+} from "./timeline";

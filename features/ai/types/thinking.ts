@@ -6,9 +6,11 @@ import type { AiMode } from "./modes";
 
 export type ThinkingNodeName =
   | "detectIntent"
+  | "modelSelect"
   | "searchKnowledge"
   | "searchStructured"
   | "webSearch"
+  | "decision"
   | "generateResponse";
 
 export type ThinkingStepStatus =
@@ -43,35 +45,42 @@ interface NodeTemplate {
 
 /**
  * 把"以何种 mode 提问"映射到"应该走哪几个 LangGraph 节点"。
- * SSE 实际触发的 tool 节点可能少于模板（比如 chat 模式下 detectIntent 直接
- * 路由到 generateResponse），未触发的节点 UI 上渲染为 `skipped`。
+ * NOTE: `generateResponse` 不写在此处 —— 后端 graph 固定在末尾追加。
+ * `decision` 是中间节点，写在 search* 之后、generateResponse 之前。
  */
 export function buildStepPlan(mode: AiMode): NodeTemplate[] {
   switch (mode) {
     case "search":
       return [
         { nodeName: "detectIntent", nodeLabel: "意图识别" },
+        { nodeName: "modelSelect", nodeLabel: "选择模型" },
         { nodeName: "searchKnowledge", nodeLabel: "知识检索", toolName: "searchKnowledge" },
         { nodeName: "searchStructured", nodeLabel: "数据库查询", toolName: "searchStructured" },
+        { nodeName: "decision", nodeLabel: "分析问题" },
         { nodeName: "generateResponse", nodeLabel: "生成回答" },
       ];
     case "web":
       return [
         { nodeName: "detectIntent", nodeLabel: "意图识别" },
+        { nodeName: "modelSelect", nodeLabel: "选择模型" },
         { nodeName: "webSearch", nodeLabel: "联网搜索", toolName: "webSearch" },
+        { nodeName: "decision", nodeLabel: "分析问题" },
         { nodeName: "generateResponse", nodeLabel: "生成回答" },
       ];
     case "chat":
       return [
         { nodeName: "detectIntent", nodeLabel: "意图识别" },
+        { nodeName: "modelSelect", nodeLabel: "选择模型" },
         { nodeName: "generateResponse", nodeLabel: "生成回答" },
       ];
     case "auto":
     default:
       return [
         { nodeName: "detectIntent", nodeLabel: "意图识别" },
+        { nodeName: "modelSelect", nodeLabel: "选择模型" },
         { nodeName: "searchKnowledge", nodeLabel: "知识检索", toolName: "searchKnowledge" },
         { nodeName: "searchStructured", nodeLabel: "数据库查询", toolName: "searchStructured" },
+        { nodeName: "decision", nodeLabel: "分析问题" },
         { nodeName: "generateResponse", nodeLabel: "生成回答" },
       ];
   }

@@ -50,6 +50,9 @@ export async function disambiguateIntentNode(
 
     if (
       decisionField?.type === "human" &&
+      // Guard: if resolvedEntities is already set (user picked from a previous round),
+      // do NOT re-trigger HIL — the selection is complete, route to generateResponse.
+      !state.resolvedEntities &&
       decisionField.entityType &&
       decisionField.candidates &&
       decisionField.candidates.length > 0

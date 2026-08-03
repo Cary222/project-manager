@@ -361,6 +361,25 @@ export async function getSystemProviders(): Promise<MaskedKeyInfo[]> {
 }
 
 /**
+ * 获取所有 SYSTEM provider 的解密凭证（用于模型发现等服务端操作）
+ */
+export async function getSystemCredentials(): Promise<CredentialRecord[]> {
+  const records = await prisma.userApiKey.findMany({
+    where: { ownerType: "SYSTEM", deletedAt: null },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return records.map((r) => ({
+    provider: r.provider,
+    baseURL: r.baseURL ? normalizeBaseURL(r.baseURL) : getEffectiveBaseURL(r.provider, null),
+    apiKey: decrypt(r.encryptedKey, r.iv, r.authTag),
+    transport: (r.transport as "proxy" | "direct") ?? "proxy",
+    apiFormat: (r.apiFormat as ApiFormat) ?? "openai-chat",
+    ownerType: "SYSTEM",
+  }));
+}
+
+/**
  * 保存/更新 SYSTEM provider（加密后存 DB）
  * - ownerType=SYSTEM，userId=null
  * - 按 provider 做 upsert（每个 SYSTEM provider 全局唯一）

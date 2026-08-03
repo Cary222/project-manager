@@ -5,15 +5,12 @@ import { AiChatInput } from "./AiChatInput";
 import { AiCandidatePicker } from "./AiCandidatePicker";
 import { AiMessageBubble } from "./AiMessageBubble";
 import { type SourceReference } from "./AiSourcesList";
-import { AiTypingBubble } from "./AiTypingBubble";
-import { AiThinkingTrace } from "./AiThinkingTrace";
 import { UserProfilePanel, type AiUserProfile } from "./UserProfilePanel";
 import { ModelSelector } from "@/features/ai/llm/model-selector";
 import {
   AI_MODE_OPTIONS,
   type AiMode,
-  type ThinkingNodeName,
-  type ThinkingStep,
+  type TaskRecord,
   buildStepPlan,
 } from "@/features/ai/types";
 import { shouldUseRag, shouldUseWebSearch } from "@/features/ai/search/detector";
@@ -51,36 +48,6 @@ function formatToolResult(output: unknown): string {
  * 工具 SSE 事件只有 toolName（searchKnowledge / searchStructured / webSearch），
  * 非工具节点通过单独的 SSE 事件标记（text / 流结束）映射。
  */
-function toolNameToNode(
-  toolName: string,
-): ThinkingNodeName | null {
-  switch (toolName) {
-    case "searchKnowledge":
-      return "searchKnowledge";
-    case "searchStructured":
-      return "searchStructured";
-    case "webSearch":
-      return "webSearch";
-    default:
-      return null;
-  }
-}
-
-function patchStep(
-  steps: ThinkingStep[],
-  nodeName: ThinkingNodeName,
-  patch: (s: ThinkingStep) => ThinkingStep,
-): ThinkingStep[] {
-  return steps.map((s) => (s.nodeName === nodeName ? patch(s) : s));
-}
-
-/** 把仍未触发的 pending 节点标为 skipped（流程结束后清理）。 */
-function markPendingAsSkipped(steps: ThinkingStep[]): ThinkingStep[] {
-  return steps.map((s) =>
-    s.status === "pending" ? { ...s, status: "skipped" as const } : s,
-  );
-}
-
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface CandidateUser {
@@ -100,6 +67,48 @@ interface Message {
   content: string;
   sources?: SourceReference[];
   candidates?: CandidateUser[];
+  /** Thinking steps snapshot — populated on done + read from DB history */
+  thinkingSteps?: TaskRecord[];
+  /** Total thinking duration in ms — persisted from DB for historical messages */
+  totalThinkingMs?: number;
+}
+
+/** Map ThinkingNodeName → TaskCategory for placeholder tasks. */
+function placeholderCategory(
+  nodeName: string
+): "reason" | "tool" | "workflow" | "system" | "human" {
+  if (nodeName === "detectIntent" || nodeName === "decision") return "reason";
+  if (
+    nodeName === "searchKnowledge" ||
+    nodeName === "searchStructured" ||
+    nodeName === "webSearch"
+  )
+    return "tool";
+  if (nodeName === "humanConfirmation") return "human";
+  return "system";
+}
+
+/**
+ * Build placeholder TaskRecords for the upcoming mode pipeline. All tasks
+ * start as `running` so the timeline shows every step (including the
+ * `generateResponse` step that runs last) with a visible loading spinner
+ * BEFORE backend snapshots arrive. The placeholder stepLabel acts as the
+ * merge key when the real snapshot overwrites it.
+ */
+function buildPlaceholderTasks(mode: AiMode): TaskRecord[] {
+  const templates = buildStepPlan(mode);
+  const now = Date.now();
+  return templates.map((t, idx) => ({
+    id: `placeholder-${t.nodeName}`,
+    parentId: null,
+    stepLabel: t.nodeLabel,
+    title: t.nodeLabel,
+    category: placeholderCategory(t.nodeName),
+    status: "running",
+    // Stagger startTime by 1ms per step so they render in correct order
+    // even before backend snapshots arrive. This prevents visual jank.
+    startTime: now + idx,
+  }));
 }
 
 interface AiChatPanelProps {
@@ -145,10 +154,6 @@ export function AiChatPanel({
   const [pendingSources, setPendingSources] = useState<SourceReference[]>([]);
   const [aiMode, setAiMode] = useState<AiMode>("auto");
   const [userProfile, setUserProfile] = useState<AiUserProfile | null>(null);
-  // Custom caption shown on the typing bubble during the auto-greeting flow,
-  // so the second bubble reads "AI 正在根据你的画像主动准备问候…" instead of
-  // the generic "思考中".
-  const [greetingHint, setGreetingHint] = useState<string | null>(null);
   const [activeToolCall, setActiveToolCall] = useState<{
     toolName: string;
     displayLabel: string;
@@ -170,14 +175,15 @@ export function AiChatPanel({
     status: "calling" | "done" | "error";
     message?: string;
   }>>([]);
-  // 完整思考流程面板：覆盖 detectIntent / searchKnowledge / searchStructured /
-  // webSearch / generateResponse 五个节点。`toolCallChain` 仅用于兜底日志。
-  // 同样使用函数式 setter 避免 SSE 快速连发时的 stale-closure。
-  const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([]);
-  /** 控制思考面板是否折叠。undefined 时由组件自动判断（运行中展开、结束折叠）。 */
-  const [thinkingCollapsed, setThinkingCollapsed] = useState<boolean | undefined>(
-    undefined,
-  );
+  // 完整思考流程面板：使用新的 TaskRecord 模型。
+  // timelineTasks 由 SSE 的 timeline_snapshot 事件驱动。
+  const [timelineTasks, setTimelineTasks] = useState<TaskRecord[]>([]);
+  // Ref for streaming message: updated DIRECTLY in SSE handler (no React batching).
+  // This is the authoritative source for the in-flight AiMessageBubble.
+  const streamingTasksRef = useRef<TaskRecord[]>([]);
+  // State derived from ref — triggers re-render when ref changes so
+  // AiMessageBubble always gets fresh tasks without state batching delays.
+  const [streamingTasks, setStreamingTasks] = useState<TaskRecord[]>([]);
   // Load preferred model from localStorage
   useEffect(() => {
     const saved = localStorage.getItem("preferredModel");
@@ -196,7 +202,6 @@ export function AiChatPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const conversationVersionRef = useRef(0);
-  const thinkingCollapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevConversationIdRef = useRef<string | null | undefined>(undefined);
   const messagesRef = useRef<Message[]>([]);
   const aiModeRef = useRef<AiMode>("auto");
@@ -223,12 +228,35 @@ export function AiChatPanel({
         const conv = json.data;
         if (conv?.messages && Array.isArray(conv.messages)) {
           setMessages(
-            conv.messages.map((m: { id: string; role: string; content: string; sources?: SourceReference[] }) => ({
-              id: m.id,
-              role: m.role as "user" | "assistant",
-              content: m.content,
-              sources: m.sources,
-            }))
+            conv.messages.map(
+              (m: {
+                id: string;
+                role: string;
+                content: string;
+                sources?: unknown;
+                metadata?: unknown;
+              }) => ({
+                id: m.id,
+                role: m.role as "user" | "assistant",
+                content: m.content,
+                sources: m.sources as SourceReference[] | undefined,
+                thinkingSteps: (() => {
+                  const steps = (m.metadata as { thinkingSteps?: TaskRecord[] } | undefined)
+                    ?.thinkingSteps;
+                  if (!Array.isArray(steps)) return undefined;
+                  // Ensure timestamps are numbers (DB JSON may parse them as strings)
+                  return steps.map((s) => ({
+                    ...s,
+                    startTime: typeof s.startTime === 'number' ? s.startTime : Number(s.startTime) || Date.now(),
+                    endTime: s.endTime !== undefined && s.endTime !== null
+                      ? (typeof s.endTime === 'number' ? s.endTime : Number(s.endTime))
+                      : undefined,
+                  }));
+                })(),
+                totalThinkingMs: (m.metadata as { totalThinkingMs?: number } | undefined)
+                  ?.totalThinkingMs,
+              })
+            )
           );
         }
       } catch (err) {
@@ -274,15 +302,34 @@ export function AiChatPanel({
   // greeting is persisted as the first assistant message of the conversation
   // by the API. We do NOT inject a placeholder Message into the `messages`
   // array during streaming — instead we use the existing `streamingContent`
-  // + `isLoading` state, which the renderer already maps to a single
-  // AiMessageBubble + AiTypingBubble pair. Avoid double-rendering.
+  // + `streamingTasks` + `isLoading` state, rendered as a single
+  // AiMessageBubble that shows thinking steps in real time.
   const triggerGreeting = useCallback(
     async (convId: string, version: number) => {
       if (version !== conversationVersionRef.current) return;
       setIsLoading(true);
       setStreamingContent("");
       setPendingSources([]);
-      setGreetingHint(pickGreetingHint());
+
+      // ── Greeting has no LangGraph timeline — fake a single thinking step
+      // so the in-flight bubble shows the same thinking UI as a real query.
+      const greetingExecId = `greeting-${Date.now()}`;
+      const greetingStart = Date.now();
+      const greetingTasks: TaskRecord[] = [
+        {
+          id: greetingExecId,
+          parentId: null,
+          stepLabel: "主动准备问候",
+          title: "正在根据你的画像主动准备问候",
+          status: "running",
+          category: "system",
+          detail: "结合最近讨论过的话题为你生成问候语",
+          startTime: greetingStart,
+        },
+      ];
+      streamingTasksRef.current = greetingTasks;
+      setStreamingTasks(greetingTasks);
+      setTimelineTasks(greetingTasks);
 
       const controller = new AbortController();
       abortControllerRef.current?.abort();
@@ -323,21 +370,33 @@ export function AiChatPanel({
                 fullContent += parsed.delta;
                 setStreamingContent(fullContent);
               } else if (parsed.type === "done") {
+                // Complete the greeting thinking step
+                const completedTasks: TaskRecord[] = greetingTasks.map((t) =>
+                  t.id === greetingExecId
+                    ? {
+                        ...t,
+                        status: "success",
+                        endTime: Date.now(),
+                        detail: `已生成（${Date.now() - greetingStart}ms）`,
+                      }
+                    : t,
+                );
+                streamingTasksRef.current = completedTasks;
+                setStreamingTasks(completedTasks);
+                setTimelineTasks(completedTasks);
+
                 // Commit the streamed greeting into the messages list as
                 // the assistant message of the conversation.
                 const greetingId = `assistant-greeting-${convId}`;
-                setMessages((prev) =>
-                  prev.some((m) => m.id === greetingId)
-                    ? prev
-                    : [
-                        ...prev,
-                        {
-                          id: greetingId,
-                          role: "assistant",
-                          content: fullContent,
-                        },
-                      ]
-                );
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: greetingId,
+                    role: "assistant",
+                    content: fullContent,
+                    thinkingSteps: completedTasks,
+                  },
+                ]);
               }
             } catch {
               // Skip invalid JSON
@@ -351,11 +410,10 @@ export function AiChatPanel({
         if (version === conversationVersionRef.current) {
           setIsLoading(false);
           setStreamingContent("");
-          setGreetingHint(null);
         }
       }
     },
-    [pickGreetingHint]
+    []
   );
 
   // ─── Welcome typewriter ────────────────────────────────────────────────────
@@ -431,9 +489,6 @@ export function AiChatPanel({
   useEffect(() => {
     return () => {
       abortControllerRef.current?.abort();
-      if (thinkingCollapseTimerRef.current) {
-        clearTimeout(thinkingCollapseTimerRef.current);
-      }
       if (welcomeTypewriterRef.current?.timerId) {
         clearInterval(welcomeTypewriterRef.current.timerId);
       }
@@ -454,10 +509,6 @@ export function AiChatPanel({
       clearInterval(welcomeTypewriterRef.current.timerId);
     }
     welcomeTypewriterRef.current = null;
-    if (thinkingCollapseTimerRef.current) {
-      clearTimeout(thinkingCollapseTimerRef.current);
-      thinkingCollapseTimerRef.current = null;
-    }
 
     setIsLoading(false);
     setIsMessagesLoading(Boolean(conversationId));
@@ -479,8 +530,7 @@ export function AiChatPanel({
     setPendingSources([]);
     setActiveToolCall(null);
     setToolCallChain([]);
-    setThinkingSteps([]);
-    setThinkingCollapsed(undefined);
+    setTimelineTasks([]);
 
     void (async () => {
       if (conversationId) {
@@ -549,15 +599,16 @@ export function AiChatPanel({
       setStreamingContent("");
       setPendingSources([]);
       setToolCallChain([]);
-      setThinkingCollapsed(undefined);
-      setThinkingSteps(
-        buildStepPlan(aiModeRef.current).map((tpl) => ({
-          nodeName: tpl.nodeName,
-          nodeLabel: tpl.nodeLabel,
-          toolName: tpl.toolName,
-          status: "pending",
-        })),
-      );
+
+      // Pre-render every step of the upcoming pipeline as `running` so the
+      // user sees the FULL plan (including the long-running "生成回答" step)
+      // with a visible loading spinner BEFORE the backend snapshot arrives.
+      // The placeholder stepLabels act as merge keys when the real
+      // timeline_snapshot overwrites them.
+      const placeholders = buildPlaceholderTasks(aiModeRef.current);
+      streamingTasksRef.current = placeholders;
+      setStreamingTasks(placeholders);
+      setTimelineTasks(placeholders);
 
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -628,7 +679,12 @@ export function AiChatPanel({
 
             try {
               const parsed = JSON.parse(data);
-              if (conversationVersion !== conversationVersionRef.current) return;
+              // Guard: skip events from a stale conversation version.
+              // Use ref↔ref comparison (stable identity), not state↔ref (state may lag).
+              const currentVersion = conversationVersionRef.current;
+              if (parsed.conversationId && parsed.conversationId !== conversationId) {
+                return;
+              }
 
               if (parsed.type === "conversation") {
                 // First message in a new conversation: API created the conversation
@@ -636,78 +692,99 @@ export function AiChatPanel({
                   onConversationCreated?.(parsed.id);
                 }
               } else if (parsed.type === "text") {
-                console.log("[AI] text delta:", parsed.delta);
                 fullContent += parsed.delta;
                 setStreamingContent(fullContent);
-                // 首次产生 token 时，把 detectIntent 标记为已完成、generateResponse
-                // 标记为 running（持续到 done）。这是 LangGraph 节点顺序
-                // 的简化推断：SSE 在 LLM 决定 action 时不会发出单独的
-                // detectIntent 事件，但 token 到来意味着已经走到 generate。
-                const tNow = performance.now();
-                setThinkingSteps((prev) =>
-                  prev.map((s) => {
-                    if (
-                      s.nodeName === "detectIntent" &&
-                      (s.status === "pending" || s.status === "running")
-                    ) {
-                      return {
-                        ...s,
-                        status: "done",
-                        startedAt: s.startedAt ?? tNow,
-                        endedAt: tNow,
-                      };
-                    }
-                    if (s.nodeName === "generateResponse") {
-                      if (s.status === "pending") {
-                        return {
-                          ...s,
-                          status: "running",
-                          startedAt: tNow,
-                        };
-                      }
-                    }
-                    return s;
-                  }),
-                );
               } else if (parsed.type === "sources") {
                 sources = parsed.sources ?? [];
                 setPendingSources(sources);
+              } else if (parsed.type === "timeline_snapshot") {
+                // Timeline events from the new TimelineStore integration.
+                // These are flat TaskRecord[] from the backend's TimelineAdapter.
+                if (Array.isArray(parsed.tasks)) {
+                  // Merge: backend snapshot is authoritative for known stepLabels.
+                  // Preserve placeholder ORDER (the user sees a stable layout)
+                  // while swapping each placeholder with the real backend task
+                  // when available. Any placeholder whose stepLabel has NOT
+                  // been emitted yet (e.g. `generateResponse` is still running,
+                  // or a node was skipped like `searchKnowledge` in auto mode
+                  // for weekly_report queries) is kept as-is.
+                  const incoming = parsed.tasks as TaskRecord[];
+                  const incomingByLabel = new Map(
+                    incoming.map((t) => [t.stepLabel, t] as const)
+                  );
+                  const currentPlaceholders = streamingTasksRef.current;
+                  // Walk the placeholder list (stable order) and substitute
+                  // each with the real backend task when available.
+                  const merged: TaskRecord[] = [];
+                  const seenLabels = new Set<string>();
+                  for (const ph of currentPlaceholders) {
+                    if (!ph.id.startsWith("placeholder-")) continue;
+                    const real = incomingByLabel.get(ph.stepLabel);
+                    if (real) {
+                      merged.push(real);
+                      seenLabels.add(ph.stepLabel);
+                    } else {
+                      // Backend hasn't emitted this node yet (or skipped it).
+                      // Keep the placeholder so the layout stays stable.
+                      merged.push(ph);
+                    }
+                  }
+                  // Append backend tasks for stepLabels not in the placeholder
+                  // list (e.g. `humanConfirmation` when pending_human_action
+                  // fires after the initial placeholder set was rendered).
+                  for (const t of incoming) {
+                    if (!seenLabels.has(t.stepLabel)) {
+                      merged.push(t);
+                    }
+                  }
+                  streamingTasksRef.current = merged;
+                  setStreamingTasks(merged);
+                  setTimelineTasks(merged);
+                }
               } else if (parsed.type === "done") {
                 setActiveToolCall(null);
                 setToolCallChain([]);
+                // Snapshot streaming tasks via ref — captured before clearing.
+                // Any placeholder still in `running` means the backend never
+                // emitted its final snapshot (e.g. graph short-circuited);
+                // mark them as `success` so the timeline doesn't end with
+                // a stuck spinner.
+                const finalTasks = streamingTasksRef.current.length > 0
+                  ? streamingTasksRef.current.map((t) =>
+                      t.id.startsWith("placeholder-") && t.status === "running"
+                        ? { ...t, status: "success" as const, endTime: Date.now() }
+                        : t,
+                    )
+                  : undefined;
+                streamingTasksRef.current = finalTasks ?? [];
+                setStreamingTasks(finalTasks ?? []);
+                // Calculate total thinking time for the assistant message
+                const totalThinkingMs =
+                  finalTasks && finalTasks.length > 0
+                    ? (() => {
+                        const starts = finalTasks.map((t) => t.startTime).filter((v) => Number.isFinite(v));
+                        const ends = finalTasks
+                          .map((t) => t.endTime)
+                          .filter((v): v is number => v !== undefined && Number.isFinite(v));
+                        if (starts.length === 0) return undefined;
+                        if (ends.length === 0) return undefined;
+                        return Math.max(...ends) - Math.min(...starts);
+                      })()
+                    : undefined;
                 const assistantMessage: Message = {
                   id: `assistant-${Date.now()}`,
                   role: "assistant",
                   content: fullContent,
                   sources: sources.length > 0 ? sources : undefined,
+                  thinkingSteps: finalTasks,
+                  totalThinkingMs,
                 };
                 setMessages((prev) => [...prev, assistantMessage]);
                 setIsLoading(false);
                 setStreamingContent("");
                 setPendingSources([]);
-                // 全部节点收尾：把仍然 pending 的视为 skipped，仍然 running
-                // 的视为 done（兜底，万一 tool_result 漏了）。
-                const dNow = performance.now();
-                setThinkingSteps((prev) =>
-                  prev.map((s) => {
-                    if (s.status === "pending") {
-                      return { ...s, status: "skipped" };
-                    }
-                    if (s.status === "running" && s.endedAt === undefined) {
-                      return { ...s, status: "done", endedAt: dNow };
-                    }
-                    return s;
-                  }),
-                );
-                // 1.5s 后让面板自动折叠成单行摘要。
-                thinkingCollapseTimerRef.current = setTimeout(() => {
-                  if (conversationVersion === conversationVersionRef.current) {
-                    setThinkingCollapsed(true);
-                  }
-                  thinkingCollapseTimerRef.current = null;
-                }, 1500);
+                // thinkingSteps now lives inside the bubble — no external collapse timer needed
               } else if (parsed.type === "tool_call") {
-                console.log("[AI] tool_call received:", parsed);
                 const toolLabel =
                   parsed.toolName === "webSearch"
                     ? "联网搜索"
@@ -734,34 +811,7 @@ export function AiChatPanel({
                   displayLabel: toolLabel,
                   status: "calling",
                 });
-                console.log("[AI] setActiveToolCall:", parsed.toolName);
-                // 思考流程：detectIntent 进入 done，对应工具节点进入 running。
-                const tcNow = performance.now();
-                const nodeName = toolNameToNode(parsed.toolName);
-                setThinkingSteps((prev) => {
-                  const basePrev = prev.map((s) => {
-                    if (
-                      s.nodeName === "detectIntent" &&
-                      (s.status === "pending" || s.status === "running")
-                    ) {
-                      return {
-                        ...s,
-                        status: "done" as const,
-                        startedAt: s.startedAt ?? tcNow,
-                        endedAt: tcNow,
-                      };
-                    }
-                    return s;
-                  });
-                  if (!nodeName) return basePrev;
-                  return patchStep(basePrev, nodeName, (s) =>
-                    s.status === "running" || s.status === "done"
-                      ? s
-                      : { ...s, status: "running", startedAt: tcNow },
-                  );
-                });
               } else if (parsed.type === "tool_result") {
-                console.log("[AI] tool_result received:", parsed);
                 const formatted = formatToolResult(parsed.output);
                 setToolCallChain((prev) => {
                   const idx = prev.findIndex(
@@ -788,20 +838,6 @@ export function AiChatPanel({
                     ? { ...prev, status: "done", message: formatted }
                     : prev
                 );
-                // 思考流程：把对应工具节点标记为 done + 输出。
-                const trNow = performance.now();
-                const nodeName = toolNameToNode(parsed.toolName);
-                if (nodeName) {
-                  setThinkingSteps((prev) =>
-                    patchStep(prev, nodeName, (s) => ({
-                      ...s,
-                      status: "done",
-                      startedAt: s.startedAt ?? trNow,
-                      endedAt: trNow,
-                      output: parsed.output,
-                    })),
-                  );
-                }
               } else if (parsed.type === "tool_error") {
                 const errorMsg = parsed.error;
                 setToolCallChain((prev) => {
@@ -828,20 +864,6 @@ export function AiChatPanel({
                     ? { ...prev, status: "error", message: errorMsg }
                     : prev
                 );
-                // 思考流程：对应工具节点标 error。
-                const teNow = performance.now();
-                const nodeName = toolNameToNode(parsed.toolName);
-                if (nodeName) {
-                  setThinkingSteps((prev) =>
-                    patchStep(prev, nodeName, (s) => ({
-                      ...s,
-                      status: "error",
-                      startedAt: s.startedAt ?? teNow,
-                      endedAt: teNow,
-                      error: errorMsg,
-                    })),
-                  );
-                }
               } else if (parsed.type === "pending_confirmation") {
                 // Human-in-Loop: render candidate picker above input (not as a message bubble)
                 setPendingCandidates(parsed.candidates ?? []);
@@ -860,15 +882,6 @@ export function AiChatPanel({
                 setMessages((prev) => [...prev, hintMsg]);
               } else if (parsed.type === "error") {
                 setActiveToolCall(null);
-                setThinkingSteps((prev) =>
-                  markPendingAsSkipped(
-                    prev.map((s) =>
-                      s.status === "running" && s.endedAt === undefined
-                        ? { ...s, status: "error", endedAt: performance.now() }
-                        : s,
-                    ),
-                  ),
-                );
                 throw new Error(parsed.message || "Stream error");
               }
             } catch {
@@ -884,12 +897,22 @@ export function AiChatPanel({
           return;
         }
         console.error("Chat error:", error);
+        // Mark all remaining placeholder tasks as error so no spinner gets stuck
+        const errorTasks = streamingTasksRef.current.map((t) =>
+          t.id.startsWith("placeholder-")
+            ? { ...t, status: "error" as const, endTime: Date.now() }
+            : t
+        );
+        streamingTasksRef.current = errorTasks;
+        setStreamingTasks(errorTasks);
+        setTimelineTasks(errorTasks);
         setMessages((prev) => [
           ...prev,
           {
             id: `error-${Date.now()}`,
             role: "assistant",
             content: "抱歉，生成回答时遇到了问题。请稍后重试。",
+            thinkingSteps: errorTasks.length > 0 ? errorTasks : undefined,
           },
         ]);
         setIsLoading(false);
@@ -1027,21 +1050,29 @@ export function AiChatPanel({
       {/* Messages */}
       <div className={`flex-1 overflow-y-auto ${padding}`}>
         <div className="space-y-4">
-          {/* Loading skeleton */}
+          {/* Loading skeleton — Code Agent style */}
           {isMessagesLoading && (
             <>
-              <div className="flex gap-3">
-                <div className="h-8 w-8 shrink-0 rounded-full bg-ink-200 animate-pulse" />
-                <div className="space-y-2">
-                  <div className="h-4 w-48 rounded bg-ink-200 animate-pulse" />
-                  <div className="h-4 w-72 rounded bg-ink-100 animate-pulse" />
+              {/* AI message: left-aligned full-width panel */}
+              <div className="w-full overflow-hidden rounded-xl border border-ink-200 bg-white shadow-sm">
+                <div className="border-b border-ink-200 bg-gradient-to-b from-brand-50/30 to-white p-3">
+                  <div className="flex items-center gap-2">
+                    <div className="h-3 w-3 animate-pulse rounded-full bg-brand-200" />
+                    <div className="h-3 w-24 animate-pulse rounded bg-brand-100" />
+                  </div>
+                </div>
+                <div className="space-y-2 p-4">
+                  <div className="h-3 w-full animate-pulse rounded bg-ink-100" />
+                  <div className="h-3 w-5/6 animate-pulse rounded bg-ink-100" />
+                  <div className="h-3 w-4/6 animate-pulse rounded bg-ink-100" />
                 </div>
               </div>
-              <div className="flex gap-3">
-                <div className="h-8 w-8 shrink-0 rounded-full bg-ink-200 animate-pulse" />
-                <div className="space-y-2">
-                  <div className="h-4 w-64 rounded bg-ink-200 animate-pulse" />
-                  <div className="h-4 w-56 rounded bg-ink-100 animate-pulse" />
+              {/* User message: right-aligned bubble */}
+              <div className="flex justify-end">
+                <div className="max-w-[75%]">
+                  <div className="rounded-2xl bg-brand-600 px-4 py-2.5">
+                    <div className="h-3 w-48 animate-pulse rounded bg-brand-400/50" />
+                  </div>
                 </div>
               </div>
             </>
@@ -1050,43 +1081,30 @@ export function AiChatPanel({
           {/* Message list */}
           {!isMessagesLoading &&
             messages.map((msg) => (
-              <AiMessageBubble
-                key={msg.id}
-                role={msg.role}
-                content={msg.content}
-                sources={msg.sources}
-                candidates={msg.candidates}
-                onCandidateSelect={(candidateId) => handleSend(candidateId)}
-              />
+              <div key={msg.id}>
+                <AiMessageBubble
+                  role={msg.role}
+                  content={msg.content}
+                  sources={msg.sources}
+                  candidates={msg.candidates}
+                  thinkingSteps={msg.thinkingSteps}
+                  totalThinkingMs={msg.totalThinkingMs}
+                  onCandidateSelect={(candidateId) => handleSend(candidateId)}
+                />
+              </div>
             ))}
 
-          {/* Typing indicator — uses `greetingHint` (if set) for the caption so
-              the auto-greet flow can show "AI 正在主动准备问候…" instead of
-              the generic "思考中". */}
-          {isLoading && !streamingContent && (
-            <AiTypingBubble text={greetingHint ?? undefined} />
-          )}
-
-          {/* Thinking trace — full node pipeline (detectIntent →
-              searchKnowledge / searchStructured / webSearch → generateResponse).
-              Replaces the old single-tool indicator with a complete progress view
-              so the user can see what the AI is doing and how long each step took. */}
-          {thinkingSteps.length > 0 && (
-            <AiThinkingTrace
-              steps={thinkingSteps}
-              collapsed={thinkingCollapsed}
-              onToggle={() => setThinkingCollapsed((c) => !c)}
-            />
-          )}
-
-          {/* Streaming message */}
-          {isLoading && streamingContent && (
-            <AiMessageBubble
-              role="assistant"
-              content={streamingContent}
-              sources={pendingSources.length > 0 ? pendingSources : undefined}
-              isStreaming
-            />
+          {/* Streaming message — show as soon as thinking tasks arrive (no waiting for text) */}
+          {isLoading && (
+            <div>
+              <AiMessageBubble
+                role="assistant"
+                content={streamingContent}
+                sources={pendingSources.length > 0 ? pendingSources : undefined}
+                isStreaming
+                thinkingSteps={streamingTasks}
+              />
+            </div>
           )}
 
           {/* Empty state for page variant with no messages */}

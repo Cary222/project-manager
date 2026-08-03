@@ -38,6 +38,7 @@ export function extractUserIdentifier(content: string): ExtractedUser | undefine
     "有哪些", "有什么", "是哪些", "的周报", "的日报", "的月报",
     "的需求", "的文档", "的笔记", "的内容", "的设计",
     "是什么", "的详情", "的内容是",
+    "的工单", "工单有哪些", "有哪些工单", "工单",  // ← 加：避免 "我的工单" 被解析成 "工"
   ];
   const stopRegex = new RegExp(
     `(${timeAdverbs.concat(activityVerbs, stopPhrases).join("|")})`,
@@ -54,13 +55,35 @@ export function extractUserIdentifier(content: string): ExtractedUser | undefine
     "g",
   );
 
-  let cleaned = content
+  // 先剥掉句首的"帮忙查一下"类前缀动词短语，避免它们残留成独立 token
+  // 干扰后续多 token 场景下 tokens[0] 的取值（否则会把"帮忙查"误当成用户名）。
+  const withoutLeadIn = stripLeadInVerbs(content);
+
+  let cleaned = withoutLeadIn
     .replace(excludePhraseRegex, " ") // 先移除词组
     .replace(stopRegex, " ")
     .replace(excludeRegex, " ")
     .replace(/^(?:用户|成员|同事)\s*/i, "")
     .replace(/[，。！？、,.!?:\s]+/g, " ")
     .trim();
+
+  // Strip possessive marker from "我的" / "我最近的" before self-check
+  const stripped = cleaned.replace(/^我的/g, "我").replace(/^我最近的/g, "我最近");
+
+  // === 自我引用处理：用户输入 "我" 或 "我最近的" / "我的" 等 ===
+  if (
+    stripped === "我" ||
+    stripped === "我自己" ||
+    stripped === "自己" ||
+    stripped === "我的" ||
+    stripped === "我最近的" ||
+    stripped === "我最近" ||
+    stripped.startsWith("我的") ||
+    stripped.startsWith("我最近") ||
+    (stripped.startsWith("我") && stripped.length <= 5)
+  ) {
+    return { raw: "我", normalized: "我", isSelf: true };
+  }
 
   if (!cleaned) return undefined;
 
@@ -101,6 +124,29 @@ export function extractUserIdentifier(content: string): ExtractedUser | undefine
   const token = tokens[0] ?? cleaned;
   const raw = stripStructuralParticles(token);
   return { raw, normalized: raw.toLowerCase() };
+}
+
+/**
+ * Strip common lead-in verb phrases ("帮我", "查一下", "请问" 等) from the
+ * start of a message so downstream regexes that greedily capture "1-4 个
+ * 汉字 + 工/经理/总" don't swallow the verb into the captured name.
+ *
+ * e.g. "帮我查一下刘工的工单" → "刘工的工单"（去掉"帮我查一下"后才能正确
+ * 匹配出"刘工"，否则贪婪正则会把"查一下刘工"整段当成姓名）。
+ */
+export function stripLeadInVerbs(content: string): string {
+  const leadInPhrases = [
+    "帮我", "请帮我", "麻烦帮我", "麻烦", "劳烦", "请问", "请", "谢谢",
+    "查一下", "查下", "查查", "查一查", "问一下", "问下", "看一下", "看下",
+    "找一下", "找下", "调出", "列出", "查看", "了解一下", "想了解", "看看", "翻翻",
+    "帮忙查", "帮忙看", "帮忙找", "帮忙",
+    "查", "看", "找", "问", "了解",
+    "一下", "一查", "一查一下",
+  ];
+  // 按长度降序排列，避免短词组先命中导致长词组匹配失败
+  const sorted = [...leadInPhrases].sort((a, b) => b.length - a.length);
+  const regex = new RegExp(`^(?:${sorted.join("|")})+`, "g");
+  return content.replace(regex, "").trim();
 }
 
 /**

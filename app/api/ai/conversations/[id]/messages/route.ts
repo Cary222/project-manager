@@ -7,6 +7,8 @@ import {
   getConversation,
   getOrCreateProfile,
 } from "@/features/ai/store/conversation-store";
+import { TimelineStore } from "@/features/ai/lib/timeline-store";
+import { onNodeStart, onNodeEnd } from "@/features/ai/lib/timeline-adapter";
 import { getUserProfileAction } from "@/features/profile/lib/profile-actions";
 import { retrieveContext, buildRagPrompt, extractSourceReferences } from "@/features/ai/search/rag";
 import type { SourceReference as RagSourceReference } from "@/features/ai/search/rag";
@@ -19,31 +21,21 @@ import { searchKnowledge, setSearchKnowledgeViewer, setSearchKnowledgeConversati
 import { searchStructured, setSearchStructuredViewer } from "@/features/ai/tools/search-structured";
 import { shouldUseWebSearch, shouldUseRag } from "@/features/ai/search/detector";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
+import { loadRuntimeState, saveRuntimeState } from "@/features/ai/core/context/conversation-state-store";
+import { buildMessages } from "@/features/ai/core/context/messages-builder";
+import { createRuntimeStatePatcher } from "@/features/ai/core/context/runtime-state-persist";
+import { buildChatContext } from "@/features/ai/core/context/context-builder";
+import {
+  getConversationContext,
+  setConversationContext,
+  setPendingHumanAction,
+  clearPendingHumanAction,
+  bridgeRuntimeToLegacy,
+  getPendingHumanAction,
+} from "@/features/ai/core/context/runtime-state-bridge";
+import type { PendingHumanActionState } from "@/features/ai/core/context/runtime-state-bridge";
 
-// ─── Human-in-Loop: In-memory state per conversation ───────────────────────
-// Stores pending confirmation between the interrupt and user reply.
-// Not persisted to DB (single-server, short-lived sessions only).
-
-// V3 格式（当前版本）
-interface PendingHumanActionState {
-  pendingHumanAction: {
-    type: "select";
-    entity?: string;
-    reason?: string;
-    entityType: "user" | "ticket" | "project" | "weekly_report";
-    candidates: Array<{ id: string; label: string; summary: string }>;
-    query: string;
-    /** Carries queryType (e.g. "weekly_report") through the HIL pipeline so the next
-     *  round's searchStructuredNode knows the original query type, not what the user
-     *  typed as a selection ("1"). */
-    sourceResult?: { queryType?: string; [key: string]: unknown };
-  };
-  lastAssistantMessage: string;
-  mode: "auto" | "search" | "chat" | "web";
-  /** 最近讨论的用户 — 用于"他/她"等代词指代 */
-  lastMentionedUser?: { id: string; name: string } | null;
-}
-
+// ─── Human-in-Loop Map fallback moved to runtime-state-bridge.ts (短期兼容, v4.1 删除) ───
 // V2 → V3 迁移类型（用于迁移函数签名）
 // 旧格式: { type: "user_disambiguation", candidates: { id, name, email }[] }
 // 新格式: { type: "select", entityType, candidates: { id, label, summary }[] }
@@ -71,36 +63,8 @@ function migratePendingConfirmation(
   };
 }
 
-const pendingHumanActionStore = new Map<string, PendingHumanActionState>();
-
-// 存储会话上下文（如最近讨论的用户）
-const conversationContextStore = new Map<string, { lastMentionedUser?: { id: string; name: string } | null }>();
-
-function setPendingHumanAction(
-  conversationId: string,
-  state: PendingHumanActionState
-) {
-  pendingHumanActionStore.set(conversationId, state);
-}
-
-function getPendingHumanAction(conversationId: string): PendingHumanActionState | undefined {
-  return pendingHumanActionStore.get(conversationId);
-}
-
-function clearPendingHumanAction(conversationId: string) {
-  pendingHumanActionStore.delete(conversationId);
-}
-
-function getConversationContext(conversationId: string): { lastMentionedUser?: { id: string; name: string } | null } | undefined {
-  return conversationContextStore.get(conversationId);
-}
-
-function setConversationContext(conversationId: string, context: { lastMentionedUser?: { id: string; name: string } | null }) {
-  conversationContextStore.set(conversationId, context);
-}
-
 // LangGraph StateGraph entry point (lazy-loaded)
-import { agentGraph } from "@/features/ai/graph/agent";
+import { agentGraph, type AgentState } from "@/features/ai/graph/agent";
 import { injectSearchKnowledgeContext } from "@/features/ai/graph/nodes/search-knowledge";
 import { injectSearchStructuredContext } from "@/features/ai/graph/nodes/search-structured";
 
@@ -588,50 +552,29 @@ async function handleLangGraphRequest(
 
   console.log(`[AI-LangGraph] start conv=${conversationId} message="${message.slice(0, 80)}" mode=${mode}`);
 
-  // Check if this conversation has a pending action that needs to be resumed
-  const pendingState = getPendingHumanAction(conversationId);
-  console.log(`[AI-LangGraph] pendingState loaded: ${pendingState ? `entityType=${pendingState.pendingHumanAction?.entityType} candidates=${pendingState.pendingHumanAction?.candidates?.length ?? 0}` : "null"}`);
+  // Load all ambient context via the builder (DB RuntimeState + Map fallback chain).
+  // Replaces 18 lines of manual loadRuntimeState / getPendingHumanAction /
+  // getConversationContext / userProfile loading.
+  const ctx = await buildChatContext({
+    conversationId,
+    message,
+    session,
+    conversationHistory: conversationHistory ?? [],
+    modelName,
+    clientCity,
+    devLog: process.env.NODE_ENV !== "production",
+  });
 
-  // Load conversation context (e.g., last mentioned user for pronoun resolution)
+  const { runtimeState, pendingState, userProfile } = ctx;
   const conversationContext = getConversationContext(conversationId);
-  console.log(`[AI-LangGraph] context loaded: lastMentionedUser=${conversationContext?.lastMentionedUser?.name ?? "null"}`);
 
-  // Load user profile for personalization
-  let userProfile: Record<string, unknown> | null = null;
-  try {
-    const profileData = await getUserProfileAction(session.user.id);
-    userProfile = profileData as unknown as Record<string, unknown>;
-    console.log(`[AI-LangGraph] userProfile loaded: id=${profileData.id} name=${profileData.name}`);
-  } catch (err) {
-    console.warn(`[AI-LangGraph] failed to load userProfile: ${err instanceof Error ? err.message : String(err)}`);
-  }
-
-  // Build message history for LangGraph (BaseMessage array)
-  const langgraphMessages: import("@langchain/core/messages").BaseMessage[] = [];
-
-  if (conversationHistory?.length) {
-    for (const msg of conversationHistory.slice(-10)) {
-      if (msg.role === "user") {
-        langgraphMessages.push(new HumanMessage(msg.content));
-      } else {
-        langgraphMessages.push(new AIMessage(msg.content));
-      }
-    }
-  }
-
-  // Keep the confirmation prompt before the current selection message. The
-  // conversation history normally already contains it; the fallback avoids a
-  // missing prompt when a client omits the persisted assistant message.
-  if (pendingState) {
-    const lastMessage = langgraphMessages[langgraphMessages.length - 1];
-    const lastContent =
-      typeof lastMessage?.content === "string" ? lastMessage.content : "";
-    if (lastMessage?.getType() !== "ai" || lastContent !== pendingState.lastAssistantMessage) {
-      langgraphMessages.push(new AIMessage(pendingState.lastAssistantMessage));
-    }
-  }
-
-  langgraphMessages.push(new HumanMessage(message));
+  // Build message history using messages-builder (token-budgeted, id-deduplicated)
+  // pendingLastAssistantMessage is injected before currentMessage when client omits it
+  const langgraphMessages = buildMessages({
+    history: conversationHistory ?? [],
+    currentMessage: message,
+    pendingLastAssistantMessage: pendingState?.lastAssistantMessage,
+  });
 
   // Inject viewer context into tool closures
   injectSearchKnowledgeContext(session.user.id, conversationId);
@@ -670,6 +613,9 @@ async function handleLangGraphRequest(
         }
       };
 
+      // RuntimeState patcher: debounce 1s writes to DB, flush immediately on SSE end/abort
+      const patcher = createRuntimeStatePatcher(conversationId);
+
       let lastResponse = "";
       let toolResultCount = 0;
       const toolResults: Array<{ toolName: string; output: unknown }> = [];
@@ -707,11 +653,25 @@ async function handleLangGraphRequest(
           profile: userProfile,
           clientCity,
           pendingHumanAction: migratedPendingHumanAction,
-          waitingForConfirmation: Boolean(pendingState),
-          resolvedEntities: null,
+          waitingForConfirmation: Boolean(pendingState?.pendingHumanAction),
+          // Restore resolvedEntities from DB so the follow-up round (after HIL
+          // resolved) does NOT re-trigger disambiguation on the next user message.
+          // Without this, every new invoke starts with resolvedEntities=null and
+          // searchStructured re-runs the ambiguous user query, looping forever.
+          resolvedEntities: (runtimeState?.human?.resolvedEntities ?? null) as AgentState["resolvedEntities"],
           toolResults: {},
           originalQuery: pendingState?.pendingHumanAction?.query ?? "",
-          lastMentionedUser: pendingState?.lastMentionedUser ?? conversationContext?.lastMentionedUser ?? null,
+          // lastMentionedUser fallback chain (DB RuntimeState primary, Map fallback):
+          // 1. HIL resumption carries the user the human was disambiguating (runtimeState.semantic)
+          // 2. Legacy Map covers cross-turn pronoun resolution (短期 fallback)
+          // 3. Current viewer defaults to "self"
+          lastMentionedUser: runtimeState?.semantic?.lastMentionedUser
+            ? { id: runtimeState.semantic.lastMentionedUser.id, name: runtimeState.semantic.lastMentionedUser.name }
+            : pendingState?.lastMentionedUser
+            ?? conversationContext?.lastMentionedUser
+            ?? (session.user.name
+                  ? { id: session.user.id, name: session.user.name }
+                  : null),
           // Model selection: use manualOverride from request if provided.
           // modelSelectNode preserves this via userConfig.manualOverride.
           // providerId/modelName are required by the Annotation schema but will be
@@ -754,33 +714,67 @@ async function handleLangGraphRequest(
           }
         }
 
-      let lastResponse = "";
-      let toolResultCount = 0;
-      const toolResults: Array<{ toolName: string; output: unknown }> = [];
-      // Deduplication: only send pending_confirmation once per response.
-      // Without this, the second stream() (after the first catches an interrupt) would
-      // re-emit the same pending_confirmation event, causing duplicate candidate pickers.
-      let alreadySentPendingConfirmation = false;
+        let lastResponse = "";
+        let toolResultCount = 0;
+        const toolResults: Array<{ toolName: string; output: unknown }> = [];
+
+      // Declare timelineStore at the outer scope so it can be accessed after the
+      // for-await loop (line ~1039), regardless of which branch (if/else) ran.
+      let timelineStore: TimelineStore | null = null;
 
       if (!graphStream) {
-          // Graph was interrupted (interruptReason is set) — skip processing,
-          // let the pending_confirmation handler above (line 820) save state.
-          // Note: the first stream() call already sent pending_confirmation via enqueueData.
-        } else {
-          for await (const chunk of graphStream) {
+        // Graph was interrupted (interruptReason is set) — skip processing,
+        // let the pending_confirmation handler below save state.
+      } else {
+        // ── Timeline: create store and subscribe to updates ───────────────────
+        timelineStore = new TimelineStore();
+        console.log(`[Timeline] store created, graphStream type=${typeof graphStream}`);
+
+        // Subscribe TimelineStore changes → SSE events
+        const unsubscribeTimeline = timelineStore.onUpdate((tasks) => {
+          console.log(`[Timeline] SSE sending snapshot, tasks=${tasks.size}`);
+          enqueueData({
+            type: "timeline_snapshot",
+            conversationId,
+            tasks: Array.from(tasks.values()),
+          });
+        });
+
+        // Deduplication: only send pending_confirmation once per response.
+        let alreadySentPendingConfirmation = false;
+
+        console.log(`[Timeline] about to iterate graphStream`);
+        let chunkCount = 0;
+        for await (const chunk of graphStream) {
+            chunkCount++;
+            console.log(`[Timeline] chunk #${chunkCount}:`, Object.keys(chunk));
             const typedChunk = chunk as Record<string, Record<string, unknown>>;
             for (const [nodeName, nodeOutput] of Object.entries(typedChunk)) {
+              console.log(`[Timeline] node=${nodeName}`);
+
+              // ── Timeline: Node START ────────────────────────────────────────────
+              // Capture the true start time BEFORE awaiting the node output.
+              // The for-await loop delivers the output after the node has finished,
+              // so we must record startTime externally to get accurate durations.
+              const nodeStartTime = Date.now();
+              // Task appears in the timeline immediately — this is the "log stream"
+              // effect: steps pop in one by one, not pre-rendered.
+              const execId = onNodeStart(nodeName, nodeStartTime, (cmd) => {
+                console.log(`[Timeline] create task cmd:`, cmd.op, cmd.task?.stepLabel);
+                timelineStore!.applyCommand(cmd);
+              });
+              console.log(`[Timeline] execId=${execId} startTime=${nodeStartTime}`);
+
+              // ── Tool events: fire AFTER node_start so UI shows "正在查询..." ───
               if (nodeOutput.toolResults && typeof nodeOutput.toolResults === "object") {
                 const results = nodeOutput.toolResults as Record<string, unknown>;
                 for (const [toolName, result] of Object.entries(results)) {
-                  // Announce the tool call first so the frontend shows "正在使用 xxx"
                   enqueueData({
                     type: "tool_call",
                     toolCallId: `lg-${toolName}`,
                     toolName,
                     input: {},
                   });
-                  // Then immediately send the result so the frontend transitions to "xxx 完成"
                   enqueueData({
                     type: "tool_result",
                     toolCallId: `lg-${toolName}`,
@@ -791,6 +785,13 @@ async function handleLangGraphRequest(
                   toolResultCount++;
                 }
               }
+
+              // ── Timeline: Node END ────────────────────────────────────────────
+              // Update task with final status + detail (e.g. "找到 12 条记录")
+              onNodeEnd(execId, nodeOutput, (cmd) => {
+                console.log(`[Timeline] update task cmd:`, cmd.op, cmd.id);
+                timelineStore!.applyCommand(cmd);
+              });
 
               // Capture Human-in-Loop: pending human action from disambiguateIntentNode
               // Decision is now embedded in pendingHumanAction by disambiguateIntentNode.
@@ -864,32 +865,43 @@ async function handleLangGraphRequest(
               ) {
                 lastResponse = nodeOutput.response;
               }
+
+              // ── RuntimeStatePersist: parse node output → debounced patch to DB ───────
+              // Stage 5: runs after Timeline (line ~813) and MessagePersist (line ~714).
+              // parse() returns { human, semantic } patches; patch() debounces 1s.
+              const patch = patcher.parse(nodeOutput);
+              if (patch.human || patch.semantic) {
+                patcher.patch(patch);
+              }
             }
           }
-        }
 
-        // ── Handle interrupt (Human-in-Loop pause) ─────────────────────────────────
-        // If the graph was interrupted, store the pending human action state
-        // and send the pending_confirmation event. The frontend will show selection UI.
-        if (interruptReason) {
-          if (capturedPendingHumanAction) {
-            // Store state so the next message from this conversation resumes it
-            setPendingHumanAction(conversationId, capturedPendingHumanAction);
-            console.log(`[AI-LangGraph] stored pending human action for conv=${conversationId}`);
+          // Unsubscribe timeline when stream ends
+          unsubscribeTimeline();
+
+          // ── Handle interrupt (Human-in-Loop pause) ─────────────────────────────────
+          // If the graph was interrupted, store the pending human action state
+          // and send the pending_confirmation event. The frontend will show selection UI.
+          if (interruptReason) {
+            if (capturedPendingHumanAction) {
+              // Store state so the next message from this conversation resumes it
+              setPendingHumanAction(conversationId, capturedPendingHumanAction);
+              console.log(`[AI-LangGraph] stored pending human action for conv=${conversationId}`);
+            }
+            // The stream was already interrupted — we already sent pending_confirmation above.
+            // Don't send "done" here; wait for the frontend to call again with user selection.
+            closeStream();
+            return;
           }
-          // The stream was already interrupted — we already sent pending_confirmation above.
-          // Don't send "done" here; wait for the frontend to call again with user selection.
-          closeStream();
-          return;
-        }
 
-        // ── Handle pending human action (Human-in-Loop) ──────────────────────────
-        // resolvedEntities (set by humanConfirmationNode) is the source of truth for success.
-        // Clear pending state on successful selection; keep it for invalid follow-up retries.
-        if (resolvedEntitiesResolved) {
-          clearPendingHumanAction(conversationId);
-        } else if (capturedPendingHumanAction) {
-          setPendingHumanAction(conversationId, capturedPendingHumanAction);
+          // ── Handle pending human action (Human-in-Loop) ──────────────────────────
+          // resolvedEntities (set by humanConfirmationNode) is the source of truth for success.
+          // Clear pending state on successful selection; keep it for invalid follow-up retries.
+          if (resolvedEntitiesResolved) {
+            clearPendingHumanAction(conversationId);
+          } else if (capturedPendingHumanAction) {
+            setPendingHumanAction(conversationId, capturedPendingHumanAction);
+          }
         }
 
         // Extract sources from tool results (for inline action buttons)
@@ -996,11 +1008,26 @@ async function handleLangGraphRequest(
         enqueueData({ type: "text", delta: lastResponse });
 
         // Append final message to conversation store
+        // Save thinkingSteps + totalThinkingMs so they persist for history display
+        const thinkingSteps = timelineStore
+          ? Array.from(timelineStore.getTasks().values())
+          : [];
+        const totalThinkingMs = (() => {
+          if (thinkingSteps.length === 0) return 0;
+          const starts = thinkingSteps.map((t) => t.startTime).filter((v) => Number.isFinite(v));
+          const ends = thinkingSteps
+            .map((t) => t.endTime)
+            .filter((v): v is number => v !== undefined && Number.isFinite(v));
+          if (starts.length === 0) return 0;
+          if (ends.length === 0) return 0;
+          return Math.max(...ends) - Math.min(...starts);
+        })();
         await appendMessage(
           conversationId,
           "assistant",
           lastResponse,
-          allSources.length > 0 ? allSources : undefined
+          allSources.length > 0 ? allSources : undefined,
+          thinkingSteps.length > 0 ? { thinkingSteps, totalThinkingMs } : undefined
         );
 
         // Save conversation context (lastMentionedUser) for pronoun resolution in next round
@@ -1031,6 +1058,11 @@ async function handleLangGraphRequest(
 
         enqueueData({ type: "error", message: errMsg });
         closeStream();
+      } finally {
+        // Stage 5 + Replace Point F: force flush RuntimeState to DB.
+        // Runs on: normal end, network abort, recursion error.
+        // Does NOT run on: other 500 errors (caught by the catch above, then finally runs).
+        await patcher.flush();
       }
     },
   });

@@ -1,5 +1,3 @@
-import { ProxyAgent } from "undici";
-
 /**
  * Agnes API base URL. In production this is the Cloudflare Worker URL;
  * in development it points directly at apihub.agnes-ai.com.
@@ -23,6 +21,8 @@ export function buildProxyAwareFetch(): typeof fetch | undefined {
   const proxyUrl = process.env.HTTPS_PROXY ?? process.env.HTTP_PROXY;
   if (!proxyUrl) return undefined;
 
+  // Dynamic import: undici is Node.js only, never runs in browser
+  const { ProxyAgent } = require("undici") as typeof import("undici");
   const proxyAgent = new ProxyAgent({ uri: proxyUrl });
 
   return async function proxiedFetch(

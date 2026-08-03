@@ -3,11 +3,11 @@
 > **适用对象**：前端工程师，AI 原生开发者，靠 AI 写代码，ProjectHub 项目实战
 > **目标**：通过重构自己的 AI 对话系统，深入理解 LangGraph 核心概念
 > **原则**：不背代码、不刷教程、在实战中理解
-> **更新日期**：2026-07-29
+> **更新日期**：2026-07-31
 
 ---
 
-## 背景：为什么现在学（已更新：2026-07-29）
+## 背景：为什么现在学（已更新：2026-07-31）
 
 你已经完成了：
 
@@ -16,13 +16,16 @@
 - ✅ SSE 流式响应 + 打字机效果
 - ✅ 用户画像 + 预缓存优化
 - ✅ **LangGraph StateGraph 状态机重构（2026-07-29）**
+- ✅ **AI 模型配置层完整上线（2026-07-31）**
 
 你的代码里已经有：
 - `detector.ts` — 判断用哪个模式
 - `features/ai/graph/` — **LangGraph StateGraph 状态机**
-- `features/ai/graph/nodes/` — **7 个节点实现**
-- `features/ai/graph/edges/routing.ts` — **7 个路由函数**
+- `features/ai/graph/nodes/` — **8 个节点实现**
+- `features/ai/graph/edges/routing.ts` — **8 个路由函数**
 - `features/ai/graph/nodes/human-confirmation.ts` — **HIL 消歧节点**
+- `features/ai/graph/nodes/model-select.ts` — **模型选择节点**
+- `features/ai/llm/` — **Model Registry + 三级凭证降级**
 
 **你已经用 LangGraph 重构了 AI 对话系统**，现在需要深入理解状态机原理 + 执行测试用例。
 

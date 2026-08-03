@@ -1,17 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { IconSparkles } from "@/shared/ui/icons";
-import { MarkdownContent } from "@/shared/ui/MarkdownContent";
-import { AiSourcesList, type SourceReference } from "./AiSourcesList";
-import { MessageCopyButton } from "./MessageCopyButton";
+import { AiResponsePanel } from "./AiResponsePanel";
+import type { TaskRecord } from "@/features/ai/types";
+import type { SourceReference } from "./AiSourcesList";
 
 interface CandidateUser {
   id: string;
-  /** HIL format: label from disambiguateIntent (e.g. "cary（刘屹鹏）") */
   label?: string;
   summary?: string;
-  /** Legacy assignee format: name from user record */
   name?: string;
   email?: string;
   sublabel?: string;
@@ -23,7 +20,8 @@ interface AiMessageBubbleProps {
   sources?: SourceReference[];
   candidates?: CandidateUser[];
   isStreaming?: boolean;
-  /** Called when user clicks a candidate button — sends the selection back to AI */
+  thinkingSteps?: TaskRecord[];
+  totalThinkingMs?: number;
   onCandidateSelect?: (candidateId: string) => void;
 }
 
@@ -36,7 +34,16 @@ interface AiMessageBubbleProps {
 const TYPEWRITER_MIN_MS_PER_CHAR = 18;
 const TYPEWRITER_MAX_MS_PER_CHAR = 55;
 
-export function AiMessageBubble({ role, content, sources, candidates, isStreaming, onCandidateSelect }: AiMessageBubbleProps) {
+export function AiMessageBubble({
+  role,
+  content,
+  sources,
+  candidates,
+  isStreaming,
+  thinkingSteps,
+  totalThinkingMs,
+  onCandidateSelect,
+}: AiMessageBubbleProps) {
   const isUserMessage = role === "user";
   const hasCandidates = candidates && candidates.length > 0;
 
@@ -53,18 +60,12 @@ export function AiMessageBubble({ role, content, sources, candidates, isStreamin
   const rafRef = useRef<number | null>(null);
 
   // Track arrival rate of SSE chars so we can adapt the reveal speed.
-  // lastChunkLength = chars that arrived in the most recent SSE burst;
-  // lastChunkAt     = timestamp of that burst.
   const lastChunkLengthRef = useRef(0);
   const lastChunkAtRef = useRef(0);
 
   // Sync refs AFTER commit (not during render) to satisfy React 19 ref rules.
   useEffect(() => {
     contentRef.current = content;
-    // Remember how many characters arrived in this update and when, so the
-    // typewriter can adapt to SSE cadence. Skip the very first sync (length
-    // jump from 0 → content when streaming starts) so we don't poison the
-    // average with one giant burst.
     if (streamingRef.current && isStreaming && content.length > contentRef.current.length) {
       lastChunkLengthRef.current = content.length - contentRef.current.length;
       lastChunkAtRef.current = performance.now();
@@ -138,89 +139,52 @@ export function AiMessageBubble({ role, content, sources, candidates, isStreamin
     };
   }, [isStreaming, isUserMessage, content, displayed]);
 
-  // Pin the bubble height to the final content once it arrives so the
-  // surrounding list doesn't reflow each tick (no jitter).
-  const finalLength = isStreaming ? displayed.length : content.length;
-  const targetLength = content.length;
-  const showCursor = !isUserMessage && isStreaming && finalLength < targetLength;
-
-  return (
-    <div className={`flex gap-3 ${isUserMessage ? "flex-row-reverse" : ""}`}>
-      {/* Avatar */}
-      <div
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
-          isUserMessage
-            ? "bg-brand-600 text-white"
-            : "bg-gradient-to-br from-brand-400 via-brand-600 to-brand-700 text-white shadow-sm"
-        }`}
-      >
-        {isUserMessage ? "U" : <IconSparkles width={16} height={16} />}
-      </div>
-
-      {/* Bubble column */}
-      <div className={`max-w-[75%] ${isUserMessage ? "items-end" : "items-start"} flex flex-col`}>
-        {/* Chat bubble */}
-        <div
-          className={`rounded-2xl px-4 py-2.5 ${
-            isUserMessage
-              ? "bg-brand-600 text-white rounded-br-md"
-              : "bg-ink-100 text-ink-900 rounded-bl-md"
-          }`}
-        >
-          {isUserMessage ? (
+  // User message: right-aligned bubble (max-w-[75%])
+  if (isUserMessage) {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[75%]">
+          <div className="rounded-2xl bg-brand-600 px-4 py-2.5 text-white rounded-br-md">
             <p className="text-sm leading-relaxed whitespace-pre-wrap">{content}</p>
-          ) : (
-            <div className="relative">
-              {/* Ghost layer — reserves height for final content via @shared/ui/MarkdownContent */}
-              <div aria-hidden="true" className="invisible">
-                <MarkdownContent content={content} />
-              </div>
-              {/* Active layer — typewriter reveal, also reuses @shared/ui/MarkdownContent */}
-              <div className="absolute inset-0 overflow-hidden">
-                <MarkdownContent content={displayed} />
-                {showCursor && (
-                  <span className="ml-0.5 inline-block h-4 w-1.5 translate-y-0.5 animate-pulse bg-brand-600 align-middle" />
-                )}
-              </div>
-            </div>
-          )}
+          </div>
+          <span className="mt-1 block text-[10px] text-ink-400">你</span>
         </div>
-
-        {/* Candidate selection buttons (Human-in-Loop) */}
-        {!isUserMessage && !isStreaming && hasCandidates && onCandidateSelect && (
-          <div className="mt-2 flex flex-col gap-1.5">
-            {candidates!.map((candidate, index) => (
-              <button
-                key={candidate.id}
-                type="button"
-                onClick={() => onCandidateSelect(candidate.id)}
-                className="w-full rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-left text-sm transition-colors hover:border-warning/60 hover:bg-warning/20"
-              >
-                <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded bg-warning/20 text-xs font-medium text-warning-foreground">
-                  {index + 1}
-                </span>
-                <span className="font-medium text-ink-900">{candidate.label ?? candidate.name}</span>
-                {(candidate.email ?? candidate.sublabel) && (
-                  <span className="ml-2 text-xs text-ink-500">{candidate.email ?? candidate.sublabel}</span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {!isStreaming && <MessageCopyButton content={content} />}
-
-        {/* Reference sources — only render after streaming is done to avoid partial flash */}
-        {!isUserMessage && !isStreaming && sources && sources.length > 0 && (
-          <div className="mt-2">
-            <AiSourcesList sources={sources} />
-          </div>
-        )}
-
-        <span className="mt-1 text-[10px] text-ink-400">
-          {isUserMessage ? "你" : "小星"}
-        </span>
       </div>
+    );
+  }
+
+  // AI message: Code Agent style — left-aligned full-width panel
+  return (
+    <div className="w-full">
+      {/* Candidate selection buttons (Human-in-Loop) */}
+      {!isStreaming && hasCandidates && onCandidateSelect && (
+        <div className="mb-2 flex flex-col gap-1.5">
+          {candidates!.map((candidate, index) => (
+            <button
+              key={candidate.id}
+              type="button"
+              onClick={() => onCandidateSelect(candidate.id)}
+              className="w-full rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-left text-sm transition-colors hover:border-warning/60 hover:bg-warning/20"
+            >
+              <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded bg-warning/20 text-xs font-medium text-warning-foreground">
+                {index + 1}
+              </span>
+              <span className="font-medium text-ink-900">{candidate.label ?? candidate.name}</span>
+              {(candidate.email ?? candidate.sublabel) && (
+                <span className="ml-2 text-xs text-ink-500">{candidate.email ?? candidate.sublabel}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <AiResponsePanel
+        content={displayed}
+        thinkingSteps={thinkingSteps}
+        sources={sources}
+        isStreaming={isStreaming}
+        totalThinkingMs={totalThinkingMs}
+      />
     </div>
   );
 }

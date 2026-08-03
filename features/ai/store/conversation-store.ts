@@ -21,6 +21,7 @@ export interface AiChatMessage {
   role: string;
   content: string;
   sources: unknown;
+  metadata: unknown;
   createdAt: Date;
 }
 
@@ -65,7 +66,8 @@ export async function appendMessage(
   conversationId: string,
   role: string,
   content: string,
-  sources?: unknown
+  sources?: unknown,
+  metadata?: unknown
 ): Promise<AiChatMessage> {
   const [message] = await prisma.$transaction([
     prisma.aiChatMessage.create({
@@ -74,6 +76,7 @@ export async function appendMessage(
         role,
         content,
         sources: sources ?? Prisma.JsonNull,
+        metadata: metadata ?? Prisma.JsonNull,
       },
     }),
     prisma.aiConversation.update({
@@ -212,6 +215,7 @@ export async function getConversationsWithMessages(
     where: { conversationId },
     orderBy: { createdAt: "asc" },
     take: 50,
+    select: { id: true, conversationId: true, role: true, content: true, sources: true, metadata: true, createdAt: true },
   });
 
   return {

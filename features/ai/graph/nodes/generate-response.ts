@@ -384,9 +384,66 @@ export async function generateResponseNode(
       messages,
       state.userId
     );
-    return { response: resultText, lastMentionedUser };
+
+    // Fallback: if data retrieval failed and the model produced nothing useful,
+    //    retry once with chat-mode (no tool-result context) so the user still
+    //    gets a friendly answer instead of an empty bubble.
+    if (!resultText.trim() && isDataRetrievalFailed(state.toolResults)) {
+      console.log(`[generateResponseNode] fallback to chat mode (data retrieval failed, empty response)`);
+      const chatResult = await callWithDynamicModel(
+        state.modelContext,
+        buildSystemPrompt(userName, "chat", profile, lastMentionedUser),
+        [{ role: "user", content: userContent } satisfies UserModelMessage],
+        state.userId
+      );
+      return {
+        response: chatResult || resultText || "抱歉，我没能理解这个问题，请换个说法试试。",
+        lastMentionedUser,
+        // Belt-and-suspenders: clear any stale pending action so a fresh user message
+        // is not hijacked by an abandoned HIL session from a previous request.
+        pendingHumanAction: null,
+      };
+    }
+
+    return {
+      response: resultText,
+      lastMentionedUser,
+      // Belt-and-suspenders: clear any stale pending action so a fresh user message
+      // is not hijacked by an abandoned HIL session from a previous request.
+      pendingHumanAction: null,
+    };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return { response: `生成回答时出错：${msg}`, lastMentionedUser };
   }
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Detect whether any tool result signals a hard failure (e.g. unsupported
+ * query type, DB error, zero results). When data retrieval fails, the
+ * generated response is unreliable and we should fall back to chat mode.
+ */
+function isDataRetrievalFailed(
+  toolResults: Record<string, unknown> | undefined
+): boolean {
+  if (!toolResults || typeof toolResults !== "object") return false;
+
+  for (const [toolName, raw] of Object.entries(toolResults)) {
+    if (!raw || typeof raw !== "object") continue;
+    const r = raw as Record<string, unknown>;
+
+    // Explicit error field
+    if (typeof r.error === "string" && r.error.trim()) return true;
+
+    // searchStructured returns a "summary" — flag if it contains failure phrases
+    if (toolName === "searchStructured" && typeof r.summary === "string") {
+      const s = r.summary;
+      if (s.includes("不支持的查询类型") || s.includes("查询失败") || s.includes("系统错误")) {
+        return true;
+      }
+    }
+  }
+  return false;
 }

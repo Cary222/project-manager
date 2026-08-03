@@ -2,14 +2,14 @@
 
 > **项目**：ProjectHub AI Agent 系统
 > **目标**：从单 Agent 演进为多 Agent 智能体编排系统
-> **日期**：2026-07-29
+> **日期**：2026-07-31
 > **依赖**：[LangGraph 实战学习计划](docs/learning/LangGraph-实战学习计划.md)
 
 ---
 
 ## 一、现状分析
 
-### 1.1 当前架构（2026-07-29 已更新）
+### 1.1 当前架构（2026-07-31 已更新）
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -20,6 +20,8 @@
 │  │              LangGraph StateGraph                    │  │
 │  │                                                      │  │
 │  │  detectIntent ──▶ 意图检测 + 实体提取              │  │
+│  │       │                                              │  │
+│  │       ├── modelSelect ──▶ 模型选择（任务类型路由） │  │
 │  │       │                                              │  │
 │  │       ├── search ──▶ searchKnowledge (RAG)         │  │
 │  │       │            ↓                                │  │
@@ -32,7 +34,7 @@
 │  │                                                      │  │
 │  │  humanConfirmation ──▶ 消歧确认（人机交互）         │  │
 │  │                                                      │  │
-│  │  7 个节点 + 7 个路由函数                            │  │
+│  │  8 个节点 + 8 个路由函数                            │  │
 │  └──────────────────────────────────────────────────────┘  │
 │                            │                                │
 │                            ▼                                │
@@ -44,11 +46,15 @@
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
-| StateGraph 状态机编排 | ✅ | 7 个节点完整实现 |
+| StateGraph 状态机编排 | ✅ | 8 个节点完整实现 |
 | 意图检测增强 | ✅ | 人员消歧、多轮对话、代词指代 |
 | HIL 人工介入节点 | ✅ | humanConfirmation 节点 |
 | 路由规则修正 | ✅ | auto 模式 DB 快查优先 |
 | 来源引用组件化 | ✅ | AiSourcesList 独立渲染 |
+| Model Registry 动态发现 | ✅ | providers/registry.ts |
+| 三级凭证降级链路 | ✅ | SYSTEM → USER → ENV |
+| 用户自定义 Provider | ✅ | UserApiKey 表 + 加密存储 |
+| Model Routing 任务路由 | ✅ | selectModel + modelSelect 节点 |
 
 ### 1.3 当前痛点
 

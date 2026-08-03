@@ -83,7 +83,12 @@ export async function searchStructuredNode(
       queryType = candidateQueryType
         ? (candidateQueryType as typeof queryType)
         : "user";
-      const needsUserExtraction = queryType === "user" || queryType === "weekly_report" || queryType === "commit";
+      // ticket 查"我的工单"时也要提取用户（用于 resolvedUser / userId 兜底）
+      const needsUserExtraction =
+        queryType === "user" ||
+        queryType === "ticket" ||
+        queryType === "weekly_report" ||
+        queryType === "commit";
       // Extract user from original query (e.g. "刘工的周报有哪些" → "刘工")
       const extractedUser = needsUserExtraction ? extractUserIdentifier(queryForParsing) : undefined;
       const activityWindow = (queryType === "user" || queryType === "commit") ? detectActivityWindow(queryForParsing) : undefined;
@@ -118,8 +123,20 @@ export async function searchStructuredNode(
         state.queryType ?? savedQueryType;
       queryType = (candidateQueryType as typeof queryType) ?? "user";
       const extractedId = extractId(content);
-      const needsUserExtraction = queryType === "user" || queryType === "weekly_report" || queryType === "commit";
+      // ticket 查"我的工单"时也要提取用户（用于 resolvedUser / userId 兜底）
+      const needsUserExtraction =
+        queryType === "user" ||
+        queryType === "ticket" ||
+        queryType === "weekly_report" ||
+        queryType === "commit";
       let extractedUser = needsUserExtraction ? extractUserIdentifier(effectiveQuery) : undefined;
+
+      // 当 needsUserExtraction=true（ticket/weekly_report/commit 查）但没提取到用户，
+      // 说明用户在查"我的 XXX"，用 viewerUserId 兜底，让 resolveUser 用 viewerUserId。
+      if (!extractedUser && needsUserExtraction && state.userId) {
+        console.log(`[AI-LangGraph] no extractedUser for ${queryType} query, using viewerUserId=${state.userId}`);
+        extractedUser = { raw: "我", normalized: "我", isSelf: true };
+      }
 
       // 检测代词：如果消息是"他/她/这..."等代词，即使不是 user_activity 查询也使用 lastMentionedUser
       // 放宽判断：只要包含代词相关关键词且消息较短，就是代词查询
@@ -131,37 +148,59 @@ export async function searchStructuredNode(
       // 从 detectIntent 返回的 lastMentionedUser（可能是错误的）
       const detectUser = state.lastMentionedUser?.name;
 
-      // 优先使用 context 中的值（包含完整的用户信息如邮箱）
       // 提取纯名字：去掉括号内的邮箱/备注部分
       const extractPureName = (name: string): string => {
-        // 去掉 "（xxx@email.com）" 或 "(xxx@email.com)" 格式
         return name.replace(/[（(][^）)]+[）)]/g, "").trim();
       };
 
-      // 如果 context 有效，使用它；否则尝试使用 detect 的值
+      // 自我引用类脏数据：DB 里残留的 "我最近的工" / "我" 等，不应覆盖真正的 isSelf 提取结果
+      const isSelfLike = (name: string) =>
+        /^(我|我自己|自己|我最近的|我的|此人?|本人|当前用户)$/.test(name);
+
+      // 如果已识别为自我引用（isSelf=true），禁止再从 contextUser/detectUser 读取姓名
+      // 以免"cary"等旧上下文覆盖"我"的语义
       let effectiveUserName: string | undefined;
-      if (contextUser && contextUser.length > 1) {
-        effectiveUserName = extractPureName(contextUser);
-      } else if (detectUser && detectUser.length > 1 && !detectUser.includes("最近")) {
-        effectiveUserName = extractPureName(detectUser);
+      if (!extractedUser?.isSelf) {
+        if (contextUser && contextUser.length > 1 && !isSelfLike(contextUser)) {
+          effectiveUserName = extractPureName(contextUser);
+        } else if (detectUser && detectUser.length > 1 && !isSelfLike(detectUser) && !detectUser.includes("最近")) {
+          effectiveUserName = extractPureName(detectUser);
+        }
       }
 
+      // 当 effectiveUserName 有值时，用它覆盖 extractedUser（保留原有的 isSelf 标记）
       if (effectiveUserName && (isPronoun || needsUserExtraction)) {
         console.log(`[AI-LangGraph] using lastMentionedUser: ${effectiveUserName}`);
-        extractedUser = { raw: effectiveUserName, normalized: effectiveUserName };
+        const existingIsSelf = extractedUser?.isSelf;
+        extractedUser = { raw: effectiveUserName, normalized: effectiveUserName, ...(existingIsSelf ? { isSelf: true } : {}) };
         // 强制设置为 user 查询类型
         if (isPronoun && !needsUserExtraction) {
           queryType = "user";
         }
       }
 
-      const activityWindow = (queryType === "user" || queryType === "commit") ? detectActivityWindow(effectiveQuery) : undefined;
+      // 优先使用 state.activityWindow（由 detectIntent 提取，已处理 isSelfReference 的 early return）
+      // 次选本地 detectActivityWindow（用于 disambiguation 场景等非主流程）
+      const activityWindow = state.activityWindow ?? (
+        (queryType === "user" || queryType === "commit")
+          ? detectActivityWindow(effectiveQuery)
+          : undefined
+      );
       queryText = extractedUser?.raw ?? extractedId ?? "(未指定)";
 
       console.log(`[AI-LangGraph] searchStructured type=${queryType} id=${extractedId ?? "none"} extractedUser=${extractedUser ? JSON.stringify(extractedUser) : "none"} window=${activityWindow ?? "none"} content="${effectiveQuery.slice(0, 50)}"${state.originalQuery ? " (from originalQuery)" : ""}`);
 
+      // 当 isSelf=true 时（"我最近的工单"），ticket 查询走 filters.userId 路径
+      // 其他查询类型走 extractedUser → resolveUser(isSelf=true) 路径
       filters = needsUserExtraction || isPronoun
-        ? { ...(extractedUser ? { extractedUser } : {}), ...(activityWindow ? { activityWindow } : {}) }
+        ? {
+            ...((extractedUser as { isSelf?: boolean })?.isSelf === true && queryType === "ticket"
+              ? { userId: state.userId }
+              : extractedUser
+                ? { extractedUser }
+                : {}),
+            ...(activityWindow ? { activityWindow } : {}),
+          }
         : undefined;
     }
 
@@ -181,7 +220,7 @@ export async function searchStructuredNode(
         filters,
         limit: 5,
       },
-      undefined // viewerUserId comes from context injection
+      state.userId || undefined
     );
 
     const resultText =

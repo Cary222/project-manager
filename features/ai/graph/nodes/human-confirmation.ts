@@ -174,6 +174,23 @@ export async function humanConfirmationNode(
       originalQuery: state.originalQuery,
     };
   }
+  // Handle invalid selection — user said "都不是" or typed something that doesn't match any candidate.
+  // Cancel this round of disambiguation so the user can rephrase their question.
+  if (result === null) {
+    return {
+      waitingForConfirmation: false,
+      pendingHumanAction: null,
+      resolvedEntities: null,
+      queryType: null,
+      messages: [
+        ...state.messages,
+        new AIMessage(
+          "好的，没有找到匹配的选项。你可以换个说法重新提问，比如直接告诉我你是谁。\n\n比如：\"我是刘工\""
+        ),
+      ],
+    };
+  }
+
   const options = candidates
     .map((c, i) => `${i + 1}. ${c.label}`)
     .join("\n");
