@@ -27,6 +27,7 @@ export interface TicketItem {
   ticketNo: number;
   title: string;
   status: string;
+  projectId: string;
   projectName: string;
   updatedAt: string;
 }
@@ -60,6 +61,10 @@ export interface WeeklyContext {
   notes: NoteItem[];
   conversations: ConversationItem[];
   visits: PageVisitAggregation;
+  /** 所有涉及的项目 ID（去重），用于自动关联周报 */
+  projectIds: string[];
+  /** 项目 ID → 名称映射 */
+  projectIdToName: Record<string, string>;
 }
 
 // ============================================================
@@ -162,7 +167,7 @@ async function fetchTickets(
       title: true,
       status: true,
       updatedAt: true,
-      project: { select: { name: true } },
+      project: { select: { id: true, name: true } },
     },
   });
 
@@ -171,6 +176,7 @@ async function fetchTickets(
     ticketNo: r.ticketNo,
     title: truncate(r.title, TITLE_MAX),
     status: r.status,
+    projectId: r.project.id,
     projectName: r.project.name,
     updatedAt: r.updatedAt.toISOString(),
   }));
@@ -319,6 +325,16 @@ export async function aggregateWeeklyContext(
     fetchVisits(userId, weekStart, weekEnd),
   ]);
 
+  // Extract unique project IDs from tickets and build id→name map
+  const projectIdSet = new Set<string>();
+  const projectIdToNameMap: Record<string, string> = {};
+  for (const t of tickets) {
+    if (t.projectId) {
+      projectIdSet.add(t.projectId);
+      projectIdToNameMap[t.projectId] = t.projectName;
+    }
+  }
+
   const context: WeeklyContext = {
     weekStart: weekStartISO,
     weekEnd: weekEnd.toISOString(),
@@ -326,6 +342,8 @@ export async function aggregateWeeklyContext(
     notes,
     conversations,
     visits,
+    projectIds: Array.from(projectIdSet),
+    projectIdToName: projectIdToNameMap,
   };
 
   const hash = computeHash(context);

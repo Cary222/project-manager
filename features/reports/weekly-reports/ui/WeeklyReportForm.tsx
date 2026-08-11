@@ -90,7 +90,7 @@ export function WeeklyReportForm({
     });
   }
 
-  async function handleAIGenerate() {
+  async function handleAIGenerate(isRegenerate = false) {
     if (!weekStart || !weekEnd) {
       toast.error("请先选择周范围");
       return;
@@ -98,7 +98,10 @@ export function WeeklyReportForm({
 
     setDraftLoading(true);
     setDraftError(null);
-    setDraftSummary(null);
+    // 重新生成时不清空草稿，让用户看到"正在优化"的状态
+    if (!isRegenerate) {
+      setDraftSummary(null);
+    }
 
     try {
       const res = await fetch("/api/reports/weekly-reports/draft-summary", {
@@ -112,6 +115,8 @@ export function WeeklyReportForm({
             content: content.trim() || undefined,
             projectIds: Array.from(selectedProjectIds),
           },
+          // 重新生成时传入当前草稿
+          currentDraft: isRegenerate && draftSummary ? draftSummary : undefined,
         }),
       });
 
@@ -156,7 +161,7 @@ export function WeeklyReportForm({
   }
 
   function handleDraftRegenerate() {
-    handleAIGenerate();
+    handleAIGenerate(true);
   }
 
   function handleInsert(markdown: string, mode: "append" | "replace") {
@@ -391,7 +396,7 @@ export function WeeklyReportForm({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={handleAIGenerate}
+              onClick={() => handleAIGenerate(false)}
               disabled={draftLoading || !weekStart || !weekEnd}
               className="rounded-lg border border-ink-300 bg-white px-4 py-2 text-sm font-medium text-ink-700 shadow-sm transition-colors hover:bg-ink-100 disabled:cursor-not-allowed disabled:opacity-50"
             >

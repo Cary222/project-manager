@@ -20,6 +20,10 @@ export interface WeeklyDraftSummary {
   tasks: string[];
   nextPlan: string[];
   rawMarkdown: string;
+  /** 项目 ID 列表（用于写入周报关联）*/
+  projectIds: string[];
+  /** 项目名称列表（用于前端展示，与 projectIds 一一对应）*/
+  projectNames: string[];
   _error?: string;
 }
 
@@ -185,6 +189,75 @@ function extractJsonFromResponse(text: string): string {
 // Main export
 // ============================================================
 
+export async function reviseWeeklyDraftSummary(
+  userId: string,
+  currentSummary: WeeklyDraftSummary,
+  feedback: string,
+  context: WeeklyContext,
+  formDraft?: FormDraft
+): Promise<WeeklyDraftSummary> {
+  const serializedContext = serializeWeeklyContext(context, formDraft);
+
+  const promptUser = [
+    "用户对当前周报草稿的修改意见如下：",
+    "",
+    feedback,
+    "",
+    "当前周报草稿：",
+    JSON.stringify(currentSummary, null, 2),
+    "",
+    "## 原始数据（供你参考查询）",
+    serializedContext,
+    "",
+    "请在当前周报草稿的基础上，结合原始数据和修改意见进行二次优化，而不是完全推翻重写。保持相同的 JSON 结构。",
+  ].join("\n");
+
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: DRAFT_INSTRUCTION },
+    { role: "user", content: promptUser },
+  ];
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { preferredAiModel: true },
+  });
+
+  try {
+    const responseText = await callAgnes(messages, {
+      userId,
+      preferredModelRef: user?.preferredAiModel,
+    });
+    const jsonStr = extractJsonFromResponse(responseText);
+    const result = JSON.parse(jsonStr) as WeeklyDraftSummary;
+
+    // Keep existing projectIds/projectNames through revise rounds
+    const projectIds = Array.isArray(result.projectIds)
+      ? result.projectIds
+      : currentSummary.projectIds;
+
+    return {
+      highlights: Array.isArray(result.highlights) ? result.highlights : [],
+      tasks: Array.isArray(result.tasks) ? result.tasks : [],
+      nextPlan: Array.isArray(result.nextPlan) ? result.nextPlan : [],
+      rawMarkdown: typeof result.rawMarkdown === "string" ? result.rawMarkdown : "",
+      projectIds,
+      projectNames: currentSummary.projectNames,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "LLM 修订调用失败";
+    console.warn("[draft-summary] revise LLM call failed:", err);
+    return {
+      highlights: [],
+      tasks: [],
+      nextPlan: [],
+      rawMarkdown: "",
+      projectIds: currentSummary.projectIds,
+      projectNames: currentSummary.projectNames,
+      _error: message,
+    };
+  }
+}
+
 export async function generateWeeklyDraftSummary(
   userId: string,
   _weekStart: Date,
@@ -201,6 +274,8 @@ export async function generateWeeklyDraftSummary(
       tasks: [],
       nextPlan: [],
       rawMarkdown: "",
+      projectIds: [],
+      projectNames: [],
       _error: "No context provided",
     };
   }
@@ -233,11 +308,17 @@ export async function generateWeeklyDraftSummary(
     const jsonStr = extractJsonFromResponse(responseText);
     const result = JSON.parse(jsonStr) as WeeklyDraftSummary;
 
+    // Use projectIds from tickets; resolve names from context
+    const projectIds = context.projectIds ?? [];
+    const projectNames = projectIds.map((id) => context.projectIdToName[id]).filter(Boolean);
+
     return {
       highlights: Array.isArray(result.highlights) ? result.highlights : [],
       tasks: Array.isArray(result.tasks) ? result.tasks : [],
       nextPlan: Array.isArray(result.nextPlan) ? result.nextPlan : [],
       rawMarkdown: typeof result.rawMarkdown === "string" ? result.rawMarkdown : "",
+      projectIds,
+      projectNames,
     };
   } catch (err) {
     console.warn("[draft-summary] LLM call failed:", err);
@@ -246,6 +327,8 @@ export async function generateWeeklyDraftSummary(
       tasks: [],
       nextPlan: [],
       rawMarkdown: "",
+      projectIds: context.projectIds ?? [],
+      projectNames: (context.projectIds ?? []).map((id) => context.projectIdToName[id]).filter(Boolean),
       _error: err instanceof Error ? err.message : "LLM 调用失败",
     };
   }

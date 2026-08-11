@@ -202,6 +202,8 @@ open http://localhost:3003/ai/chat
 
 ## 8. 踩坑记录
 
+> 本次开发从零搭建生图功能到修复持久化 bug 的完整踩坑记录，按时间顺序或逻辑分组排列。
+
 ### 坑 1：`typedData` 重复声明导致 worker 启动失败
 
 **现象**：
@@ -246,9 +248,147 @@ ERROR: The symbol "typedData" has already been declared
 
 **解法**：本次只需修复 `conversation-store.ts` 的批量查询，无需改动 `messages/[id]/route.ts`。
 
+### 坑 4：生图 API 模型参数不匹配
+
+**现象**：调用 DashScope Wan2.7-image API 时返回 `400 Bad Request`。
+
+**原因**：不同生图模型的参数格式不同。按照 ai-image-generation skill，应该先确定使用哪个模型（OpenAI / DashScope / 其他），再查阅对应的 schema。
+
+**解法**：在 `image-generator.ts` 中实现 `detectProvider` 函数，根据 `baseURL` 自动识别 provider：
+- `dashscope` / `aliyuncs.com` → DashScope Wan
+- `openai.com` → OpenAI DALL-E
+- 其他 → 兜底处理
+
+### 坑 5：Background Worker 未正确处理生图 Job
+
+**现象**：生图请求发送后，前端一直显示 "生成中"，后端 worker 没有处理 job。
+
+**原因**：Worker 的 `dispatcher.ts` 中 `IMAGE_GENERATE` job type 没有注册到 handler。
+
+**解法**：
+1. 在 `worker/background/handlers/index.ts` 注册 `handleImageGenerate`
+2. 在 `worker/background/dispatcher.ts` 的 `switch` 语句中添加 `IMAGE_GENERATE` case
+3. 重启 worker 进程
+
+### 坑 6：图片 base64 存储超出数据库字段长度限制
+
+**现象**：生成的图片无法存入 `AiFileAsset` 表，报错 `value too long for type character varying(N)`。
+
+**原因**：Prisma schema 中 `data` 字段类型为 `String`，默认映射到 PostgreSQL 的 `VARCHAR(255)`，无法容纳大图片的 base64。
+
+**解法**：修改 Prisma schema：
+```prisma
+model AiFileAsset {
+  // ...
+  data String @db.Text  // 使用 Text 类型，支持无限长度
+}
+```
+然后执行 `npx prisma migrate dev`。
+
 ---
 
-## 9. 相关链接
+## 9. 生图功能完整流程（从零到完成）
+
+> 本节总结当前对话中从零搭建生图功能的完整开发流程。
+
+### 9.1 需求明确
+
+**原始需求**：在 AI 对话页面支持"生图模式"，用户输入提示词后，系统调用 DashScope Wan2.7-image API 生成图片，并在对话界面显示。
+
+**核心要求**：
+1. 异步生成：生图耗时长（10-30秒），不能阻塞 UI
+2. 持久化：刷新页面后图片依然显示
+3. 多模型支持：未来可接入 OpenAI DALL-E 等其他模型
+
+### 9.2 技术选型
+
+| 层次 | 选型 | 理由 |
+|------|------|------|
+| 生图 API | DashScope Wan2.7-image | 阿里云通义万相，价格低，质量高 |
+| 异步任务 | Background Worker（tsx） | 本地部署，无需 Redis/RabbitMQ |
+| 文件存储 | AiFileAsset 表（base64） | 无需对象存储，适合小规模 |
+| 前端轮询 | 不轮询，依赖 WebSocket（未来） | 当前版本：刷新页面查看结果 |
+
+### 9.3 开发阶段
+
+#### Phase 1：搭建 API + Worker（2小时）
+
+**关键文件**：
+- `app/api/ai/generate/image/route.ts`（POST API）
+- `worker/background/handlers/image.handler.ts`（处理逻辑）
+- `features/ai/llm/image-generator.ts`（统一生图接口）
+
+**核心逻辑**：
+1. 前端 POST `/api/ai/generate/image` 发起生图请求
+2. API 创建 `AiChatMessage`（`executionStatus: "QUEUED"`）
+3. API 创建 `AiGenerationJob`（`type: "IMAGE_GENERATE"`, `status: "pending"`）
+4. Background worker 轮询 job 表，claim 后调用 `handleImageGenerate`
+5. `handleImageGenerate` 调用 `image-generator.ts` → DashScope API
+6. 图片生成后存入 `AiFileAsset`，创建 `AiMessageAttachment`
+7. Message 状态更新为 `COMPLETED`
+
+**踩坑**：
+- Worker 启动时报 `typedData` 重复声明 → 删除冗余代码
+- Job dispatcher 未注册 `IMAGE_GENERATE` → 添加 case
+
+#### Phase 2：前端显示图片（30分钟）
+
+**关键文件**：
+- `features/ai/ui/AiMessageBubble.tsx`（渲染 attachments）
+- `app/api/ai/file-assets/[id]/route.ts`（图片 GET API）
+
+**核心逻辑**：
+1. `AiMessageBubble` 检查 message 的 `attachments` 字段
+2. 如果存在 `type: "IMAGE"`，调用 `GET /api/ai/file-assets/:id` 获取图片 base64
+3. 渲染 `<img src={data:image/png;base64,...} />`
+
+**踩坑**：
+- 图片 base64 存储超出字段长度 → Prisma schema 改为 `@db.Text`
+
+#### Phase 3：修复持久化 Bug（1小时）
+
+**问题**：生图成功后刷新页面，图片消失。
+
+**诊断**（按 diagnosing-bugs skill）：
+1. Phase 1 — 建立反馈循环：复现 bug（生图 → 刷新 → 图片消失）
+2. Phase 2 — 数据流追踪：发现 `GET /api/ai/conversations/:id` 返回的 message 缺少 `attachments` 字段
+3. Phase 3 — 假设验证：单条消息 API 有 attachments，批量 API 没有 → 确认是 Prisma select 漏掉字段
+4. Phase 4 — 修复：在 `conversation-store.ts` 和 `AiChatPanel.tsx` 补上 `attachments` 映射
+5. Phase 5 — 验证：`npm run build` 通过，手动测试通过
+
+**修复内容**：
+- 后端：`conversation-store.ts` Prisma select 添加 `attachments` 嵌套查询
+- 前端：`AiChatPanel.tsx` loadMessages 映射 `attachments` 到 Message 类型
+
+### 9.4 完整技术栈
+
+| 层次 | 技术 | 版本 | 用途 |
+|------|------|------|------|
+| 前端框架 | Next.js | 15 | SSR + Client Component |
+| 前端 UI | React | 19 | 组件化渲染 |
+| 状态管理 | React Hooks | - | useState, useEffect |
+| 后端 API | Next.js Route Handler | - | RESTful API |
+| 数据库 ORM | Prisma | - | PostgreSQL schema `pm` |
+| 异步任务 | Background Worker | - | tsx 轮询 job 表 |
+| 生图 API | DashScope Wan2.7-image | - | 阿里云通义万相 |
+| 文件存储 | AiFileAsset 表 | - | base64 + mimeType |
+
+### 9.5 上线 Checklist
+
+- [x] 后端 API 正常响应
+- [x] Background Worker 正常消费 job
+- [x] 图片生成成功后正确存入 DB
+- [x] 前端正常显示图片
+- [x] 刷新页面后图片持久化
+- [ ] 生图失败时前端显示错误提示
+- [ ] 支持多图生成（`n > 1`）
+- [ ] 支持取消生图（前端 Cancel 按钮）
+- [ ] 接入其他生图模型（OpenAI DALL-E, Stable Diffusion）
+- [ ] 优化图片存储（迁移到 OSS / CDN）
+
+---
+
+## 10. 相关链接
 
 - [生图 API 文档](../ARCHITECTURE.md#ai-image-generation)
 - [Background Worker 运维](../OPERATIONS.md#background-worker)

@@ -3,17 +3,32 @@
 import { useCallback, useEffect, useRef, useState, Suspense } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AiChatPanel } from "./AiChatPanel";
-import { AiConversationSidebar } from "./AiConversationSidebar";
+import { AiConversationSidebar, type ConversationCategory } from "./AiConversationSidebar";
+import { WorkModePanel } from "./work/WorkModePanel";
+import { WorkflowStatus } from "./work/WorkflowStatus";
+
+type ChatMode = "conversation" | "work";
 
 function AiChatPageInner() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
+  // Chat mode: default to work if URL says so, otherwise conversation
+  const [mode, setMode] = useState<ChatMode>(() => {
+    return searchParams.get("m") === "work" ? "work" : "conversation";
+  });
+
   // Active conversation ID: initialize from URL query string
   const [activeConversationId, setActiveConversationId] = useState<string | null>(() => {
     return searchParams.get("c") || null;
   });
+
+  // Category filter for conversation sidebar
+  const [conversationCategory, setConversationCategory] = useState<ConversationCategory>("ALL");
+
+  // Selected workflow run — controls the right-side detail panel
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
   // Tracks IDs of conversations that were just freshly created in this
   // session, so AiChatPanel knows to auto-greet them (AI proactively says
@@ -96,6 +111,11 @@ function AiChatPageInner() {
     setActiveConversationId(id);
   }, []);
 
+  // AiChatPanel 报 404 → 清掉失效 id，避免下次重渲染再次请求
+  const handleConversationMissing = useCallback((id: string) => {
+    setActiveConversationId((current) => (current === id ? null : current));
+  }, []);
+
   // "New chat" button handler: create an empty conversation, mark it for
   // greeting, and switch to it.
   const handleNewConversation = useCallback(async () => {
@@ -135,21 +155,153 @@ function AiChatPageInner() {
     });
   }, []);
 
+  const handleSwitchToWorkMode = useCallback(() => {
+    setMode("work");
+    setSelectedRunId(null);
+  }, []);
+
+  // 工作流结束跳转周报页：同一 runId 在浏览器会话内只跳一次
+  // 跨页面刷新也持久化：避免用户进入工作模式时所有已完成 run 都触发跳转
+  const NAVIGATED_RUN_IDS_KEY = "pm:navigatedRunIds";
+  const navigatedRunIdsRef = useRef<Set<string> | null>(null);
+  if (navigatedRunIdsRef.current === null) {
+    let initial = new Set<string>();
+    if (typeof window !== "undefined") {
+      try {
+        const raw = sessionStorage.getItem(NAVIGATED_RUN_IDS_KEY);
+        if (raw) initial = new Set(JSON.parse(raw) as string[]);
+      } catch {
+        // ignore
+      }
+    }
+    navigatedRunIdsRef.current = initial;
+  }
+  const recordNavigated = useCallback((runId: string) => {
+    const set = navigatedRunIdsRef.current;
+    if (!set) return;
+    set.add(runId);
+    try {
+      sessionStorage.setItem(
+        NAVIGATED_RUN_IDS_KEY,
+        JSON.stringify(Array.from(set)),
+      );
+    } catch {
+      // ignore quota / private mode
+    }
+  }, []);
+  const handleWorkflowApproved = useCallback(
+    (runId: string, reportId: string) => {
+      const set = navigatedRunIdsRef.current;
+      if (!set || set.has(runId)) return;
+      recordNavigated(runId);
+      router.push(`/reports/weekly-reports/${reportId}?from=/ai&mode=work`);
+    },
+    [router, recordNavigated],
+  );
+  const handleWorkflowDone = useCallback(
+    (runId: string, reportId: string) => {
+      const set = navigatedRunIdsRef.current;
+      if (!set || set.has(runId)) return;
+      recordNavigated(runId);
+      router.push(`/reports/weekly-reports/${reportId}?from=/ai&mode=work`);
+    },
+    [router, recordNavigated],
+  );
+
   return (
     <div className="flex h-[calc(100vh-8rem)] flex-row rounded-2xl border border-ink-200 bg-white shadow-soft">
-      <AiConversationSidebar
-        activeId={activeConversationId}
-        onSelect={handleSelect}
-        onNewConversation={handleNewConversation}
-      />
-      <main className="min-w-0 flex-1 overflow-hidden">
-        <AiChatPanel
-          variant="page"
-          conversationId={activeConversationId}
-          onConversationCreated={handleConversationCreated}
-          autoGreet={pendingGreetingIds.has(activeConversationId ?? "")}
-          onGreetingConsumed={handleGreetingConsumed}
+      {mode === "conversation" ? (
+        <AiConversationSidebar
+          activeId={activeConversationId}
+          onSelect={handleSelect}
+          onNewConversation={handleNewConversation}
+          onSwitchToWorkMode={handleSwitchToWorkMode}
+          category={conversationCategory}
+          onCategoryChange={setConversationCategory}
         />
+      ) : (
+        <WorkModePanel
+          onSelectRun={(runId, conversationId) => {
+            setSelectedRunId(runId);
+            // If workflow is linked to a conversation, switch to conversation mode
+            if (conversationId) {
+              setMode("conversation");
+              setActiveConversationId(conversationId);
+            }
+          }}
+        />
+      )}
+      <main className="min-w-0 flex-1 overflow-hidden">
+        {mode === "conversation" ? (
+          <AiChatPanel
+            variant="page"
+            conversationId={activeConversationId}
+            onConversationCreated={handleConversationCreated}
+            autoGreet={pendingGreetingIds.has(activeConversationId ?? "")}
+            onGreetingConsumed={handleGreetingConsumed}
+            onSwitchToWorkMode={handleSwitchToWorkMode}
+            onStartWorkflow={handleSwitchToWorkMode}
+            onConversationMissing={handleConversationMissing}
+          />
+        ) : selectedRunId ? (
+          <div
+            className="flex h-full flex-col p-6"
+            data-testid="workflow-detail-panel"
+          >
+            <button
+              onClick={() => {
+                setSelectedRunId(null);
+                setMode("work");
+              }}
+              className="mb-4 flex w-fit items-center gap-1.5 text-sm text-ink-500 transition-colors hover:text-ink-800"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+              返回列表
+            </button>
+            <div className="flex-1 overflow-y-auto">
+              <WorkflowStatus
+                runId={selectedRunId}
+                onApproved={(runId, reportId) => handleWorkflowApproved(runId, reportId)}
+                onDone={(runId, snap) => {
+                  if (snap?.reportId) {
+                    handleWorkflowDone(runId, snap.reportId);
+                  }
+                }}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="flex h-full items-center justify-center text-ink-500">
+            <div className="text-center">
+              <svg
+                className="mx-auto mb-4 h-12 w-12 text-ink-300"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
+                />
+              </svg>
+              <p className="text-sm font-medium">工作流面板</p>
+              <p className="mt-1 text-xs text-ink-400">在左侧发起和管理工作流</p>
+              <button
+                onClick={() => {
+                  setMode("conversation");
+                  setActiveConversationId(null);
+                }}
+                className="mt-4 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700"
+              >
+                发起对话
+              </button>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

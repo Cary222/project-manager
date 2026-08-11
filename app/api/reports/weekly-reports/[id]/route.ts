@@ -3,6 +3,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { getWeeklyReport, updateWeeklyReport, deleteWeeklyReport } from "@/features/weekly-reports/lib/weekly-report-store";
 import { enqueueSummarizeWeeklyReport } from "@/features/reports/weekly-reports/lib/background-jobs";
+import { prisma } from "@/shared/db/client";
 
 const updateSchema = z.object({
   weekStart: z.string().datetime().optional(),
@@ -80,6 +81,54 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   }
 
   const { id } = await params;
-  await deleteWeeklyReport(id, session.user.id);
+
+  // 获取周报信息（用于清理工作流关联）
+  const report = await prisma.weeklyReport.findFirst({
+    where: { id, userId: session.user.id },
+    select: { id: true, workflowRunId: true },
+  });
+  if (!report) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // 事务：删除周报 + 清理关联工作流的 metadata.reportId
+  await prisma.$transaction(async (tx) => {
+    // 1. 删除周报关联的项目记录
+    await tx.weeklyReportProject.deleteMany({ where: { reportId: id } });
+
+    // 2. 删除周报
+    await tx.weeklyReport.delete({ where: { id } });
+
+    // 3. 清理关联 WorkflowRun 的 metadata.reportId
+    // 使用 raw query 直接操作 JSON 字段，清除 reportId
+    if (report.workflowRunId) {
+      await tx.$executeRaw`
+        UPDATE "pm"."WorkflowRun"
+        SET metadata = metadata #- '{reportId}',
+            "updatedAt" = NOW()
+        WHERE id = ${report.workflowRunId}
+          AND metadata IS NOT NULL
+          AND metadata::text LIKE '%reportId%'
+      `.catch(() => {
+        // 忽略错误（某些情况下 metadata 可能为 null 或格式不对）
+      });
+    }
+
+    // 4. 查找并清理所有通过 workflowRunId 关联到该报告的工作流
+    await tx.workflowRun.updateMany({
+      where: {
+        metadata: {
+          path: ["reportId"],
+          equals: id,
+        } as never,
+      },
+      data: {
+        status: "cancelled",
+      },
+    }).catch(() => {
+      // 忽略 JSON path 查询的错误
+    });
+  });
+
   return new NextResponse(null, { status: 204 });
 }

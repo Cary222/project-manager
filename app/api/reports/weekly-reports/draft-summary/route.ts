@@ -10,6 +10,7 @@
  *   weekStart: ISOString,
  *   weekEnd: ISOString,
  *   formDraft: { title?, content?, projectIds?[] },
+ *   currentDraft?: WeeklyDraftSummary,  // 重新生成时传入
  *   force?: boolean  // 跳过限流
  * }
  *
@@ -23,8 +24,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { aggregateWeeklyContext } from "@/features/reports/weekly-reports/lib/context-aggregator";
-import { generateWeeklyDraftSummary } from "@/features/reports/weekly-reports/lib/draft-summary";
+import { generateWeeklyDraftSummary, reviseWeeklyDraftSummary } from "@/features/reports/weekly-reports/lib/draft-summary";
 import { createHash } from "node:crypto";
+
+const draftSummarySchema = z.object({
+  highlights: z.array(z.string()),
+  tasks: z.array(z.string()),
+  nextPlan: z.array(z.string()),
+  rawMarkdown: z.string(),
+  projectIds: z.array(z.string()),
+  projectNames: z.array(z.string()),
+  _error: z.string().optional(),
+});
 
 const requestSchema = z.object({
   weekStart: z.string().datetime(),
@@ -34,6 +45,7 @@ const requestSchema = z.object({
     content: z.string().optional(),
     projectIds: z.array(z.string()).optional(),
   }).optional(),
+  currentDraft: draftSummarySchema.optional(),
   force: z.boolean().optional(),
 });
 
@@ -74,7 +86,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Bad request" }, { status: 400 });
   }
 
-  const { weekStart, weekEnd, formDraft, force } = body;
+  const { weekStart, weekEnd, formDraft, currentDraft, force } = body;
   const userId = session.user.id;
 
   // Rate limit
@@ -98,14 +110,27 @@ export async function POST(request: NextRequest) {
       .digest("hex")
       .slice(0, 16);
 
-    // Generate draft summary
-    const draft = await generateWeeklyDraftSummary(
-      userId,
-      weekStartDate,
-      weekEndDate,
-      formDraft,
-      context
-    );
+    // If currentDraft exists, this is a "regenerate" request — revise based on existing draft
+    let draft;
+    if (currentDraft) {
+      const feedback = "请结合最新数据对原草稿进行二次优化，补充遗漏内容、修正过时信息，而不是完全推翻重写";
+      draft = await reviseWeeklyDraftSummary(
+        userId,
+        currentDraft,
+        feedback,
+        context,
+        formDraft
+      );
+    } else {
+      // First time generation
+      draft = await generateWeeklyDraftSummary(
+        userId,
+        weekStartDate,
+        weekEndDate,
+        formDraft,
+        context
+      );
+    }
 
     // If LLM call failed, surface the error message in the response so the
     // frontend can display it clearly instead of a misleading "暂无数据" state.

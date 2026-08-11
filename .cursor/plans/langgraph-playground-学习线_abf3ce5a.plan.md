@@ -3,7 +3,7 @@ name: LangGraph Playground 学习线（Copilot + Workflow 双架构）
 overview: 建立 playground/langgraph/ 独立实验区，学习 Chat Agent（stateless）和 Business Workflow（interrupt + MemorySaver + Scheduler）双层架构。
 todos:
   - id: playground-setup
-    content: "创建 playground/langgraph/ 目录结构"
+    content: 创建 playground/langgraph/ 目录结构
     status: completed
   - id: playground-basics
     content: "00-runtime-model.ts: Chat vs Workflow 运行时对比"

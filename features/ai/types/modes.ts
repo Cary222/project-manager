@@ -3,7 +3,7 @@
  * Core mode types for the AI system.
  */
 
-export type AiMode = "auto" | "search" | "chat" | "web";
+export type AiMode = "auto" | "search" | "chat" | "web" | "image";
 
 export interface AiModeOption {
   key: AiMode;
@@ -36,5 +36,11 @@ export const AI_MODE_OPTIONS: AiModeOption[] = [
     label: "联网搜索",
     icon: "globe",
     description: "联网搜索最新信息，结合知识库回答",
+  },
+  {
+    key: "image",
+    label: "生图",
+    icon: "image",
+    description: "AI 图片生成，输入描述即可创作图像",
   },
 ];

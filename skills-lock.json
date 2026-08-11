@@ -1,6 +1,24 @@
 {
   "version": 1,
   "skills": {
+    "ai-image-generation": {
+      "source": "prime-skills/runcomfy-agent-skills",
+      "sourceType": "github",
+      "skillPath": "ai-image-generation/SKILL.md",
+      "computedHash": "765f5ce859b1943e948d4f747b768389d7a9f0c563d4e93f2a3231bc1a617944"
+    },
+    "ai-video-generation": {
+      "source": "prime-skills/runcomfy-agent-skills",
+      "sourceType": "github",
+      "skillPath": "ai-video-generation/SKILL.md",
+      "computedHash": "e7a373961e0196280ecf1de3ddbfb10c5a74f3f5305cb2718284e6f06b1c7d65"
+    },
+    "code-review": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/code-review/SKILL.md",
+      "computedHash": "1d5e7242a98674635be79ab310cdda0e555d36a9903d2526ebf4263d0b7997ca"
+    },
     "context-engineering": {
       "source": "addyosmani/agent-skills",
       "sourceType": "github",
@@ -19,11 +37,29 @@
       "skillPath": "packages/skills-catalog/skills/(creation)/cursor-subagent-creator/SKILL.md",
       "computedHash": "658a170d783a694e638814bed35a738184795da2d0f0b36489cac94a478cd8d7"
     },
+    "diagnosing-bugs": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/diagnosing-bugs/SKILL.md",
+      "computedHash": "c86c725ad271ba57d7e9ffd86122b898438314ef9c20ec1dbe03f3e8f149c3b2"
+    },
     "dive-into-langgraph": {
       "source": "luochang212/dive-into-langgraph",
       "sourceType": "github",
       "skillPath": "skills/dive-into-langgraph/SKILL.md",
       "computedHash": "2e4a19dabd135f81394fc12f0e6d932084b17c222212396300e0938d4895c6f9"
+    },
+    "image-to-video": {
+      "source": "prime-skills/runcomfy-agent-skills",
+      "sourceType": "github",
+      "skillPath": "image-to-video/SKILL.md",
+      "computedHash": "0b513e14dfeb425a5288a79b551a7cf101a44b25763f7bd6b588d529f40d48c2"
+    },
+    "implement": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/implement/SKILL.md",
+      "computedHash": "2139cfedf24791adbc839aaab6019cff158af1e28bfead020ec6e0ce01b3e74d"
     },
     "langchain-architecture": {
       "source": "wshobson/agents",
@@ -72,6 +108,12 @@
       "sourceType": "github",
       "skillPath": "plugins/ork/skills/rag-retrieval/SKILL.md",
       "computedHash": "f3f9b009e0f563a3b74e4625b6c82e5abeb217f9c47b2b4acf63d18533d5e419"
+    },
+    "tdd": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/tdd/SKILL.md",
+      "computedHash": "614ac2e45fb0ec02f6ce422d26bd9aa4e33aa4867323f5a3a5c0c20b96f78ff4"
     }
   }
 }

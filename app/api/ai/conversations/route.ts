@@ -17,7 +17,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const limit = Number.parseInt(searchParams.get("limit") ?? "50", 10);
     const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 100) : 50;
-    const conversations = await listConversations(session.user.id, safeLimit);
+    const category = searchParams.get("category") as "CHAT" | "WORK" | null;
+    const conversations = await listConversations(session.user.id, safeLimit, category ?? undefined);
     const serialized = conversations.map((c) => ({
       ...c,
       createdAt: c.createdAt.toISOString(),

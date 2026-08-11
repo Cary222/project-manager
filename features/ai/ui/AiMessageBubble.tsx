@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AiResponsePanel } from "./AiResponsePanel";
+import { ImageLightbox } from "@/shared/ui/ImageLightbox";
 import type { TaskRecord } from "@/features/ai/types";
 import type { SourceReference } from "./AiSourcesList";
 
@@ -22,6 +23,14 @@ interface AiMessageBubbleProps {
   isStreaming?: boolean;
   thinkingSteps?: TaskRecord[];
   totalThinkingMs?: number;
+  /** 执行状态：QUEUED / PROCESSING / COMPLETED / FAILED */
+  executionStatus?: string;
+  /** 附件列表（生图模式使用） */
+  attachments?: Array<{
+    id: string;
+    type: string;
+    fileAssetId: string;
+  }>;
   onCandidateSelect?: (candidateId: string) => void;
 }
 
@@ -42,6 +51,8 @@ export function AiMessageBubble({
   isStreaming,
   thinkingSteps,
   totalThinkingMs,
+  executionStatus,
+  attachments,
   onCandidateSelect,
 }: AiMessageBubbleProps) {
   const isUserMessage = role === "user";
@@ -50,6 +61,9 @@ export function AiMessageBubble({
   // User messages always render the full content. Assistant messages start
   // empty and are revealed by the typewriter loop below.
   const [displayed, setDisplayed] = useState(isUserMessage ? content : "");
+
+  // Lightbox state for generated images
+  const [lightboxImage, setLightboxImage] = useState<{ src: string; name: string } | null>(null);
 
   // Keep latest content/streaming flags in refs so the typewriter loop reads
   // fresh values without restarting on every SSE chunk. This eliminates
@@ -185,6 +199,59 @@ export function AiMessageBubble({
         isStreaming={isStreaming}
         totalThinkingMs={totalThinkingMs}
       />
+
+      {/* 执行状态指示器（QUEUED / PROCESSING） */}
+      {(executionStatus === "QUEUED" || executionStatus === "PROCESSING") && (
+        <div className="mt-2 flex items-center gap-2 text-ink-secondary text-sm">
+          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-brand border-t-transparent" />
+          <span>正在生成图片...</span>
+        </div>
+      )}
+
+      {/* 生成完成后显示图片附件 */}
+      {attachments && attachments.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-3">
+          {attachments
+            .filter((a) => a.type === "IMAGE")
+            .map((att) => {
+              const imgSrc = `/api/ai/file-assets/${att.fileAssetId}`;
+              return (
+                <button
+                  key={att.id}
+                  type="button"
+                  onClick={() => setLightboxImage({ src: imgSrc, name: `ai-image-${att.id}` })}
+                  className="group relative max-w-sm overflow-hidden rounded-lg border border-ink-subtle shadow-sm transition-all hover:shadow-md hover:scale-[1.02]"
+                >
+                  <img
+                    src={imgSrc}
+                    alt="AI 生成图片"
+                    className="object-cover"
+                    loading="lazy"
+                  />
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                    <span className="opacity-0 group-hover:opacity-100 text-white text-sm bg-black/50 px-3 py-1 rounded-full transition-opacity">
+                      点击放大
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+        </div>
+      )}
+
+      {/* ImageLightbox for zoom & download */}
+      {lightboxImage && (
+        <ImageLightbox
+          image={lightboxImage}
+          onClose={() => setLightboxImage(null)}
+          onDownload={() => {
+            const a = document.createElement("a");
+            a.href = lightboxImage.src;
+            a.download = lightboxImage.name;
+            a.click();
+          }}
+        />
+      )}
     </div>
   );
 }

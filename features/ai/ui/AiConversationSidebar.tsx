@@ -6,6 +6,8 @@ import { useToast } from "@/shared/lib/use-toast";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+export type ConversationCategory = "CHAT" | "WORK" | "ALL";
+
 export interface ConversationSummary {
   id: string;
   title: string;
@@ -13,16 +15,18 @@ export interface ConversationSummary {
   lastMessageAt: string;
   summary?: string;
   tags?: string[];
+  category?: "CHAT" | "WORK";
 }
 
 interface AiConversationSidebarProps {
   activeId: string | null;
   onSelect: (id: string | null) => void;
   onClose?: () => void;
-  // Optional handler for the "新对话" button. When provided, the button
-  // creates a new conversation via the parent instead of just calling
-  // onSelect(null). The parent uses this to also trigger the AI greeting.
+  onSwitchToWorkMode?: () => void;
   onNewConversation?: () => void;
+  /** Current category filter; pass undefined to show all */
+  category?: ConversationCategory;
+  onCategoryChange?: (cat: ConversationCategory) => void;
 }
 
 // ─── Time formatting ──────────────────────────────────────────────────────────
@@ -95,7 +99,15 @@ function InlineConfirmDialog({
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
-export function AiConversationSidebar({ activeId, onSelect, onClose, onNewConversation }: AiConversationSidebarProps) {
+export function AiConversationSidebar({
+  activeId,
+  onSelect,
+  onClose,
+  onSwitchToWorkMode,
+  onNewConversation,
+  category = "ALL",
+  onCategoryChange,
+}: AiConversationSidebarProps) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -113,12 +125,13 @@ export function AiConversationSidebar({ activeId, onSelect, onClose, onNewConver
   // Delete confirm state
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Load conversations
+  // Load conversations with category filter
   const loadConversations = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/ai/conversations");
+      const url = category === "ALL" ? "/api/ai/conversations" : `/api/ai/conversations?category=${category}`;
+      const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setConversations(json.data ?? []);
@@ -130,7 +143,7 @@ export function AiConversationSidebar({ activeId, onSelect, onClose, onNewConver
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [category]);
 
   useEffect(() => { void (async () => { await loadConversations(); })(); }, [loadConversations]);
 
@@ -235,40 +248,68 @@ export function AiConversationSidebar({ activeId, onSelect, onClose, onNewConver
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
+  const categoryTabs: { value: ConversationCategory; label: string }[] = [
+    { value: "ALL", label: "全部" },
+    { value: "CHAT", label: "对话" },
+    { value: "WORK", label: "工作" },
+  ];
+
   return (
     <aside
       ref={menuRef}
       className="flex w-[260px] shrink-0 flex-col border-r border-ink-200 bg-white"
     >
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-ink-100 px-4 py-3.5">
-        <span className="text-sm font-semibold text-ink-700">对话历史</span>
-        <div className="flex items-center gap-1">
-          {onClose && (
+      <div className="border-b border-ink-100 px-4 pt-3.5 pb-2">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-sm font-semibold text-ink-700">对话历史</span>
+          <div className="flex items-center gap-1">
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg p-1.5 text-ink-400 transition hover:bg-ink-100 hover:text-ink-600"
+                title="关闭"
+              >
+                <IconX className="h-4 w-4" />
+              </button>
+            )}
             <button
               type="button"
-              onClick={onClose}
-              className="rounded-lg p-1.5 text-ink-400 transition hover:bg-ink-100 hover:text-ink-600"
-              title="关闭"
+              onClick={() => {
+                if (onNewConversation) {
+                  onNewConversation();
+                } else {
+                  onSelect(null);
+                }
+              }}
+              className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-brand-700"
             >
-              <IconX className="h-4 w-4" />
+              <IconPlus className="h-3.5 w-3.5" />
+              新对话
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              if (onNewConversation) {
-                onNewConversation();
-              } else {
-                onSelect(null);
-              }
-            }}
-            className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-brand-700"
-          >
-            <IconPlus className="h-3.5 w-3.5" />
-            新对话
-          </button>
+          </div>
         </div>
+
+        {/* Category tabs */}
+        {onCategoryChange && (
+          <div className="-mx-1 flex gap-1">
+            {categoryTabs.map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => onCategoryChange(tab.value)}
+                className={`flex-1 rounded-lg px-2 py-1 text-xs font-medium transition-colors ${
+                  category === tab.value
+                    ? "bg-brand-100 text-brand-700"
+                    : "text-ink-500 hover:bg-ink-50 hover:text-ink-700"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* List */}
@@ -333,8 +374,8 @@ export function AiConversationSidebar({ activeId, onSelect, onClose, onNewConver
                         isActive ? "text-brand-700" : "text-ink-700"
                       }`}
                     >
-                      {conv.title.length > 20
-                        ? conv.title.slice(0, 20) + "…"
+                      {conv.title.length > 24
+                        ? conv.title.slice(0, 24) + "…"
                         : conv.title}
                     </p>
                   )}
@@ -375,6 +416,11 @@ export function AiConversationSidebar({ activeId, onSelect, onClose, onNewConver
                     <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-ink-100 px-1 text-[9px] font-medium text-ink-500">
                       {conv.messageCount}
                     </span>
+                    {conv.category && conv.category === "WORK" && (
+                      <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-medium text-amber-700">
+                        工作
+                      </span>
+                    )}
                   </div>
                 </div>
 

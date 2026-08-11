@@ -7,10 +7,11 @@ import { WeeklyReportDetailClient } from "./WeeklyReportDetailClient";
 
 export const dynamic = "force-dynamic";
 
-type Props = { params: Promise<{ id: string }> };
+type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ from?: string; mode?: string }> };
 
-export default async function WeeklyReportDetailPage({ params }: Props) {
+export default async function WeeklyReportDetailPage({ params, searchParams }: Props) {
   const { id } = await params;
+  const { from, mode } = await searchParams;
   const session = await auth();
 
   if (!session?.user?.id) {
@@ -32,8 +33,19 @@ export default async function WeeklyReportDetailPage({ params }: Props) {
   }
 
   // 如果是查看他人周报，返回到该用户的个人主页
-  const backHref = isOwnReport ? "/reports/weekly-reports" : `/team/${report.userId}`;
-  const backLabel = isOwnReport ? "返回周报列表" : "返回个人主页";
+  // 如果有 from 参数（如 from=/ai），优先使用作为返回地址
+  let backHref: string;
+  let backLabel: string;
+  if (from) {
+    backHref = from;
+    backLabel = "返回 AI 助手";
+  } else if (isOwnReport) {
+    backHref = "/reports/weekly-reports";
+    backLabel = "返回周报列表";
+  } else {
+    backHref = `/team/${report.userId}`;
+    backLabel = "返回个人主页";
+  }
 
   return (
     <AppShell

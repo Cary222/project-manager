@@ -8,8 +8,8 @@ description: >-
 
 > **项目启动**：2026-06-04（基于 GitHub 代码实际评估）
 > **仓库**：https://github.com/Cary222/project-manager
-> **最后更新**：2026-07-29（LangGraph 路由重构 + 意图检测优化 + 人员活动归因）
-> **当前阶段**：功能迭代中（LangGraph 状态机 + HIL 消歧）
+> **最后更新**：2026-07-31（AI 模型配置层完整上线 + 月度报销功能增强 + 图片 OCR）
+> **当前阶段**：功能迭代中（AI 模型配置层 + LangGraph 状态机）
 
 ---
 
@@ -64,8 +64,14 @@ description: >-
   │     │     ├── 意图检测增强（人员消歧、多轮对话、代词指代）
   │     │     ├── HIL 人工介入节点（humanConfirmation 节点）
   │     │     ├── 路由规则修正（auto 模式 DB 快查优先）
-  │     │     └── 来源引用组件化（AiSourcesList 独立渲染）
-  ├── 项目详情文档 Tab（#10081，附件上传 + DocumentPreviewModal，2026-06-24）
+    │     │     └── 来源引用组件化（AiSourcesList 独立渲染）
+    ├── AI 模型配置层（#10199，2026-07-31）
+    │     ├── Model Registry 动态模型发现（providers/registry.ts）
+    │     ├── 三级凭证降级链路（SYSTEM → USER → ENV）
+    │     ├── 用户自定义 Provider 接入（UserApiKey 表 + 加密存储）
+    │     ├── Model Routing 任务类型路由（selectModel + modelSelect 节点）
+    │     └── DeepSeek 404 修复 + preferredAiModel 功能
+    ├── 项目详情文档 Tab（#10081，附件上传 + DocumentPreviewModal，2026-06-24）
   ├── 管理端职能管理增强（#10080，2026-06-23）
   ├── 周报系统（PR1，2026-06-29）
   ├── 周报报表真实化（PR2，2026-06-29）
@@ -85,12 +91,11 @@ description: >-
   └── 周报率图表 Bug 修复（#10166，2026-07-16）
         └── 修复累积算法，统一本周/本月视图数据
 
-当前阶段 🔄  功能迭代中（2026-07-29）
-            新增：LangGraph StateGraph 状态机编排
-            新增：HIL 人工介入节点（humanConfirmation）
-            新增：意图检测增强（人员消歧、多轮对话、代词指代）
-            新增：路由规则修正（auto 模式 DB 快查优先）
-            新增：来源引用组件化（AiSourcesList）
+当前阶段 🔄  功能迭代中（2026-07-31）
+            新增：AI 模型配置层（Model Registry + 三级凭证 + 用户自定义 Provider）
+            新增：Model Routing 任务类型路由（modelSelect 节点）
+            新增：月度报销多用户分摊功能（#10196）
+            新增：图片 OCR + .doc/.wps 文本提取
 ```
 
 ---
@@ -141,7 +146,7 @@ features/
 
 ---
 
-## AI 模块结构（2026-07-29 LangGraph 重构后）
+## AI 模块结构（2026-07-31 更新）
 
 ```
 features/ai/
@@ -150,55 +155,44 @@ features/ai/
 │   ├── state.ts             # AgentState Annotation 定义
 │   ├── types.ts             # PendingHumanAction / DisambiguationCandidate
 │   ├── edges/
-│   │   └── routing.ts       # 7 个路由函数（routeAfterDetectIntent 等）
+│   │   └── routing.ts       # 8 个路由函数（routeAfterDetectIntent 等）
 │   └── nodes/
 │       ├── detect-intent.ts       # 意图检测 + 实体提取
+│       ├── model-select.ts       # 模型选择节点（2026-07-31 新增）
 │       ├── search-knowledge.ts    # RAG 向量检索
-│       ├── search-structured.ts    # DB 结构化查询
+│       ├── search-structured.ts   # DB 结构化查询
 │       ├── decision.ts            # 消歧决策节点
 │       ├── human-confirmation.ts  # HIL 确认节点
-│       ├── web-search.ts          # 联网搜索
-│       └── generate-response.ts    # LLM 生成回答
+│       ├── web-search.ts         # 联网搜索
+│       └── generate-response.ts   # LLM 生成回答
+├── llm/                     # LLM 层（2026-07-31 重构）
+│   ├── providers/           # Model Registry
+│   │   ├── registry.ts          # 动态模型发现
+│   │   ├── types.ts            # ModelCatalogEntry / ApiFormat
+│   │   ├── init.ts             # 初始化系统 Provider
+│   │   └── user-providers.ts   # 用户 Provider
+│   ├── credentials/        # 凭证层
+│   │   ├── api-key-store.ts    # 三级降级链路（SYSTEM → USER → ENV）
+│   │   └── encryption.ts        # API Key 加密
+│   ├── model-routing.ts     # selectModel 任务类型路由
+│   ├── model-runtime-config.ts  # 运行时配置
+│   ├── proxy.ts            # Agnes 代理
+│   ├── agnes-provider.ts   # Agnes LLM 提供者
+│   └── summarizer.ts       # 对话摘要
 ├── core/
-│   ├── queries/             # 查询解析器
-│   │   ├── query-parser.ts       # 解析查询类型
-│   │   ├── query-ticket.ts       # 工单查询
-│   │   ├── query-user.ts         # 用户查询
-│   │   ├── query-project.ts      # 项目查询
-│   │   ├── query-weekly-report.ts # 周报查询
-│   │   ├── query-commit.ts       # 提交查询
-│   │   ├── query-note.ts         # 笔记查询
-│   │   ├── query-profile.ts      # 画像查询
-│   │   └── query-ambiguous.ts    # 歧义处理
-│   ├── resolvers/
-│   │   └── query-parser.ts       # 查询解析核心
-│   │   └── user-resolver.ts     # 用户解析
-│   ├── formatters.ts         # 格式化工具
+│   ├── queries/            # 查询解析器
+│   ├── resolvers/         # 查询解析核心
+│   ├── formatters.ts      # 格式化工具
 │   └── search-structured-core.ts # 结构化搜索核心
 ├── search/
-│   ├── detector.ts           # 意图检测（shouldUseRag）
-│   ├── rag.ts                # RAG 检索
-│   └── speculation-cache.ts   # 预缓存
-├── tools/
-│   ├── index.ts              # 工具配置
-│   ├── web-search.ts         # 联网搜索工具
-│   ├── search-knowledge.ts   # 知识库搜索工具
-│   └── search-structured.ts  # 结构化搜索工具
-├── jobs/
-│   ├── background-jobs.ts    # 后台任务队列
-│   └── profile-cleanup.ts    # 画像清理
-├── llm/
-│   ├── agnes-provider.ts     # Agnes LLM 提供者
-│   └── summarizer.ts         # 对话摘要
-├── types/
-│   ├── index.ts              # 类型导出
-│   ├── modes.ts              # AgentMode 类型
-│   ├── structured.ts          # 结构化数据类型
-│   └── thinking.ts           # Thinking 类型
-└── ui/                       # UI 组件
-    ├── AiSourcesList.tsx     # 来源引用组件
-    ├── AiMessageBubble.tsx   # 消息气泡
-    └── AiChatPanel.tsx       # 聊天面板
+│   ├── detector.ts        # 意图检测
+│   ├── rag.ts            # RAG 检索
+│   └── speculation-cache.ts  # 预缓存
+├── tools/                 # 工具集
+├── jobs/                 # 后台任务
+├── store/                # 会话存储
+├── types/                # 类型定义
+└── ui/                   # UI 组件
 ```
 
 ---
@@ -260,6 +254,9 @@ features/ai/
 | 2026-07-29 | LangGraph 路由重构             | StateGraph 状态机 + 意图检测增强 + HIL 消歧（#10195）|
 | 2026-07-29 | 人员活动归因修复               | 修复 searchStructured 的 TicketCommit 列表加载 |
 | 2026-07-29 | 文件处理多 Bug 修复           | 多 chunk OOM + 纯文本解码 + 项目文档 RAG 映射 |
+| 2026-07-31 | AI 模型配置层完整上线           | Model Registry + 三级凭证 + 用户自定义 Provider（#10199）|
+| 2026-07-31 | 月度报销多用户分摊             | 月度报销看板重构 + 查看他人详情 + ROOT 编辑（#10196）|
+| 2026-07-31 | 图片 OCR + .doc/.wps 提取      | embedding 文档处理增强（#10197）|
 
 ---
 

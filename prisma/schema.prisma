@@ -11,7 +11,7 @@ datasource db {
 model User {
   id                     String                  @id @default(cuid())
   name                   String?
-  searchName             String?                // 所有变体空格分隔，冗余存储避免运行时计算
+  searchName             String? // 所有变体空格分隔，冗余存储避免运行时计算
   email                  String                  @unique
   emailVerified          DateTime?
   image                  String?
@@ -21,7 +21,7 @@ model User {
   updatedAt              DateTime                @updatedAt
   bannedAt               DateTime?
   bio                    String?
-  preferredAiModel       String?  // 用户偏好的 AI 模型，null 表示使用系统默认（Agnes）
+  preferredAiModel       String? // 用户偏好的 AI 模型，null 表示使用系统默认（Agnes）
   accounts               Account[]
   aiConversations        AiConversation[]
   aiProfile              AiUserProfile?
@@ -43,6 +43,7 @@ model User {
   responsibilities       UserResponsibility[]
   uploadedFiles          FileAsset[]
   weeklyReports          WeeklyReport[]
+  workflowRuns           WorkflowRun[]
   monthlyExpenses        MonthlyExpense[]
   expenseShares          ExpenseShare[]
   userApiKeys            UserApiKey[]
@@ -156,17 +157,17 @@ model SearchDocument {
 }
 
 model IndexJob {
-  id           String              @id @default(cuid())
+  id           String             @id @default(cuid())
   noteId       String?
   targetType   IndexJobTargetType
   targetId     String
-  status       IndexJobStatus      @default(PENDING)
-  attempt      Int                 @default(0)
-  maxAttempts  Int                 @default(5)
+  status       IndexJobStatus     @default(PENDING)
+  attempt      Int                @default(0)
+  maxAttempts  Int                @default(5)
   error        String?
   errorSources Json?
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
   startedAt    DateTime?
 
   @@index([targetType, targetId])
@@ -175,18 +176,18 @@ model IndexJob {
 }
 
 model PkmNote {
-  id          String     @id @default(cuid())
+  id          String   @id @default(cuid())
   userId      String
   projectId   String?
   title       String
   content     String
-  tags        String[]   @default([])
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  tags        String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
   attachments Json?
-  isPublic    Boolean    @default(false)
-  project     Project?   @relation(fields: [projectId], references: [id])
-  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isPublic    Boolean  @default(false)
+  project     Project? @relation(fields: [projectId], references: [id])
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, updatedAt(sort: Desc)])
   @@index([userId, isPublic, updatedAt(sort: Desc)])
@@ -275,18 +276,18 @@ model Ticket {
 }
 
 model TicketComment {
-  id        String   @id @default(cuid())
-  ticketId  String
-  authorId  String
-  content   String
+  id               String   @id @default(cuid())
+  ticketId         String
+  authorId         String
+  content          String
   /// 用户在评论中用 @ 提到的人(userId 列表)。用于:1)发提及通知;2)防 XSS 渲染只允许在这里列出的用户
   mentionedUserIds String[] @default([])
   /// 评论附件（PR10 FileAttachment 格式），Json 类型
-  attachments    Json     @default("[]")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  author    User     @relation("TicketCommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  attachments      Json     @default("[]")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  ticket           Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author           User     @relation("TicketCommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
 
   @@index([ticketId, createdAt(sort: Desc)])
   @@schema("pm")
@@ -486,56 +487,63 @@ model ActivityLog {
 }
 
 model AiConversation {
-  id            String          @id @default(cuid())
+  id            String                      @id @default(cuid())
   userId        String
   title         String
   summary       Json?
-  messageCount  Int             @default(0)
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  lastMessageAt DateTime        @default(now())
-  tags          String[]        @default([])
+  messageCount  Int                         @default(0)
+  /// 对话分类：CHAT=普通对话，WORK=工作流触发对话
+  category      String                      @default("CHAT")
+  createdAt     DateTime                    @default(now())
+  updatedAt     DateTime                    @updatedAt
+  lastMessageAt DateTime                    @default(now())
+  tags          String[]                    @default([])
   messages      AiChatMessage[]
   runtimeState  AiConversationRuntimeState?
-  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workflows     WorkflowRun[]
+  user          User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId, lastMessageAt(sort: Desc)])
+  @@index([userId, category, lastMessageAt(sort: Desc)])
   @@schema("pm")
 }
 
 model AiChatMessage {
-  id             String         @id @default(cuid())
-  conversationId String
-  role           String
-  content        String
-  sources        Json?
-  metadata       Json?
-  createdAt      DateTime       @default(now())
-  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  id              String                   @id @default(cuid())
+  conversationId  String
+  role            String
+  content         String
+  sources         Json?
+  metadata        Json?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  executionStatus AiMessageExecutionStatus @default(COMPLETED)
+  errorMessage    String?
+  conversation    AiConversation           @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  attachments     AiMessageAttachment[]
 
   @@index([conversationId, createdAt])
   @@schema("pm")
 }
 
 model AiUserProfile {
-  userId             String   @id
+  userId             String    @id
   profile            Json
-  sourceSummaryCount Int      @default(0)
-  version            Int      @default(1)  // 版本号，每次更新递增
-  weekStart          DateTime?           // 当前版本对应的周开始日期
-  updatedAt          DateTime @updatedAt
-  createdAt          DateTime @default(now())
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceSummaryCount Int       @default(0)
+  version            Int       @default(1) // 版本号，每次更新递增
+  weekStart          DateTime? // 当前版本对应的周开始日期
+  updatedAt          DateTime  @updatedAt
+  createdAt          DateTime  @default(now())
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@schema("pm")
 }
 
 model AiConversationRuntimeState {
-  conversationId   String            @id
+  conversationId  String         @id
   humanState      Json?
   semanticContext Json?
-  updatedAt       DateTime          @updatedAt
-  conversation    AiConversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  updatedAt       DateTime       @updatedAt
+  conversation    AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@schema("pm")
 }
@@ -551,6 +559,8 @@ model WeeklyReport {
   aiSummary        String?
   aiSummaryAt      DateTime?
   aiSummaryPartial Boolean               @default(false)
+  /// Workflow RUN id that produced this report (nullable, no FK — soft link)
+  workflowRunId    String?
   createdAt        DateTime              @default(now())
   updatedAt        DateTime              @updatedAt
   user             User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -558,6 +568,35 @@ model WeeklyReport {
 
   @@unique([userId, weekStart])
   @@index([userId, weekStart(sort: Desc)])
+  @@index([workflowRunId])
+  @@schema("pm")
+}
+
+/// Unified table for SCHEDULE + RUN (kind discriminator).
+/// SCHEDULE rows hold cron + nextTriggerAt for restart compensation;
+/// RUN rows hold threadId + status for a single workflow execution.
+model WorkflowRun {
+  id               String          @id @default(cuid())
+  kind             String // SCHEDULE | RUN
+  userId           String
+  workflowType     String // e.g. "weekly_report"
+  threadId         String? // RUN only — LangGraph thread_id
+  status           String // pending | running | waiting_review | done | cancelled | error | paused
+  cron             String? // SCHEDULE optional cron hint string
+  nextTriggerAt    DateTime? // SCHEDULE — next fire time (restart compensation)
+  metadata         Json?
+  history          Json? // append-only { timestamp, event, payload }[]
+  parentScheduleId String? // RUN → SCHEDULE id
+  conversationId   String? // 关联的对话 ID（可选，软链接）
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation     AiConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, kind])
+  @@index([nextTriggerAt])
+  @@index([threadId])
+  @@index([conversationId])
   @@schema("pm")
 }
 
@@ -574,19 +613,19 @@ model WeeklyReportProject {
 }
 
 model MonthlyExpense {
-  id           String        @id @default(cuid())
-  userId       String        // 创建者
-  month        String        // "YYYY-MM" 格式，如 "2026-07"
-  expenseType  ExpenseType
-  customType   String?       // 当 expenseType = OTHER 时使用
-  amount       Float         // 总金额
-  description  String
-  attachments  Json?        // FileAttachment[]
-  status       ExpenseStatus @default(ACTIVE)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  shares       ExpenseShare[]
+  id          String         @id @default(cuid())
+  userId      String // 创建者
+  month       String // "YYYY-MM" 格式，如 "2026-07"
+  expenseType ExpenseType
+  customType  String? // 当 expenseType = OTHER 时使用
+  amount      Float // 总金额
+  description String
+  attachments Json? // FileAttachment[]
+  status      ExpenseStatus  @default(ACTIVE)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shares      ExpenseShare[]
 
   @@index([userId, month(sort: Desc)])
   @@index([month(sort: Desc)])
@@ -595,13 +634,13 @@ model MonthlyExpense {
 
 /// 报销分摊记录
 model ExpenseShare {
-  id          String        @id @default(cuid())
+  id          String         @id @default(cuid())
   expenseId   String
   userId      String
-  shareAmount Float         // 该用户分摊的金额
-  createdAt   DateTime      @default(now())
+  shareAmount Float // 该用户分摊的金额
+  createdAt   DateTime       @default(now())
   expense     MonthlyExpense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
-  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([expenseId, userId])
   @@index([userId, createdAt(sort: Desc)])
@@ -611,7 +650,7 @@ model ExpenseShare {
 /// 用户上传的图片/文件二进制，存 DB 不落本地文件系统。
 /// URL 由 `/api/upload/[id]` 代理返回；这样多实例部署不需要共享磁盘。
 model FileAsset {
-  id           String         @id @default(cuid())
+  id           String          @id @default(cuid())
   uploaderId   String
   originalName String
   mimeType     String
@@ -620,8 +659,8 @@ model FileAsset {
   /// sha256 hex (64 字符)，服务端权威计算，客户端 hash 仅作 hint
   hash         String?
   status       FileAssetStatus @default(ACTIVE)
-  createdAt    DateTime       @default(now())
-  uploader     User           @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  createdAt    DateTime        @default(now())
+  uploader     User            @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
   /// Document 是 FileAsset 的派生（1:1），FileAsset 删除时级联删除 Document
   document     Document?
   /// FileReference 反向引用：FileAsset 被哪些业务实体引用
@@ -644,7 +683,7 @@ model FileReference {
   sourceId    String
   /// 软删除（PR10 Schema 先预留字段，hook 留 PR11 实现）
   deletedAt   DateTime?
-  createdAt   DateTime               @default(now())
+  createdAt   DateTime                @default(now())
 
   fileAsset FileAsset @relation(fields: [fileAssetId], references: [id], onDelete: Cascade)
 
@@ -657,22 +696,22 @@ model FileReference {
 
 /// 文档处理层：FileAsset 的派生（1:1），存文本提取/chunk/embeddings 结果
 model Document {
-  id            String         @id @default(cuid())
+  id              String           @id @default(cuid())
   /// 关联 FileAsset（1:1）。FileAsset 删除时级联删除 Document。
-  fileAssetId   String         @unique
-  fileAsset     FileAsset      @relation(fields: [fileAssetId], references: [id], onDelete: Cascade)
-  status        DocumentStatus @default(PENDING)
+  fileAssetId     String           @unique
+  fileAsset       FileAsset        @relation(fields: [fileAssetId], references: [id], onDelete: Cascade)
+  status          DocumentStatus   @default(PENDING)
   /// 版本号，PR11 实现重处理时递增
-  version       Int            @default(1)
+  version         Int              @default(1)
   /// chunk 缓存（量小保留，PR11 可剥）
-  extractedText String?
-  pageCount     Int?
+  extractedText   String?
+  pageCount       Int?
   /// OCR / PDF 解析的扩展信息
-  metadata      Json?
+  metadata        Json?
   /// 失败时的错误信息
-  error         Json?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  error           Json?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
   /// 反向 relation：SearchDocument.documentId → Document
   searchDocuments SearchDocument[]
 
@@ -795,11 +834,11 @@ enum FileReferenceSourceType {
 }
 
 enum ExpenseType {
-  TRANSPORT  // 交通
-  MEAL       // 餐饮
-  TRAVEL     // 差旅
-  OFFICE     // 办公
-  OTHER      // 其他
+  TRANSPORT // 交通
+  MEAL // 餐饮
+  TRAVEL // 差旅
+  OFFICE // 办公
+  OTHER // 其他
 
   @@schema("pm")
 }
@@ -815,28 +854,159 @@ enum ExpenseStatus {
 /// SYSTEM ownerType 的记录 userId 为空，仅用于平台级凭证（如 Agnes）
 model UserApiKey {
   id           String    @id @default(cuid())
-  userId       String?   // 普通用户为真实 userId；SYSTEM 凭证为空
+  userId       String? // 普通用户为真实 userId；SYSTEM 凭证为空
   ownerType    String    @default("USER") // "SYSTEM" | "USER"
   transport    String    @default("direct") // "proxy" | "direct"
   apiFormat    String    @default("openai-chat") // "openai-chat" | "openai-responses" | "anthropic"
-  provider     String    // provider id，如 "deepseek", "agnes", "anthropic"
-  name         String    // 用户给这个 key 的命名
-  baseURL      String?   // 可选的 Base URL，不填则用 provider 默认值
-  encryptedKey String    // AES-256-GCM 加密后的 API Key（hex 编码）
-  iv           String    // 初始化向量（hex 编码，12 字节）
-  authTag      String    // 认证标签（hex 编码，16 字节）
-  keyLast4     String    // 明文后 4 位，用于 UI 显示（如 "sk-...abcd"）
-  keyHash      String    // SHA-256 hash，用于去重校验（hex 编码）
+  provider     String // provider id，如 "deepseek", "agnes", "anthropic"
+  name         String // 用户给这个 key 的命名
+  baseURL      String? // 可选的 Base URL，不填则用 provider 默认值
+  encryptedKey String // AES-256-GCM 加密后的 API Key（hex 编码）
+  iv           String // 初始化向量（hex 编码，12 字节）
+  authTag      String // 认证标签（hex 编码，16 字节）
+  keyLast4     String // 明文后 4 位，用于 UI 显示（如 "sk-...abcd"）
+  keyHash      String // SHA-256 hash，用于去重校验（hex 编码）
   lastUsedAt   DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   deletedAt    DateTime? // 软删除
 
   // SYSTEM 凭证没有对应的 User 记录，设为可选关系
-  user         User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, provider])
   @@index([keyHash])
   @@index([ownerType])
+  @@schema("pm")
+}
+
+// ========== AI 生图异步任务系统 ==========
+
+enum AiMessageExecutionStatus {
+  COMPLETED
+  QUEUED
+  PROCESSING
+  FAILED
+  CANCELLED
+
+  @@schema("pm")
+}
+
+enum BackgroundJobType {
+  IMAGE_GENERATE
+  DOCUMENT_INDEX
+  TEXT_SUMMARY
+
+  @@schema("pm")
+}
+
+enum BackgroundJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+
+  @@schema("pm")
+}
+
+enum JobOutputStatus {
+  PENDING
+  GENERATING
+  COMPLETED
+  FAILED
+
+  @@schema("pm")
+}
+
+enum AiAttachmentType {
+  IMAGE
+  FILE
+
+  @@schema("pm")
+}
+
+enum AiFileStorageType {
+  DATABASE
+  OBJECT_STORAGE
+
+  @@schema("pm")
+}
+
+model BackgroundJob {
+  id             String              @id @default(cuid())
+  type           BackgroundJobType
+  status         BackgroundJobStatus @default(PENDING)
+  payload        Json
+  result         Json?
+  errorMessage   String?
+  correlationId  String?
+  traceId        String?
+  parentJobId    String?
+  priority       Int                 @default(10)
+  attempt        Int                 @default(0)
+  nextRetryAt    DateTime?
+  lockedBy       String?
+  leaseExpiresAt DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([status, priority, createdAt])
+  @@index([correlationId])
+  @@index([traceId])
+  @@schema("pm")
+}
+
+model JobOutput {
+  id           String          @id @default(cuid())
+  jobId        String
+  sequence     Int
+  status       JobOutputStatus @default(PENDING)
+  fileAssetId  String?
+  errorMessage String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  fileAsset AiFileAsset? @relation(fields: [fileAssetId], references: [id], onDelete: SetNull)
+
+  @@unique([jobId, sequence])
+  @@index([jobId])
+  @@map("JobOutput")
+  @@schema("pm")
+}
+
+model AiMessageAttachment {
+  id          String           @id @default(cuid())
+  messageId   String
+  fileAssetId String
+  jobOutputId String?          @unique
+  type        AiAttachmentType
+  createdAt   DateTime         @default(now())
+
+  message   AiChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  fileAsset AiFileAsset   @relation(fields: [fileAssetId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([fileAssetId])
+  @@map("AiMessageAttachment")
+  @@schema("pm")
+}
+
+model AiFileAsset {
+  id          String            @id @default(cuid())
+  storageType AiFileStorageType @default(DATABASE)
+  storageKey  String?
+  checksum    String?
+  size        Int?
+  mimeType    String?
+  bytes       Bytes?
+  createdAt   DateTime          @default(now())
+
+  attachments AiMessageAttachment[]
+  outputs     JobOutput[]
+
+  @@index([storageKey])
+  @@index([checksum])
+  @@map("AiFileAsset")
   @@schema("pm")
 }

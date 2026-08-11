@@ -64,9 +64,9 @@ function migratePendingConfirmation(
 }
 
 // LangGraph StateGraph entry point (lazy-loaded)
-import { agentGraph, type AgentState } from "@/features/ai/graph/agent";
-import { injectSearchKnowledgeContext } from "@/features/ai/graph/nodes/search-knowledge";
-import { injectSearchStructuredContext } from "@/features/ai/graph/nodes/search-structured";
+import { agentGraph, type AgentState } from "@/features/ai/agents/conversation/agent";
+import { injectSearchKnowledgeContext } from "@/features/ai/agents/conversation/nodes/search-knowledge";
+import { injectSearchStructuredContext } from "@/features/ai/agents/conversation/nodes/search-structured";
 
 type Message = {
   id: string;
@@ -841,6 +841,51 @@ async function handleLangGraphRequest(
                     mode: resolvedMode,
                   };
                 }
+              } else if (
+                pendingHA &&
+                typeof pendingHA === "object" &&
+                (pendingHA as Record<string, unknown>).type === "approve"
+              ) {
+                // Workflow match: "帮我生成周报" / "提交周报" etc.
+                const wfa = pendingHA as {
+                  type: "approve";
+                  entityType: string;
+                  reason?: string;
+                  query?: string;
+                };
+                if (!alreadySentPendingConfirmation) {
+                  alreadySentPendingConfirmation = true;
+                  console.log(`[AI-LangGraph] pending_human_action: workflow approval reason="${wfa.reason ?? ""}"`);
+                  enqueueData({
+                    type: "pending_confirmation",
+                    entityType: wfa.entityType,
+                    reason: wfa.reason,
+                    query: wfa.query ?? "",
+                  });
+                  // Extract workflow type from reason (e.g. "检测到工作流「周报生成」，是否启动？" → "weekly_report")
+                  const reason = wfa.reason ?? "";
+                  const nameMatch = reason.match(/「([^」]+)」/);
+                  const workflowName = nameMatch ? nameMatch[1] : wfa.entityType;
+                  const workflowType = wfa.entityType === "workflow"
+                    ? (nodeOutput.workflowMatch as { type?: string } | undefined)?.type ?? "unknown"
+                    : wfa.entityType;
+                  enqueueData({
+                    type: "workflow_match",
+                    workflowType,
+                    workflowName,
+                    description: reason.replace(/「[^」]+」/, "").replace(/。是否启动\？/, "").trim() || "即将启动工作流",
+                  });
+                  capturedPendingHumanAction = {
+                    pendingHumanAction: {
+                      type: "approve",
+                      entityType: wfa.entityType,
+                      reason: wfa.reason,
+                      query: wfa.query ?? "",
+                    },
+                    lastAssistantMessage: String(nodeOutput.response ?? ""),
+                    mode: resolvedMode,
+                  } as unknown as PendingHumanActionState;
+                }
               }
 
               if (nodeName === "humanConfirmation") {
@@ -1029,6 +1074,26 @@ async function handleLangGraphRequest(
           allSources.length > 0 ? allSources : undefined,
           thinkingSteps.length > 0 ? { thinkingSteps, totalThinkingMs } : undefined
         );
+
+        // ── Workflow Match: Send dedicated event for frontend optimistic switch ────────
+        // Check if response contains workflow match signal
+        if (lastResponse.startsWith("[WORKFLOW_MATCH:")) {
+          const match = lastResponse.match(/\[WORKFLOW_MATCH:([^\]]+)\]:(.+)/);
+          if (match) {
+            const [, workflowType, rest] = match;
+            const nameMatch = rest.match(/「([^」]+)」/);
+            const workflowName = nameMatch ? nameMatch[1] : workflowType;
+            const description = rest.replace(/「[^」]+」/, "").replace(/。是否现在启动\？/, "").trim();
+
+            console.log(`[AI-LangGraph] workflow match detected: ${workflowType}`);
+            enqueueData({
+              type: "workflow_match",
+              workflowType,
+              workflowName,
+              description: description || "即将启动工作流",
+            });
+          }
+        }
 
         // Save conversation context (lastMentionedUser) for pronoun resolution in next round
         setConversationContext(conversationId, {
