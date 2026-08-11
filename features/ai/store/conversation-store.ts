@@ -110,10 +110,14 @@ export async function getMessages(
 
 export async function listConversations(
   userId: string,
-  limit: number = 50
+  limit: number = 50,
+  category?: "CHAT" | "WORK"
 ): Promise<ConversationListItem[]> {
   return prisma.aiConversation.findMany({
-    where: { userId },
+    where: {
+      userId,
+      ...(category ? { category } : {}),
+    },
     orderBy: { lastMessageAt: "desc" },
     take: limit,
   });
@@ -215,7 +219,23 @@ export async function getConversationsWithMessages(
     where: { conversationId },
     orderBy: { createdAt: "asc" },
     take: 50,
-    select: { id: true, conversationId: true, role: true, content: true, sources: true, metadata: true, createdAt: true },
+    select: {
+      id: true,
+      conversationId: true,
+      role: true,
+      content: true,
+      sources: true,
+      metadata: true,
+      createdAt: true,
+      executionStatus: true,
+      attachments: {
+        select: {
+          id: true,
+          type: true,
+          fileAssetId: true,
+        },
+      },
+    },
   });
 
   return {

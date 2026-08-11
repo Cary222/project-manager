@@ -15,6 +15,7 @@ import {
 } from "@/features/ai/types";
 import { shouldUseRag, shouldUseWebSearch } from "@/features/ai/search/detector";
 import { IconSparkles, IconX } from "@/shared/ui/icons";
+import { WorkflowMatchCard } from "./work/WorkflowMatchCard";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,14 @@ interface Message {
   thinkingSteps?: TaskRecord[];
   /** Total thinking duration in ms — persisted from DB for historical messages */
   totalThinkingMs?: number;
+  /** 执行状态：QUEUED / PROCESSING / COMPLETED / FAILED（生图模式） */
+  executionStatus?: string;
+  /** 附件列表（生图模式） */
+  attachments?: Array<{
+    id: string;
+    type: string;
+    fileAssetId: string;
+  }>;
 }
 
 /** Map ThinkingNodeName → TaskCategory for placeholder tasks. */
@@ -115,14 +124,14 @@ interface AiChatPanelProps {
   variant?: "page" | "floating";
   conversationId?: string | null;
   onConversationCreated?: (id: string) => void;
-  // When true and the active conversation is brand-new (just created by the
-  // parent's "新对话" button), trigger an AI greeting based on the user's
-  // profile. The greeting runs as an SSE stream and is persisted as the
-  // first assistant message of the conversation.
   autoGreet?: boolean;
-  // Called once a greeting has been triggered (or failed) so the parent can
-  // clear the pending flag for this conversation.
   onGreetingConsumed?: (id: string) => void;
+  /** Switch to work mode (no workflow POST). Used by header button. */
+  onSwitchToWorkMode?: () => void;
+  /** Switch to work mode AND fire POST /api/ai/workflows in background. Used by WorkflowMatchCard. */
+  onStartWorkflow?: (workflowType: string) => void;
+  /** Notifies parent that the conversation no longer exists (e.g. 404). */
+  onConversationMissing?: (id: string) => void;
 }
 
 // ─── Main Panel ───────────────────────────────────────────────────────────────
@@ -133,6 +142,9 @@ export function AiChatPanel({
   onConversationCreated,
   autoGreet = false,
   onGreetingConsumed,
+  onSwitchToWorkMode,
+  onStartWorkflow,
+  onConversationMissing,
 }: AiChatPanelProps) {
   const isPage = variant === "page";
 
@@ -164,6 +176,13 @@ export function AiChatPanel({
   // (not as a message bubble in the conversation).
   const [pendingCandidates, setPendingCandidates] = useState<CandidateUser[] | null>(null);
   const [selectedModel, setSelectedModel] = useState<string>("agnes:agnes-2.5-flash");
+
+  // Workflow match state: passed to parent for optimistic mode switch
+  const [workflowMatch, setWorkflowMatch] = useState<{
+    workflowType: string;
+    workflowName: string;
+    description: string;
+  } | null>(null);
 
   // Tracks every tool call in the current stream so the UI can show a full
   // "searchKnowledge → searchStructured" pipeline instead of the last tool only.
@@ -206,6 +225,11 @@ export function AiChatPanel({
   const messagesRef = useRef<Message[]>([]);
   const aiModeRef = useRef<AiMode>("auto");
   const selectedModelRef = useRef<string>("agnes:agnes-2.5-flash");
+  const conversationIdRef = useRef<string | null | undefined>(undefined);
+  // 跳进程 message 轮询 ref（生图模式）
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Tracks if we should skip the next assistant message (workflow match case)
+  const skipAssistantMessageRef = useRef<string | null>(null);
 
   // Keep refs in sync with state — useLayoutEffect runs synchronously after
   // render, avoiding the "Cannot update ref during render" lint error.
@@ -213,6 +237,7 @@ export function AiChatPanel({
     messagesRef.current = messages;
     aiModeRef.current = aiMode;
     selectedModelRef.current = selectedModel;
+    conversationIdRef.current = conversationId;
   });
 
   // ─── Load conversation messages ─────────────────────────────────────────────
@@ -223,6 +248,12 @@ export function AiChatPanel({
       try {
         const res = await fetch(`/api/ai/conversations/${convId}`);
         if (version !== conversationVersionRef.current) return;
+        if (res.status === 404) {
+          // 会话不存在（已删除 / 失效）—— 静默清空,通知父组件清掉无效 id
+          setMessages([]);
+          onConversationMissing?.(convId);
+          return;
+        }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         const conv = json.data;
@@ -235,6 +266,12 @@ export function AiChatPanel({
                 content: string;
                 sources?: unknown;
                 metadata?: unknown;
+                executionStatus?: string;
+                attachments?: Array<{
+                  id: string;
+                  type: string;
+                  fileAssetId: string;
+                }>;
               }) => ({
                 id: m.id,
                 role: m.role as "user" | "assistant",
@@ -255,6 +292,8 @@ export function AiChatPanel({
                 })(),
                 totalThinkingMs: (m.metadata as { totalThinkingMs?: number } | undefined)
                   ?.totalThinkingMs,
+                executionStatus: m.executionStatus,
+                attachments: m.attachments,
               })
             )
           );
@@ -484,7 +523,7 @@ export function AiChatPanel({
     [triggerGreeting]
   );
 
-  // Cleanup: cancel any active typewriter when this component unmounts or
+  // Cleanup: cancel any active typewriter and polling when this component unmounts or
   // when the user switches to a different conversation.
   useEffect(() => {
     return () => {
@@ -493,6 +532,10 @@ export function AiChatPanel({
         clearInterval(welcomeTypewriterRef.current.timerId);
       }
       welcomeTypewriterRef.current = null;
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
     };
   }, []);
 
@@ -579,10 +622,129 @@ export function AiChatPanel({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingContent]);
 
+  // ─── Image generation polling (cross-process: worker → DB → poll) ─────────────
+
+  const startPolling = useCallback((messageId: string, startTime: number) => {
+    if (pollingRef.current) clearInterval(pollingRef.current);
+    pollingRef.current = setInterval(async () => {
+      // 超时保护：3 分钟
+      if (Date.now() - startTime > 3 * 60 * 1000) {
+        if (pollingRef.current) clearInterval(pollingRef.current);
+        pollingRef.current = null;
+        return;
+      }
+      try {
+        const res = await fetch(`/api/ai/messages/${messageId}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          id: string;
+          executionStatus: string;
+          attachments: Array<{ id: string; type: string; fileAssetId: string }>;
+        };
+        if (
+          data.executionStatus === "COMPLETED" ||
+          data.executionStatus === "FAILED"
+        ) {
+          if (pollingRef.current) clearInterval(pollingRef.current);
+          pollingRef.current = null;
+          // 更新 messages state，把占位替换为包含 attachments 的真实 message
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === messageId
+                ? {
+                    ...m,
+                    content:
+                      data.executionStatus === "COMPLETED"
+                        ? "图片已生成"
+                        : "图片生成失败",
+                    executionStatus: data.executionStatus,
+                    attachments: data.attachments,
+                  }
+                : m,
+            ),
+          );
+        }
+      } catch {
+        // 忘记错误，下次轮询继续尝试
+      }
+    }, 2000);
+  }, []);
+
   // ─── Send message ───────────────────────────────────────────────────────────
 
   const handleSend = useCallback(
     async (message: string) => {
+      // ── Image generation mode (提前 return，不走 SSE 流) ────────────────────
+      if (aiModeRef.current === "image") {
+        // Optimistically add user message
+        const tempUserId = `user-${Date.now()}`;
+        setMessages((prev) => [
+          ...prev,
+          { id: tempUserId, role: "user", content: message },
+        ]);
+
+        try {
+          // 生图模式下新对话没有 conversationId：先建对话再入队，
+          // 与普通对话首条消息隐式建会话保持一致的用户体验。
+          let convId = conversationIdRef.current;
+          if (!convId) {
+            const createRes = await fetch("/api/ai/conversations", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ title: message }),
+            });
+            if (!createRes.ok) throw new Error(`HTTP ${createRes.status}`);
+            const created = (await createRes.json()) as {
+              data: { id: string } | null;
+              error: string | null;
+            };
+            if (!created.data) throw new Error(created.error ?? "创建对话失败");
+            convId = created.data.id;
+            conversationIdRef.current = convId;
+            onConversationCreated?.(convId);
+          }
+
+          const res = await fetch("/api/ai/generate/image", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              conversationId: convId,
+              prompt: message,
+              modelName: selectedModelRef.current,
+            }),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = (await res.json()) as {
+            messageId: string;
+            executionStatus: string;
+          };
+          // 展示占位 message
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: data.messageId,
+              role: "assistant" as const,
+              content: "正在生成图片...",
+              executionStatus: "QUEUED",
+              attachments: [],
+            },
+          ]);
+          // 开始轮询
+          startPolling(data.messageId, Date.now());
+        } catch {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `err-${Date.now()}`,
+              role: "assistant" as const,
+              content: "生图失败，请稍后重试。",
+            },
+          ]);
+        }
+        return;
+      }
+      // ── End image mode ─────────────────────────────────────────────────────
+
       const conversationVersion = conversationVersionRef.current;
       const requestController = new AbortController();
       const tempUserId = `user-${Date.now()}`;
@@ -779,11 +941,28 @@ export function AiChatPanel({
                   thinkingSteps: finalTasks,
                   totalThinkingMs,
                 };
-                setMessages((prev) => [...prev, assistantMessage]);
+                // If we detected a workflow match, skip adding this message
+                // (the workflow card is already shown instead)
+                const shouldSkip = skipAssistantMessageRef.current === assistantMessage.id;
+                if (shouldSkip) {
+                  skipAssistantMessageRef.current = null;
+                } else {
+                  setMessages((prev) => [...prev, assistantMessage]);
+                }
                 setIsLoading(false);
                 setStreamingContent("");
                 setPendingSources([]);
+
                 // thinkingSteps now lives inside the bubble — no external collapse timer needed
+              } else if (parsed.type === "workflow_match") {
+                // Workflow match detected by backend — show inline card for optimistic switch
+                setWorkflowMatch({
+                  workflowType: parsed.workflowType,
+                  workflowName: parsed.workflowName,
+                  description: parsed.description || "即将启动工作流",
+                });
+                // Store the message ID to skip in done handler
+                skipAssistantMessageRef.current = `assistant-${Date.now()}`;
               } else if (parsed.type === "tool_call") {
                 const toolLabel =
                   parsed.toolName === "webSearch"
@@ -921,7 +1100,7 @@ export function AiChatPanel({
         setToolCallChain([]);
       }
     },
-    [conversationId, onConversationCreated]
+    [conversationId, onConversationCreated, startPolling]
   );
 
   const handleStop = useCallback(() => {
@@ -947,6 +1126,48 @@ export function AiChatPanel({
       setToolCallChain([]);
     }
   }, [pendingSources]);
+
+  // ── Workflow Match Handlers ─────────────────────────────────────────────────
+
+  const handleStartWorkflow = useCallback((workflowType: string) => {
+    // Optimistically switch mode immediately — don't wait for API.
+    // POST /api/ai/workflows runs in the background; if it fails the user
+    // is already in work mode with an empty/loading list (graceful degradation).
+    setWorkflowMatch(null);
+    setIsLoading(false);
+    onStartWorkflow?.(workflowType);
+
+    // Fire-and-forget: start workflow server-side, linked to current conversation
+    void (async () => {
+      try {
+        const now = new Date();
+        const dayOfWeek = now.getDay();
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+        monday.setHours(0, 0, 0, 0);
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+        sunday.setHours(23, 59, 59, 999);
+
+        await fetch("/api/ai/workflows", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            workflowType,
+            weekStart: monday.toISOString(),
+            weekEnd: sunday.toISOString(),
+            conversationId: conversationId, // Link to current conversation
+          }),
+        });
+      } catch (err) {
+        console.error("[AiChatPanel] background workflow start error:", err);
+      }
+    })();
+  }, [onStartWorkflow, conversationId]);
+
+  const handleWorkflowDismiss = useCallback(() => {
+    setWorkflowMatch(null);
+  }, []);
 
   const handleClear = useCallback(() => {
     setMessages(
@@ -988,19 +1209,34 @@ export function AiChatPanel({
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
           </div>
-          <div>
-            <p className={`font-semibold text-ink-900 ${isPage ? "text-base" : "text-sm"}`}>
-              小星 · AI 助手
-            </p>
-            <p className="text-xs text-ink-400">
-              {conversationId
-                ? "加载历史对话中…"
-                : aiMode === "auto"
-                  ? "智能检测中"
-                  : aiMode === "search"
-                    ? "知识检索模式"
-                    : "通用对话模式"}
-            </p>
+          <div className="flex items-center gap-2">
+            <div>
+              <p className={`font-semibold text-ink-900 ${isPage ? "text-base" : "text-sm"}`}>
+                小星 · AI 助手
+              </p>
+              <p className="text-xs text-ink-400">
+                {aiMode === "auto"
+                    ? "智能检测中"
+                    : aiMode === "search"
+                      ? "知识检索模式"
+                      : aiMode === "image"
+                        ? "生图模式"
+                        : "通用对话模式"}
+              </p>
+            </div>
+            {onSwitchToWorkMode && (
+              <button
+                type="button"
+                onClick={onSwitchToWorkMode}
+                className="flex items-center gap-1 rounded-lg border border-ink-200 bg-white px-2 py-1 text-xs font-medium text-ink-700 transition-colors hover:bg-ink-50"
+                title="切换到工作模式"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+                工作模式
+              </button>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -1089,6 +1325,8 @@ export function AiChatPanel({
                   candidates={msg.candidates}
                   thinkingSteps={msg.thinkingSteps}
                   totalThinkingMs={msg.totalThinkingMs}
+                  executionStatus={msg.executionStatus}
+                  attachments={msg.attachments}
                   onCandidateSelect={(candidateId) => handleSend(candidateId)}
                 />
               </div>
@@ -1149,6 +1387,17 @@ export function AiChatPanel({
           customInputPlaceholder="输入用户名或重新描述问题…"
         />
       )}
+
+      {/* Workflow Match Dialog */}
+      {/* Workflow Match Card */}
+      <WorkflowMatchCard
+        isOpen={!!workflowMatch}
+        workflowType={workflowMatch?.workflowType ?? ""}
+        workflowName={workflowMatch?.workflowName ?? ""}
+        description={workflowMatch?.description ?? ""}
+        onStartWorkflow={handleStartWorkflow}
+        onDismiss={handleWorkflowDismiss}
+      />
 
       {/* Input */}
       <div className={`border-t border-ink-200 ${isPage ? "p-6" : "p-3"}`}>
