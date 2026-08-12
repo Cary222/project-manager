@@ -874,7 +874,9 @@ model UserApiKey {
   // SYSTEM 凭证没有对应的 User 记录，设为可选关系
   user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId, provider])
+  // 支持同一 provider 下多个 key，通过 (userId, provider, name) 唯一约束
+  @@unique([userId, provider, name])
+  @@index([userId, provider, deletedAt])
   @@index([keyHash])
   @@index([ownerType])
   @@schema("pm")

@@ -142,7 +142,7 @@ const messageSchema = z.object({
       })
     )
     .optional(),
-  mode: z.enum(["auto", "search", "chat", "web"]).optional().default("auto"),
+  mode: z.enum(["auto", "search", "chat", "web", "image"]).optional().default("auto"),
   forceSearch: z.boolean().optional().default(false),
   useWebSearch: z.boolean().optional().default(false),
   clientCity: z.string().optional(),
@@ -526,7 +526,7 @@ interface LangGraphRequestOptions {
   conversationId: string;
   message: string;
   conversationHistory?: Array<{ id: string; role: "user" | "assistant"; content: string }>;
-  mode: "auto" | "search" | "chat" | "web";
+  mode: "auto" | "search" | "chat" | "web" | "image";
   forceSearch: boolean;
   session: { user: { id: string; name?: string | null; email?: string | null } };
   conversation: { id: string; title: string };

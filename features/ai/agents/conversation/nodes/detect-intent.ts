@@ -240,7 +240,19 @@ function isPureChat(message: string): boolean {
 export function detectMode(message: string): AgentMode {
   const trimmed = message.trim();
 
-  // 1. 天气/实时信息 → web
+  // 1. 图片生成意图 → image
+  const hasImageIntent = /(?:生成|画|创作|制作)(?:一张|一幅|一张)?[的]?(?:.+?)?(?:图片?|图|画像|照片)/i.test(trimmed) ||
+    /(?:图片?|图|照片|画像)[:：]/.test(trimmed) ||
+    /(?:给我|帮我)?(?:生成|画|创作|做)(?:一张|一幅)?(?:的)?(?:图片?|图|画像|照片)/i.test(trimmed);
+  if (hasImageIntent) return "image";
+
+  // 2. 视频生成意图 → video
+  const hasVideoIntent = /(?:生成|制作|创作)(?:一个?|段?)?(?:视频?|短片|动画|影片)/i.test(trimmed) ||
+    /(?:视频?|短片|动画|影片)[:：]/.test(trimmed) ||
+    /(?:帮我|请)?(?:生成|制作)(?:一个?|段?)?/i.test(trimmed) && /(?:视频?|短片|动画|影片)/i.test(trimmed);
+  if (hasVideoIntent) return "video";
+
+  // 3. 天气/联网搜索 → web
   const hasWeatherIntent = WEB_KEYWORDS.some(
     ({ pattern, category }) => category === "weather" && pattern.test(trimmed)
   );
@@ -251,16 +263,16 @@ export function detectMode(message: string): AgentMode {
   );
   if (hasWebIntent) return "web";
 
-  // 2. 纯闲聊 → chat
+  // 4. 纯闲聊 → chat
   if (isPureChat(trimmed)) return "chat";
 
-  // 3. 人员近况必须走结构化（优先级高于默认 search）
+  // 5. 人员近况必须走结构化（优先级高于默认 search）
   if (isUserActivityQuery(trimmed)) return "search";
 
-  // 4. 其他查询 → search（结构化查询）
+  // 6. 其他查询 → search（结构化查询）
   if (containsSearchKeywords(trimmed)) return "search";
 
-  // 5. 兜底默认 search（项目管理平台，大部分查询都涉及数据）
+  // 7. 兜底默认 search（项目管理平台，大部分查询都涉及数据）
   return "search";
 }
 

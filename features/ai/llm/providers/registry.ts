@@ -96,6 +96,7 @@ function isHardcodedProvider(p: string): p is HardcodedProvider {
 // Agnes model list — hardcoded, initialized to DB by ensureSystemProvider()
 // ---------------------------------------------------------------------------
 const AGNES_MODELS: ModelCatalogEntry[] = [
+  // Chat models
   {
     id: "agnes:agnes-2.5-flash",
     modelName: "agnes-2.5-flash",
@@ -113,6 +114,41 @@ const AGNES_MODELS: ModelCatalogEntry[] = [
     displayName: "Agnes 2.0 Flash",
     modelRef: "agnes:agnes-2.0-flash",
     capabilities: ["fast"],
+    enabled: true,
+    provider: "agnes",
+    apiFormat: "openai-responses",
+    ownerType: "SYSTEM",
+  },
+  // Image models
+  {
+    id: "agnes:agnes-image-2.1-flash",
+    modelName: "agnes-image-2.1-flash",
+    displayName: "Agnes Image 2.1 Flash",
+    modelRef: "agnes:agnes-image-2.1-flash",
+    capabilities: ["image"],
+    enabled: true,
+    provider: "agnes",
+    apiFormat: "openai-responses",
+    ownerType: "SYSTEM",
+  },
+  {
+    id: "agnes:agnes-image-2.0-flash",
+    modelName: "agnes-image-2.0-flash",
+    displayName: "Agnes Image 2.0 Flash",
+    modelRef: "agnes:agnes-image-2.0-flash",
+    capabilities: ["image"],
+    enabled: true,
+    provider: "agnes",
+    apiFormat: "openai-responses",
+    ownerType: "SYSTEM",
+  },
+  // Video models
+  {
+    id: "agnes:agnes-video-v2.0",
+    modelName: "agnes-video-v2.0",
+    displayName: "Agnes Video 2.0",
+    modelRef: "agnes:agnes-video-v2.0",
+    capabilities: ["video"],
     enabled: true,
     provider: "agnes",
     apiFormat: "openai-responses",
@@ -217,6 +253,12 @@ export async function discoverModelsFromAPI(options: {
  */
 function inferCapabilities(modelId: string): ModelCatalogEntry["capabilities"] {
   const lower = modelId.toLowerCase();
+  if (lower.includes("image") || lower.includes("wan2.7") || lower.includes("dall") || lower.includes("flux"))
+    return ["image"];
+  if (lower.includes("video") || lower.includes("wan-video"))
+    return ["video"];
+  if (lower.includes("audio") || lower.includes("tts") || lower.includes("realtime") || lower.includes("asr"))
+    return ["audio"];
   if (lower.includes("vision") || lower.includes("gpt-4o") || lower.includes("claude-3-opus"))
     return ["vision"];
   if (lower.includes("reasoner") || lower.includes("o1") || lower.includes("deepseek-r1"))

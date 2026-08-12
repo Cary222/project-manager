@@ -3,8 +3,8 @@
  */
 
 // Re-export all types from submodules
-export type { AiMode, AiModeOption } from "./modes";
-export { AI_MODE_OPTIONS } from "./modes";
+export type { AiMode, AiModeOption, AiTaskCategory, ChatToolMode } from "./modes";
+export { AI_MODE_OPTIONS, CHAT_SUB_MODE_OPTIONS } from "./modes";
 
 export type { ThinkingNodeName, ThinkingStepStatus, ThinkingStep } from "./thinking";
 export { buildStepPlan } from "./thinking";

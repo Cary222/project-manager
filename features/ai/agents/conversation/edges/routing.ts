@@ -47,6 +47,8 @@ export function routeByMode(state: AgentState): NextNode {
     case "web":
       return "webSearch";
 
+    case "image":
+    case "video":
     case "chat":
     default:
       return "generateResponse";
@@ -240,6 +242,8 @@ export function routeAfterModelSelect(state: AgentState): NextNode {
 
   if (mode === "web") return "webSearch";
   if (mode === "chat") return "generateResponse";
+  if (mode === "image") return "generateResponse";
+  if (mode === "video") return "generateResponse";
   // search and auto both start with searchKnowledge
   if (mode === "search" || mode === "auto") return "searchKnowledge";
 

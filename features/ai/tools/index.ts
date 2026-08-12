@@ -4,7 +4,7 @@ import { searchStructured } from "./search-structured";
 
 export { webSearch, searchKnowledge, searchStructured };
 
-export type ToolMode = "auto" | "web" | "search" | "chat";
+export type ToolMode = "auto" | "web" | "search" | "chat" | "image";
 
 type WebToolSet = {
   webSearch: typeof webSearch;
@@ -38,6 +38,8 @@ const POLICIES: Record<ToolMode, ModePolicy> = {
   chat:   { tools: {},                                    maxSteps: 3 },
   // web: 联网优先，项目数据兜底；knowledge 不挂（联网场景下笔记兜底反而带偏）
   web:    { tools: { webSearch, searchStructured },       maxSteps: 15 },
+  // image: 前端直接调用 /api/ai/generate/image，不走 LLM
+  image:  { tools: {},                                    maxSteps: 1 },
 };
 
 export function toolsetForMode(

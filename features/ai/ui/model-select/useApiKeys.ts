@@ -87,16 +87,17 @@ export function useApiKeys() {
     }
   };
 
-  // 删除 API Key
+  // 删除 API Key（支持按 id 精确删除，或按 provider 批量删除）
   const deleteApiKey = async (
-    provider: string,
+    id?: string,
+    provider?: string,
     ownerType: "USER" | "SYSTEM" = "USER"
   ): Promise<boolean> => {
     try {
       const res = await fetch("/api/ai/providers", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider, ownerType }),
+        body: JSON.stringify({ id, provider, ownerType }),
       });
       if (!res.ok) return false;
       mutate("/api/ai/providers");
@@ -110,10 +111,10 @@ export function useApiKeys() {
   const hasKey = (provider: string): boolean => userKeys.some((k) => k.provider === provider);
   const hasSystemKey = (provider: string): boolean =>
     systemKeys.some((k) => k.provider === provider);
-  const getKeyLast4 = (provider: string): string | undefined =>
-    userKeys.find((k) => k.provider === provider)?.keyLast4;
-  const getSystemKeyLast4 = (provider: string): string | undefined =>
-    systemKeys.find((k) => k.provider === provider)?.keyLast4;
+  const getKeysByProvider = (provider: string): UserKeyInfo[] =>
+    userKeys.filter((k) => k.provider === provider);
+  const getSystemKeysByProvider = (provider: string): UserKeyInfo[] =>
+    systemKeys.filter((k) => k.provider === provider);
 
   return {
     userKeys,
@@ -127,8 +128,8 @@ export function useApiKeys() {
     deleteApiKey,
     hasKey,
     hasSystemKey,
-    getKeyLast4,
-    getSystemKeyLast4,
+    getKeysByProvider,
+    getSystemKeysByProvider,
     reload: () => mutate("/api/ai/providers"),
   };
 }

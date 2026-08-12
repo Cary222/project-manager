@@ -277,14 +277,25 @@ export async function getMaskedKeyInfo(userId: string): Promise<MaskedKeyInfo[]>
 }
 
 /**
- * 软删除用户 API Key
+ * 软删除用户 API Key（按 id 删除）
+ */
+export async function deleteApiKeyById(id: string, userId: string): Promise<void> {
+  await prisma.userApiKey.updateMany({
+    where: { id, userId, ownerType: "USER" },
+    data: { deletedAt: new Date() },
+  });
+}
+
+/**
+ * 软删除用户 API Key（兼容旧接口，按 provider 删除所有匹配项）
+ * @deprecated 请使用 deleteApiKeyById
  */
 export async function deleteApiKey(
   userId: string,
   provider: string
 ): Promise<void> {
   await prisma.userApiKey.updateMany({
-    where: { userId, provider },
+    where: { userId, provider, deletedAt: null },
     data: { deletedAt: new Date() },
   });
 }
@@ -449,11 +460,21 @@ export async function saveSystemProvider(
 }
 
 /**
- * 软删除 SYSTEM provider
+ * 软删除 SYSTEM provider（按 id 精确删除）
+ */
+export async function deleteSystemProviderById(id: string): Promise<void> {
+  await prisma.userApiKey.updateMany({
+    where: { id, ownerType: "SYSTEM" },
+    data: { deletedAt: new Date() },
+  });
+}
+
+/**
+ * 软删除 SYSTEM provider（按 provider 删除所有匹配项）
  */
 export async function deleteSystemProvider(provider: string): Promise<void> {
   await prisma.userApiKey.updateMany({
-    where: { ownerType: "SYSTEM", provider },
+    where: { ownerType: "SYSTEM", provider, deletedAt: null },
     data: { deletedAt: new Date() },
   });
 }

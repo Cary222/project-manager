@@ -37,6 +37,7 @@ export interface GenerateImageResult {
  * 根据 modelRef 和 baseURL 判断使用哪个 provider
  *
  * dashscope-wan: maas.aliyuncs.com 上的 wan2.x 系列，需走 multimodal-generation 专用端点
+ * agnes: apihub.agnes-ai.com 的图片生成 API（/v1/images/generations）
  * openai-compatible: 标准 OpenAI /images/generations 兼容端点
  * wanx: 原生 DashScope 异步轮询 API（dashscope.aliyuncs.com）
  * placeholder: 兜底
@@ -44,13 +45,18 @@ export interface GenerateImageResult {
 function detectProvider(
   modelRef?: string,
   baseURL?: string
-): "dashscope-wan" | "openai-compatible" | "wanx" | "placeholder" {
+): "dashscope-wan" | "agnes" | "openai-compatible" | "wanx" | "placeholder" {
   const ref = (modelRef ?? "").toLowerCase();
   const url = (baseURL ?? "").toLowerCase();
 
   // maas.aliyuncs.com 上的 wan2.x 模型 → DashScope multimodal-generation 专用端点
   if (url.includes("maas.aliyuncs.com") && (ref.includes("wan2") || ref.includes("wan2.7"))) {
     return "dashscope-wan";
+  }
+
+  // Agnes 图片模型（agnes-image-*）→ apihub.agnes-ai.com/v1/images/generations
+  if (ref.includes("agnes") && ref.includes("image")) {
+    return "agnes";
   }
 
   // 原生 DashScope 异步 API
@@ -168,6 +174,94 @@ async function generateWithDashScopeWan(
 }
 
 /**
+ * 通过 apihub.agnes-ai.com/v1/images/generations 生成图片
+ * 支持 agnes-image-2.1-flash / agnes-image-2.0-flash
+ *
+ * API 文档：https://wiki.agnes-ai.com/llms.txt
+ *
+ * 必填：model, prompt, size
+ * 可选：ratio, image（图生图）, return_base64, extra_body.response_format
+ */
+async function generateWithAgnes(
+  params: GenerateImageParams,
+  apiKey: string,
+  baseURL: string
+): Promise<GenerateImageResult> {
+  const { prompt, modelRef = "agnes-image-2.1-flash", n = 1, size = "1K" } = params;
+  const [_provider, modelName] = modelRef.includes(":") ? modelRef.split(":") : ["", modelRef];
+
+  // Agnes 图片端点：apihub.agnes-ai.com/v1/images/generations
+  // baseURL 通常是 apihub.agnes-ai.com/v1，构造完整端点
+  const endpoint = `${baseURL.replace(/\/$/, "")}/images/generations`;
+
+  console.log(`[agnes-image] 发起生图: endpoint=${endpoint}, model=${modelName}, prompt="${prompt}"`);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120000); // 120s 超时
+
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: modelName,
+        prompt,
+        size,
+        n,
+      }),
+    });
+
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.error(`[agnes-image] HTTP ${res.status}:`, errText);
+      throw new Error(`Agnes 图片生成失败: ${res.status} ${errText}`);
+    }
+
+    const data = await res.json();
+    console.log(`[agnes-image] 响应:`, JSON.stringify(data, null, 2));
+
+    const responseData = data as {
+      data: Array<{ url?: string | null; b64_json?: string | null }>;
+    };
+
+    if (!responseData.data || responseData.data.length === 0) {
+      throw new Error("Agnes 返回数据为空");
+    }
+
+    // 处理图片数据
+    const images: GeneratedImage[] = await Promise.all(
+      responseData.data.map(async (item) => {
+        if (item.b64_json) {
+          return { bytes: Buffer.from(item.b64_json, "base64"), mimeType: "image/png" };
+        }
+        if (item.url) {
+          const imgRes = await fetch(item.url);
+          if (!imgRes.ok) throw new Error(`下载图片失败: ${imgRes.statusText}`);
+          const arrayBuffer = await imgRes.arrayBuffer();
+          const mimeType = imgRes.headers.get("content-type") ?? "image/png";
+          return { bytes: Buffer.from(arrayBuffer), mimeType };
+        }
+        throw new Error("Agnes 返回数据无 url 或 b64_json");
+      })
+    );
+
+    return { images, model: modelName, provider: "agnes" };
+  } catch (error) {
+    clearTimeout(timeout);
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("Agnes 图片生成超时（120s）");
+    }
+    throw error;
+  }
+}
+
+/**
  * 通过 OpenAI 兼容端点生成图片（同步 API，无需轮询）
  */
 async function generateWithOpenAI(
@@ -245,6 +339,13 @@ export async function generateImages(params: GenerateImageParams): Promise<Gener
       throw new Error("DashScope Wan 端点需要 apiKey 和 baseURL");
     }
     return generateWithDashScopeWan(params, apiKey, baseURL);
+  }
+
+  if (provider === "agnes") {
+    if (!apiKey || !baseURL) {
+      throw new Error("Agnes 端点需要 apiKey 和 baseURL");
+    }
+    return generateWithAgnes(params, apiKey, baseURL);
   }
 
   if (provider === "openai-compatible") {

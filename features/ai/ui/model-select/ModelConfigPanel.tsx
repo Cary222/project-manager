@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import {
   ModelSelectionProvider,
@@ -10,22 +10,19 @@ import { useApiKeys } from "@/features/ai/ui/model-select/useApiKeys";
 import { useModelSortAndFilter } from "@/features/ai/ui/model-select/useModelSortAndFilter";
 import { useModelCatalog } from "@/features/ai/ui/model-select/useModelCatalog";
 import { SearchInput } from "@/shared/ui/SearchInput";
-import { IconCheck, IconLoader, IconSettings, IconTrash } from "@/shared/ui/icons";
+import { IconCheck, IconLoader, IconSettings, IconTrash, IconPlus, IconX } from "@/shared/ui/icons";
 import { updatePreferredAiModelAction } from "@/features/admin/settings";
 import type { AiModel } from "@/features/ai/ui/model-select/types";
+import { ConfigPanelModelSelect } from "./ConfigPanelModelSelect";
+import { getProviderDisplayName, CATEGORY_CONFIG, PROVIDER_DISPLAY_NAMES } from "./model-labels";
 
 /* ------------------------------------------------------------------ */
-/*  Provider display names                                             */
+/*  Helper functions                                                     */
 /* ------------------------------------------------------------------ */
-const PROVIDER_LABELS: Record<string, string> = {
-  agnes: "Agnes",
-  deepseek: "DeepSeek",
-  openai: "OpenAI",
-  anthropic: "Anthropic",
-};
-
-function getProviderLabel(provider: string) {
-  return PROVIDER_LABELS[provider] ?? provider;
+function getCategoryLabel(category: string) {
+  return CATEGORY_CONFIG[category]?.label
+    ? `${CATEGORY_CONFIG[category].icon} ${CATEGORY_CONFIG[category].label}`
+    : category;
 }
 
 /* ------------------------------------------------------------------ */
@@ -47,7 +44,7 @@ function ModelConfigPanelInner({ preferredAiModel, availableModels }: ModelConfi
 
   // 对话总结用模型偏好
   const [selectedPreferredModel, setSelectedPreferredModel] = useState<string>(
-    preferredAiModel ?? "default"
+    preferredAiModel ?? ""
   );
   const [preferredFlash, setPreferredFlash] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [preferredSaving, setPreferredSaving] = useState(false);
@@ -63,8 +60,8 @@ function ModelConfigPanelInner({ preferredAiModel, availableModels }: ModelConfi
     deleteApiKey,
     hasKey,
     hasSystemKey,
-    getKeyLast4,
-    getSystemKeyLast4,
+    getKeysByProvider,
+    getSystemKeysByProvider,
     reload,
   } = useApiKeys();
 
@@ -77,9 +74,9 @@ function ModelConfigPanelInner({ preferredAiModel, availableModels }: ModelConfi
   async function handlePreferredModelSave() {
     setPreferredSaving(true);
     setPreferredFlash(null);
-    const result = await updatePreferredAiModelAction(
-      selectedPreferredModel === "default" ? null : selectedPreferredModel
-    );
+    // 空字符串表示使用默认（Agnes）
+    const modelToSave = selectedPreferredModel === "" ? null : selectedPreferredModel;
+    const result = await updatePreferredAiModelAction(modelToSave);
     setPreferredSaving(false);
     if (result.error) {
       setPreferredFlash({ type: "error", message: result.error });
@@ -113,20 +110,12 @@ function ModelConfigPanelInner({ preferredAiModel, availableModels }: ModelConfi
           <p className="text-xs font-medium uppercase tracking-wide text-brand-600">对话总结模型</p>
         </div>
         <div className="flex items-center gap-2">
-          <select
-            value={selectedPreferredModel}
-            onChange={(e) => setSelectedPreferredModel(e.target.value)}
-            className="flex-1 rounded-md border border-brand-300 bg-white px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-          >
-            <option value="default">系统默认（Agnes）</option>
-            {availableModels
-              .filter((m) => m.provider !== "agnes")
-              .map((model) => (
-                <option key={model.value} value={model.value}>
-                  {model.model}
-                </option>
-              ))}
-          </select>
+          <div className="flex-1">
+            <ConfigPanelModelSelect
+              value={selectedPreferredModel === "default" ? "" : selectedPreferredModel}
+              onChange={(modelRef) => setSelectedPreferredModel(modelRef)}
+            />
+          </div>
           <button
             type="button"
             onClick={handlePreferredModelSave}
@@ -148,9 +137,9 @@ function ModelConfigPanelInner({ preferredAiModel, availableModels }: ModelConfi
           </p>
         )}
         <p className="mt-2 text-xs text-ink-500">
-          {selectedPreferredModel === "default"
+          {selectedPreferredModel === "default" || selectedPreferredModel === ""
             ? "使用系统默认的 Agnes 模型进行对话总结"
-            : "使用你配置的模型进行对话总结"}
+            : "使用选中的模型进行对话总结"}
         </p>
       </div>
 
@@ -217,7 +206,7 @@ function ModelConfigPanelInner({ preferredAiModel, availableModels }: ModelConfi
                       onChange={(e) => handleToggleProvider(provider, e.target.checked)}
                       className="h-4 w-4 rounded border-ink-300 text-brand-500 focus:ring-brand-500"
                     />
-                    {getProviderLabel(provider)}
+                    {getProviderDisplayName(provider)}
                     <span className="ml-auto rounded bg-ink-100 px-2 py-0.5 text-xs font-normal text-ink-500">
                       {selectedProviderModels.length}/{providerModels.length}
                     </span>
@@ -245,7 +234,7 @@ function ModelConfigPanelInner({ preferredAiModel, availableModels }: ModelConfi
                                 }
                                 className="h-3.5 w-3.5 rounded border-ink-300 text-brand-500 focus:ring-brand-500"
                               />
-                              {category}
+                              {getCategoryLabel(category)}
                             </label>
                             <div className="ml-5 space-y-1">
                               {models.map((model) => (
@@ -291,8 +280,8 @@ function ModelConfigPanelInner({ preferredAiModel, availableModels }: ModelConfi
           onDelete={deleteApiKey}
           hasKey={hasKey}
           hasSystemKey={hasSystemKey}
-          getKeyLast4={getKeyLast4}
-          getSystemKeyLast4={getSystemKeyLast4}
+          getKeysByProvider={getKeysByProvider}
+          getSystemKeysByProvider={getSystemKeysByProvider}
           onReload={reload}
         />
       </div>
@@ -325,13 +314,16 @@ interface ApiKeyConfigPanelProps {
     apiKey: string,
     baseURL?: string
   ) => Promise<{ success: boolean; message: string }>;
-  onDelete: (provider: string, ownerType?: "USER" | "SYSTEM") => Promise<boolean>;
+  onDelete: (id?: string, provider?: string, ownerType?: "USER" | "SYSTEM") => Promise<boolean>;
   hasKey: (provider: string) => boolean;
   hasSystemKey: (provider: string) => boolean;
-  getKeyLast4: (provider: string) => string | undefined;
-  getSystemKeyLast4: (provider: string) => string | undefined;
+  getKeysByProvider: (provider: string) => UserKeyInfo[];
+  getSystemKeysByProvider: (provider: string) => UserKeyInfo[];
   onReload: () => void;
 }
+
+/** 所有预定义 provider id */
+const BUILTIN_PROVIDER_IDS = Object.keys(PROVIDER_DISPLAY_NAMES);
 
 function ApiKeyConfigPanel({
   userKeys,
@@ -346,83 +338,133 @@ function ApiKeyConfigPanel({
   onDelete,
   hasKey,
   hasSystemKey,
-  getKeyLast4,
-  getSystemKeyLast4,
+  getKeysByProvider,
+  getSystemKeysByProvider,
   onReload,
 }: ApiKeyConfigPanelProps) {
-  const [activeProvider, setActiveProvider] = useState<string | null>(null);
+  const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
+  const [addingCustomProvider, setAddingCustomProvider] = useState(false);
+
+  // Form state
+  const [inputProvider, setInputProvider] = useState("");
   const [inputKey, setInputKey] = useState("");
   const [inputBaseURL, setInputBaseURL] = useState("");
   const [inputTransport, setInputTransport] = useState<"proxy" | "direct">("direct");
   const [inputApiFormat, setInputApiFormat] = useState<string>("openai-chat");
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
+  const [savingKey, setSavingKey] = useState(false);
 
-  const editableProviders = Object.entries(PROVIDER_LABELS);
-
-  // Determine which keys to show based on active tab
   const activeKeys = activeTab === "system" ? systemKeys : userKeys;
   const activeHasKey = activeTab === "system" ? hasSystemKey : hasKey;
-  const activeGetLast4 = activeTab === "system" ? getSystemKeyLast4 : getKeyLast4;
+  const activeGetKeys = activeTab === "system" ? getSystemKeysByProvider : getKeysByProvider;
+  const isSystem = activeTab === "system";
 
-  const handleProviderClick = (provider: string) => {
-    const existingKey = activeKeys.find((k) => k.provider === provider);
-    setActiveProvider(provider === activeProvider ? null : provider);
+  // 所有已出现的 provider（包括预定义 + 自定义）
+  const allProviders = useMemo(() => {
+    const seen = new Set<string>();
+    activeKeys.forEach((k) => seen.add(k.provider));
+    return seen;
+  }, [activeKeys]);
+
+  // 预定义但未配置的 provider
+  const unconfiguredBuiltin = useMemo(
+    () => BUILTIN_PROVIDER_IDS.filter((id) => !allProviders.has(id)),
+    [allProviders]
+  );
+
+  function handleSelectProvider(provider: string) {
+    setAddingCustomProvider(false);
+    setExpandedProvider(provider === expandedProvider ? null : provider);
+    setInputProvider(provider);
     setInputKey("");
-    setInputBaseURL(existingKey?.baseURL ?? "");
-    setInputTransport(
-      "transport" in (existingKey ?? {})
-        ? (existingKey as any).transport === "proxy" ? "proxy" : "direct"
-        : provider === "deepseek" || provider === "siliconflow" ? "direct" : "proxy"
-    );
-    setInputApiFormat(
-      "apiFormat" in (existingKey ?? {})
-        ? String((existingKey as any).apiFormat)
-        : provider === "anthropic" ? "anthropic" : "openai-chat"
-    );
+    setInputBaseURL("");
     setTestResult(null);
-  };
+    setSavingKey(false);
+    const existingKeys = activeGetKeys(provider);
+    if (existingKeys.length > 0) {
+      const first = existingKeys[0];
+      setInputTransport(
+        first.transport === "proxy" ? "proxy" : "direct"
+      );
+      setInputApiFormat(
+        first.apiFormat ? String(first.apiFormat) : provider === "anthropic" ? "anthropic" : "openai-chat"
+      );
+    } else {
+      setInputTransport(
+        provider === "deepseek" || provider === "siliconflow" ? "direct" : "proxy"
+      );
+      setInputApiFormat(provider === "anthropic" ? "anthropic" : "openai-chat");
+    }
+  }
 
-  const handleTest = async () => {
-    if (!activeProvider || !inputKey) return;
+  function handleAddCustomProvider() {
+    setAddingCustomProvider(true);
+    setExpandedProvider(null);
+    setInputProvider("");
+    setInputKey("");
+    setInputBaseURL("");
+    setInputTransport("direct");
+    setInputApiFormat("openai-chat");
+    setTestResult(null);
+    setSavingKey(false);
+  }
+
+  function handleCancelAdd() {
+    setAddingCustomProvider(false);
+    setExpandedProvider(null);
+  }
+
+  async function handleTest() {
+    if (!inputProvider || !inputKey) return;
     setIsTesting(true);
     setTestResult(null);
-    const result = await onTest(
-      activeProvider,
-      inputKey,
-      inputBaseURL || undefined
-    );
+    const result = await onTest(inputProvider, inputKey, inputBaseURL || undefined);
     setTestResult(result);
     setIsTesting(false);
-  };
+  }
 
-  const handleSave = async () => {
-    if (!activeProvider || !inputKey) return;
-    const name = PROVIDER_LABELS[activeProvider] + " Key";
-    const ownerType: "USER" | "SYSTEM" = activeTab === "system" ? "SYSTEM" : "USER";
+  async function handleSave() {
+    if (!inputProvider || !inputKey) return;
+    setSavingKey(true);
+    // name 默认用用户输入的 provider id
+    const name = inputProvider;
+    const ownerType: "USER" | "SYSTEM" = isSystem ? "SYSTEM" : "USER";
     const success = await onSave(
-      activeProvider,
+      inputProvider,
       name,
       inputKey,
       inputBaseURL || undefined,
       { transport: inputTransport, apiFormat: inputApiFormat, ownerType }
     );
+    setSavingKey(false);
     if (success) {
       setInputKey("");
       setInputBaseURL("");
       setTestResult(null);
-      setActiveProvider(null);
+      setExpandedProvider(null);
+      setAddingCustomProvider(false);
       onReload();
     }
-  };
+  }
 
-  const handleDelete = async (provider: string) => {
-    const prefix = activeTab === "system" ? "[系统]" : "";
-    if (!confirm(`${prefix}确定删除 ${PROVIDER_LABELS[provider]} 的 API Key？`)) return;
-    const ownerType: "USER" | "SYSTEM" = activeTab === "system" ? "SYSTEM" : "USER";
-    await onDelete(provider, ownerType);
+  async function handleDeleteById(id: string) {
+    if (!confirm("确定删除此 API Key？")) return;
+    const ownerType: "USER" | "SYSTEM" = isSystem ? "SYSTEM" : "USER";
+    await onDelete(id, undefined, ownerType);
     onReload();
-  };
+  }
+
+  // 按 provider 分组已配置的 keys
+  const groupedByProvider = useMemo(() => {
+    const map = new Map<string, UserKeyInfo[]>();
+    for (const k of activeKeys) {
+      const list = map.get(k.provider) ?? [];
+      list.push(k);
+      map.set(k.provider, list);
+    }
+    return Array.from(map.entries());
+  }, [activeKeys]);
 
   return (
     <div className="rounded-xl border border-ink-200 bg-white p-4">
@@ -435,7 +477,7 @@ function ApiKeyConfigPanel({
       {isRoot && (
         <div className="mb-3 flex rounded-lg border border-ink-200 p-0.5">
           <button
-            onClick={() => { onTabChange("user"); setActiveProvider(null); }}
+            onClick={() => { onTabChange("user"); setExpandedProvider(null); setAddingCustomProvider(false); }}
             className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition ${
               activeTab === "user"
                 ? "bg-brand-500 text-white"
@@ -445,7 +487,7 @@ function ApiKeyConfigPanel({
             用户配置
           </button>
           <button
-            onClick={() => { onTabChange("system"); setActiveProvider(null); }}
+            onClick={() => { onTabChange("system"); setExpandedProvider(null); setAddingCustomProvider(false); }}
             className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition ${
               activeTab === "system"
                 ? "bg-brand-500 text-white"
@@ -457,175 +499,309 @@ function ApiKeyConfigPanel({
         </div>
       )}
 
-      {/* 已配置的 Keys */}
+      {/* 已配置的 Keys — 按 provider 分组 */}
       <div className="space-y-2">
-        {editableProviders.map(([id, label]) => {
-          const configured = activeHasKey(id);
-          const last4 = activeGetLast4(id);
-          const isSystem = activeTab === "system";
-          const systemRecord = isSystem ? systemKeys.find((k) => k.provider === id) : null;
-          const activeRecord = activeKeys.find((k) => k.provider === id);
-
+        {groupedByProvider.map(([provider, keys]) => {
+          const isExpanded = expandedProvider === provider;
           return (
-            <div key={id}>
-              {configured ? (
-                /* 已配置状态 */
-                <div className="flex flex-col gap-1.5 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-ink-700">{label}</span>
-                      <span className="rounded bg-brand-100 px-1.5 py-0.5 text-xs text-brand-700">
-                        ···{last4}
+            <div key={provider}>
+              <div
+                className={`flex items-center justify-between rounded-lg border px-3 py-2 transition ${
+                  isExpanded
+                    ? "border-brand-300 bg-brand-50"
+                    : "border-ink-200 bg-white hover:border-ink-300"
+                }`}
+              >
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <button
+                    onClick={() => handleSelectProvider(provider)}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  >
+                    <span className="truncate text-xs font-medium text-ink-700">
+                      {getProviderDisplayName(provider)}
+                    </span>
+                    {keys.length > 1 && (
+                      <span className="flex-shrink-0 rounded bg-brand-100 px-1.5 py-0.5 text-xs text-brand-700">
+                        ×{keys.length}
                       </span>
-                      <span className="rounded bg-ink-200 px-1.5 py-0.5 text-xs text-ink-600">
-                        {(activeRecord as any)?.apiFormat ?? "—"}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleProviderClick(id)}
-                        className="rounded px-2 py-1 text-xs text-ink-500 transition hover:bg-ink-100 hover:text-ink-700"
+                    )}
+                  </button>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => handleSelectProvider(provider)}
+                    className="rounded px-2 py-1 text-xs text-ink-400 transition hover:bg-ink-100 hover:text-ink-600"
+                  >
+                    {isExpanded ? "收起" : "编辑"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Provider 展开：显示 key 列表 + 输入表单 */}
+              {isExpanded && (
+                <div className="mt-1.5 space-y-2 rounded-lg border border-brand-200 bg-brand-50 p-3">
+                  {/* Key 列表 */}
+                  <div className="space-y-1.5">
+                    {keys.map((k) => (
+                      <div
+                        key={k.id}
+                        className="flex items-center justify-between rounded-md border border-ink-100 bg-white px-3 py-2"
                       >
-                        更新
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="rounded bg-ink-100 px-1.5 py-0.5 text-xs text-ink-600">
+                              ···{k.keyLast4}
+                            </span>
+                            <span className="rounded bg-ink-200 px-1.5 py-0.5 text-xs text-ink-600">
+                              {k.apiFormat ?? "—"}
+                            </span>
+                            <span className="rounded bg-ink-200 px-1.5 py-0.5 text-xs text-ink-600">
+                              {k.transport ?? "—"}
+                            </span>
+                          </div>
+                          {k.baseURL && (
+                            <span className="truncate text-xs text-ink-400">{k.baseURL}</span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => handleDeleteById(k.id)}
+                          className="flex-shrink-0 rounded p-1 text-danger-400 transition hover:bg-danger-50 hover:text-danger-600"
+                          title="删除此 Key"
+                        >
+                          <IconTrash className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* 输入表单 */}
+                  <div className="space-y-2 border-t border-brand-200 pt-2">
+                    <p className="text-xs font-medium text-ink-600">
+                      {isSystem && (
+                        <span className="mr-2 rounded bg-ink-200 px-1.5 py-0.5 text-xs text-ink-600">
+                          系统级
+                        </span>
+                      )}
+                      添加新 Key
+                    </p>
+
+                    <input
+                      type="password"
+                      value={inputKey}
+                      onChange={(e) => setInputKey(e.target.value)}
+                      placeholder="输入 API Key（sk-...）"
+                      className="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-xs text-ink-900 placeholder:text-ink-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none"
+                      autoComplete="off"
+                    />
+
+                    <input
+                      type="url"
+                      value={inputBaseURL}
+                      onChange={(e) => setInputBaseURL(e.target.value)}
+                      placeholder="Base URL（可选，留空使用默认值）"
+                      className="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-xs text-ink-900 placeholder:text-ink-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none"
+                    />
+
+                    {/* System-only: Transport + ApiFormat */}
+                    {isSystem && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="mb-1 block text-xs text-ink-600">传输方式</label>
+                          <select
+                            value={inputTransport}
+                            onChange={(e) => setInputTransport(e.target.value as "proxy" | "direct")}
+                            className="w-full rounded-md border border-ink-300 bg-white px-2 py-1.5 text-xs text-ink-900 focus:border-brand-500 focus:outline-none"
+                          >
+                            <option value="proxy">代理 (proxy)</option>
+                            <option value="direct">直连 (direct)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-ink-600">API 协议</label>
+                          <select
+                            value={inputApiFormat}
+                            onChange={(e) => setInputApiFormat(e.target.value)}
+                            className="w-full rounded-md border border-ink-300 bg-white px-2 py-1.5 text-xs text-ink-900 focus:border-brand-500 focus:outline-none"
+                          >
+                            <option value="openai-chat">OpenAI Chat</option>
+                            <option value="openai-responses">OpenAI Responses</option>
+                            <option value="anthropic">Anthropic</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    {testResult && (
+                      <div
+                        className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs ${
+                          testResult.success
+                            ? "bg-success-50 text-success-700"
+                            : "bg-danger-50 text-danger-700"
+                        }`}
+                      >
+                        {testResult.success ? (
+                          <IconCheck className="h-3.5 w-3.5 flex-shrink-0" />
+                        ) : (
+                          <span className="flex-shrink-0">✕</span>
+                        )}
+                        {testResult.message}
+                      </div>
+                    )}
+
+                    {error && (
+                      <div className="flex items-center gap-2 rounded-md bg-danger-50 px-3 py-2 text-xs text-danger-700">
+                        {error}
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleTest}
+                        disabled={!inputKey || isTesting}
+                        className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-ink-300 bg-white px-3 py-2 text-xs font-medium text-ink-700 transition hover:bg-ink-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <IconLoader className="h-3 w-3" />
+                        测试
                       </button>
                       <button
-                        onClick={() => handleDelete(id)}
-                        className="rounded p-1 text-danger-500 transition hover:bg-danger-50"
-                        title="删除"
+                        onClick={handleSave}
+                        disabled={!inputKey || savingKey}
+                        className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-brand-500 px-3 py-2 text-xs font-medium text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        <IconTrash className="h-3.5 w-3.5" />
+                        {savingKey ? (
+                          <IconLoader className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <IconCheck className="h-3 w-3" />
+                        )}
+                        保存
                       </button>
                     </div>
                   </div>
-                  {activeRecord && (
-                    <div className="flex gap-3 text-xs text-ink-500">
-                      <span>传输：{(activeRecord as any).transport ?? "—"}</span>
-                      <span>协议：{(activeRecord as any).apiFormat ?? "—"}</span>
-                    </div>
-                  )}
                 </div>
-              ) : (
-                /* 未配置状态 */
-                <button
-                  onClick={() => handleProviderClick(id)}
-                  className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition ${
-                    activeProvider === id
-                      ? "border-brand-500 bg-brand-50"
-                      : "border-ink-200 hover:border-ink-300 hover:bg-ink-50"
-                  }`}
-                >
-                  <span className="text-xs font-medium text-ink-600">{label}</span>
-                  <span className="text-xs text-ink-400">点击配置</span>
-                </button>
               )}
             </div>
           );
         })}
-      </div>
 
-      {/* 输入表单（展开时显示） */}
-      {activeProvider && (
-        <div className="mt-3 space-y-3 rounded-lg border border-brand-200 bg-brand-50 p-3">
-          <div className="text-xs font-medium text-ink-700">
-            配置 {PROVIDER_LABELS[activeProvider]}
-            {activeTab === "system" && (
-              <span className="ml-2 rounded bg-ink-200 px-1.5 py-0.5 text-xs text-ink-600">
-                系统级
-              </span>
+        {/* 未配置的预定义 provider */}
+        {unconfiguredBuiltin.map((id) => (
+          <button
+            key={id}
+            onClick={() => handleSelectProvider(id)}
+            className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition ${
+              expandedProvider === id
+                ? "border-brand-500 bg-brand-50"
+                : "border-ink-200 hover:border-ink-300 hover:bg-ink-50"
+            }`}
+          >
+            <span className="text-xs font-medium text-ink-600">{getProviderDisplayName(id)}</span>
+            <span className="text-xs text-ink-400">点击配置</span>
+          </button>
+        ))}
+
+        {/* 添加自定义 Provider */}
+        {addingCustomProvider ? (
+          <div className="rounded-lg border border-brand-300 bg-brand-50 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-medium text-ink-700">自定义 Provider</p>
+              <button onClick={handleCancelAdd} className="text-ink-400 hover:text-ink-600">
+                <IconX className="h-4 w-4" />
+              </button>
+            </div>
+
+            <input
+              type="text"
+              value={inputProvider}
+              onChange={(e) => setInputProvider(e.target.value.toLowerCase().replace(/\s+/g, "-"))}
+              placeholder="Provider ID（如 my-azure）"
+              className="mb-2 w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-xs text-ink-900 placeholder:text-ink-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none"
+            />
+
+            <input
+              type="password"
+              value={inputKey}
+              onChange={(e) => setInputKey(e.target.value)}
+              placeholder="API Key（sk-...）"
+              className="mb-2 w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-xs text-ink-900 placeholder:text-ink-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none"
+              autoComplete="off"
+            />
+
+            <input
+              type="url"
+              value={inputBaseURL}
+              onChange={(e) => setInputBaseURL(e.target.value)}
+              placeholder="Base URL（必填，自定义 Provider 需要）"
+              className="mb-2 w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-xs text-ink-900 placeholder:text-ink-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none"
+            />
+
+            {isSystem && (
+              <div className="mb-2 grid grid-cols-2 gap-2">
+                <div>
+                  <label className="mb-1 block text-xs text-ink-600">传输方式</label>
+                  <select
+                    value={inputTransport}
+                    onChange={(e) => setInputTransport(e.target.value as "proxy" | "direct")}
+                    className="w-full rounded-md border border-ink-300 bg-white px-2 py-1.5 text-xs text-ink-900 focus:border-brand-500 focus:outline-none"
+                  >
+                    <option value="proxy">代理 (proxy)</option>
+                    <option value="direct">直连 (direct)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-ink-600">API 协议</label>
+                  <select
+                    value={inputApiFormat}
+                    onChange={(e) => setInputApiFormat(e.target.value)}
+                    className="w-full rounded-md border border-ink-300 bg-white px-2 py-1.5 text-xs text-ink-900 focus:border-brand-500 focus:outline-none"
+                  >
+                    <option value="openai-chat">OpenAI Chat</option>
+                    <option value="openai-responses">OpenAI Responses</option>
+                    <option value="anthropic">Anthropic</option>
+                  </select>
+                </div>
+              </div>
             )}
-          </div>
 
-          <input
-            type="password"
-            value={inputKey}
-            onChange={(e) => setInputKey(e.target.value)}
-            placeholder="输入 API Key（sk-...）"
-            className="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-xs text-ink-900 placeholder:text-ink-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none"
-            autoComplete="off"
-          />
-
-          <input
-            type="url"
-            value={inputBaseURL}
-            onChange={(e) => setInputBaseURL(e.target.value)}
-            placeholder="Base URL（可选，留空使用默认值）"
-            className="w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-xs text-ink-900 placeholder:text-ink-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none"
-          />
-
-          {/* System-only: Transport + ApiFormat — always shown */}
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="mb-1 block text-xs text-ink-600">传输方式</label>
-              <select
-                value={inputTransport}
-                onChange={(e) => setInputTransport(e.target.value as "proxy" | "direct")}
-                className="w-full rounded-md border border-ink-300 bg-white px-2 py-1.5 text-xs text-ink-900 focus:border-brand-500 focus:outline-none"
+            {testResult && (
+              <div
+                className={`mb-2 flex items-center gap-2 rounded-md px-3 py-2 text-xs ${
+                  testResult.success ? "bg-success-50 text-success-700" : "bg-danger-50 text-danger-700"
+                }`}
               >
-                <option value="proxy">代理 (proxy)</option>
-                <option value="direct">直连 (direct)</option>
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-ink-600">API 协议</label>
-              <select
-                value={inputApiFormat}
-                onChange={(e) => setInputApiFormat(e.target.value)}
-                className="w-full rounded-md border border-ink-300 bg-white px-2 py-1.5 text-xs text-ink-900 focus:border-brand-500 focus:outline-none"
+                {testResult.success ? <IconCheck className="h-3.5 w-3.5 flex-shrink-0" /> : <span className="flex-shrink-0">✕</span>}
+                {testResult.message}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                onClick={handleTest}
+                disabled={!inputProvider || !inputKey || isTesting}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-ink-300 bg-white px-3 py-2 text-xs font-medium text-ink-700 transition hover:bg-ink-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <option value="openai-chat">OpenAI Chat</option>
-                <option value="openai-responses">OpenAI Responses</option>
-                <option value="anthropic">Anthropic</option>
-              </select>
+                <IconLoader className="h-3 w-3" />
+                测试
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={!inputProvider || !inputKey || !inputBaseURL || savingKey}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-brand-500 px-3 py-2 text-xs font-medium text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {savingKey ? <IconLoader className="h-3 w-3 animate-spin" /> : <IconCheck className="h-3 w-3" />}
+                保存
+              </button>
             </div>
           </div>
-
-          {testResult && (
-            <div
-              className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs ${
-                testResult.success
-                  ? "bg-success-50 text-success-700"
-                  : "bg-danger-50 text-danger-700"
-              }`}
-            >
-              {testResult.success ? (
-                <IconCheck className="h-3.5 w-3.5 flex-shrink-0" />
-              ) : (
-                <span className="flex-shrink-0">✕</span>
-              )}
-              {testResult.message}
-            </div>
-          )}
-
-          {error && (
-            <div className="flex items-center gap-2 rounded-md bg-danger-50 px-3 py-2 text-xs text-danger-700">
-              {error}
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            <button
-              onClick={handleTest}
-              disabled={!inputKey || isTesting}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-ink-300 bg-white px-3 py-2 text-xs font-medium text-ink-700 transition hover:bg-ink-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <IconLoader className="h-3 w-3" />
-              测试连接
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={!inputKey || isSaving}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-brand-500 px-3 py-2 text-xs font-medium text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isSaving ? (
-                <IconLoader className="h-3 w-3 animate-spin" />
-              ) : (
-                <IconCheck className="h-3 w-3" />
-              )}
-              保存
-            </button>
-          </div>
-        </div>
-      )}
+        ) : (
+          <button
+            onClick={handleAddCustomProvider}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-ink-300 px-3 py-2 text-xs text-ink-500 transition hover:border-brand-400 hover:text-brand-600"
+          >
+            <IconPlus className="h-3.5 w-3.5" />
+            添加自定义 Provider
+          </button>
+        )}
+      </div>
 
       <p className="mt-3 flex items-start gap-2 rounded-lg bg-ink-100 px-3 py-2 text-xs text-ink-500">
         <span className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-ink-200 text-ink-600">
@@ -633,7 +809,7 @@ function ApiKeyConfigPanel({
         </span>
         {activeTab === "system"
           ? "系统配置对所有用户生效，仅 ROOT 管理员可修改"
-          : "Key 加密存储，仅显示后 4 位"}
+          : "Key 加密存储，仅显示后 4 位 · 支持同 Provider 配置多个 Key"}
       </p>
     </div>
   );

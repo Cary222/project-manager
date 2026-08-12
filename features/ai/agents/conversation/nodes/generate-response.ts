@@ -297,6 +297,20 @@ export async function generateResponseNode(
     return {};
   }
 
+  // ── Image generation mode: signal frontend to switch to image mode ──────────
+  if (state.mode === "image") {
+    const lastMessage = state.messages[state.messages.length - 1];
+    const content =
+      typeof lastMessage?.content === "string"
+        ? lastMessage.content.trim()
+        : "";
+    console.log(`[generateResponseNode] image mode detected, content="${content}"`);
+    return {
+      response: "[IMAGE_MODE] 检测到图片生成意图，前端将自动切换到生图模式。",
+      pendingHumanAction: null,
+    };
+  }
+
   // ── Workflow Match: Return special response to trigger frontend dialog ──
   if (state.workflowMatch) {
     const { workflow } = state.workflowMatch;

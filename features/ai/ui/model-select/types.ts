@@ -4,7 +4,9 @@
  * to the shadcn-aisdk-model-select pattern.
  */
 
-export type AiModelCategory = "chat" | "embedding" | "transcription" | "image" | "completion" | "speech";
+export type AiModelCategory = "chat" | "embedding" | "transcription" | "image" | "video" | "other" | "completion" | "speech";
+
+export type AiModelTier = "reasoning" | "strong" | "balanced" | "fast" | "standard" | "embedding" | "other";
 
 export type AiModel = {
   /** Unique identifier, e.g. "agnes:agnes-2.5-flash" */
@@ -17,6 +19,8 @@ export type AiModel = {
   context_window?: number;
   /** SYSTEM = 平台默认模型；USER = 用户导入 */
   ownerType?: "SYSTEM" | "USER";
+  /** Model performance tier for UI grouping */
+  tier?: AiModelTier;
 };
 
 export interface ModelGroup {

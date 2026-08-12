@@ -1,38 +1,49 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/features/ai/ui/model-select/ui/select";
 import type { AiModel } from "./types";
 import { useModelSelection } from "./ModelSelectionContext";
+import { useModelGrouping } from "./useModelGrouping";
+import {
+  getProviderDisplayName,
+  CATEGORY_CONFIG,
+} from "./model-labels";
 
-const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
-  agnes: "Agnes",
-  deepseek: "DeepSeek",
-  openai: "OpenAI",
-  anthropic: "Anthropic",
-  groq: "Groq",
-  openrouter: "OpenRouter",
-  together: "Together AI",
-};
-
-function ModelGroupLabel({
-  provider,
-  ownerType,
-}: {
-  provider: string;
-  ownerType?: "SYSTEM" | "USER";
-}) {
-  const displayName = PROVIDER_DISPLAY_NAMES[provider] ?? provider;
+function CategoryHeader({ category }: { category: string }) {
+  const config = CATEGORY_CONFIG[category] ?? { label: category, icon: "📦" };
   return (
-    <div className="flex items-center gap-2 py-1.5 pl-3 pr-2">
+    <div className="flex items-center gap-1.5 py-1.5 pl-3 pr-2">
+      <span className="text-xs">{config.icon}</span>
       <span className="text-xs font-medium uppercase tracking-wide text-ink-400">
-        {displayName}
+        {config.label}
+      </span>
+    </div>
+  );
+}
+
+function TierHeader({ tier }: { tier: string }) {
+  const config = CATEGORY_CONFIG[tier] ?? { label: tier, icon: "📦" };
+  return (
+    <div className="flex items-center gap-1.5 py-1 pl-6 pr-2">
+      <span className="text-xs">{config.icon}</span>
+      <span className="text-xs font-medium text-ink-400">{config.label}</span>
+    </div>
+  );
+}
+
+function ProviderHeader({ provider, ownerType }: { provider: string; ownerType?: string }) {
+  return (
+    <div className="flex items-center gap-2 py-1 pl-6 pr-2">
+      <span className="text-xs font-medium uppercase tracking-wide text-ink-400">
+        {getProviderDisplayName(provider)}
       </span>
       {ownerType === "SYSTEM" && (
         <span className="rounded bg-ink-100 px-1.5 py-0.5 text-[10px] font-medium text-ink-600">
@@ -44,52 +55,42 @@ function ModelGroupLabel({
 }
 
 export function ModelList({ models }: { models: AiModel[] }) {
-  const groupedModels = useMemo(() => {
-    return models.reduce(
-      (acc, model) => {
-        if (!acc[model.provider]) {
-          acc[model.provider] = [];
-        }
-        acc[model.provider].push(model);
-        return acc;
-      },
-      {} as Record<string, AiModel[]>
-    );
-  }, [models]);
+  const { groupedModels } = useModelGrouping(models);
 
-  if (Object.keys(groupedModels).length === 0) {
+  if (groupedModels.length === 0) {
     return (
       <div className="px-2 py-6 text-center text-sm text-ink-400">
-        No models available to display.
+        暂无可用模型
       </div>
     );
   }
 
   return (
     <>
-      {Object.entries(groupedModels).map(([provider, providerModels]) => (
-        <SelectGroup key={provider}>
-          <ModelGroupLabel
-            provider={provider}
-            ownerType={providerModels[0]?.ownerType}
-          />
-          {providerModels.map((model) => (
-            <SelectItem key={model.value} value={model.value}>
-              {model.model}
-            </SelectItem>
+      {groupedModels.map(({ category, groups }) => (
+        <SelectGroup key={category}>
+          <CategoryHeader category={category} />
+          {groups.map((group) => (
+            <div key={group.key}>
+              {category === "chat" ? (
+                <TierHeader tier={group.key} />
+              ) : (
+                <ProviderHeader
+                  provider={group.key}
+                  ownerType={group.models[0]?.ownerType}
+                />
+              )}
+              {group.models.map((model) => (
+                <SelectItem key={model.value} value={model.value}>
+                  {model.model}
+                </SelectItem>
+              ))}
+            </div>
           ))}
         </SelectGroup>
       ))}
     </>
   );
-}
-
-function SelectGroup({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return <div className="[&_*]:text-ink-900">{children}</div>;
 }
 
 export interface TinyModelSelectorProps {
@@ -101,19 +102,14 @@ export interface TinyModelSelectorProps {
 }
 
 export function TinyModelSelector({
-  placeholder = "Select Model",
+  placeholder = "选择模型",
   className,
   value,
   onValueChange,
   useGlobalState = true,
 }: TinyModelSelectorProps) {
-  const {
-    selectedModel: globalSelectedModel,
-    setSelectedModel: setGlobalSelectedModel,
-    selectedModels,
-    allModels,
-    state,
-  } = useModelSelection();
+  const { selectedModel, setSelectedModel, selectedModels, allModels, state } =
+    useModelSelection();
 
   const [localSelectedModel, setLocalSelectedModel] = useState("");
 
@@ -123,14 +119,14 @@ export function TinyModelSelector({
   const currentModel = isControlledByProps
     ? value
     : isUsingGlobalState
-      ? globalSelectedModel
+      ? selectedModel
       : localSelectedModel;
 
   const handleModelChange = (modelValue: string) => {
     if (isControlledByProps) {
       onValueChange?.(modelValue);
     } else if (isUsingGlobalState) {
-      setGlobalSelectedModel(modelValue);
+      setSelectedModel(modelValue);
     } else {
       setLocalSelectedModel(modelValue);
     }
@@ -156,7 +152,7 @@ export function TinyModelSelector({
     <Select value={currentModel} onValueChange={handleModelChange}>
       <SelectTrigger
         className={`w-52 ${className ?? ""}`}
-        aria-label="Select AI model"
+        aria-label="选择 AI 模型"
       >
         <SelectValue placeholder={isLoading ? "..." : selectedModelLabel} />
       </SelectTrigger>

@@ -1,7 +1,7 @@
 /**
  * Agent mode types — mirrors the existing ToolMode from features/ai/tools/index.ts
  */
-export type AgentMode = "auto" | "search" | "chat" | "web";
+export type AgentMode = "auto" | "search" | "chat" | "web" | "image" | "video";
 
 /**
  * Structured-query fields populated by detectIntent and consumed by

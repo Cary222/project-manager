@@ -4,11 +4,13 @@ import { requireSession } from "@/shared/lib/permissions";
 import {
   saveApiKey,
   deleteApiKey,
+  deleteApiKeyById,
   getMaskedKeyInfo,
   hasApiKey,
   getSystemProviders,
   saveSystemProvider,
   deleteSystemProvider,
+  deleteSystemProviderById,
 } from "@/features/ai/llm/credentials/api-key-store";
 
 /**
@@ -226,10 +228,12 @@ export async function PUT(request: NextRequest) {
 
 // DELETE: 软删除用户 API Key 或 SYSTEM provider（ROOT）
 const DeleteKeySchema = z.object({
-  provider: z.string().min(1),
+  id: z.string().min(1).optional(),
+  provider: z.string().min(1).optional(),
   ownerType: z.enum(["USER", "SYSTEM"]).optional(),
 });
 
+// 按 id 删除（精确单条）或按 provider 删除（删除该 provider 下所有匹配的 key）
 export async function DELETE(request: NextRequest) {
   try {
     const session = await requireSession();
@@ -237,7 +241,15 @@ export async function DELETE(request: NextRequest) {
     const isRoot = session.user.role === "ROOT";
 
     const body = await request.json().catch(() => ({}));
-    const { provider, ownerType } = DeleteKeySchema.parse(body);
+    const parsed = DeleteKeySchema.parse(body);
+    const { id, provider, ownerType } = parsed;
+
+    if (!id && !provider) {
+      return NextResponse.json(
+        { data: null, error: "Either id or provider is required" },
+        { status: 400 }
+      );
+    }
 
     if (ownerType === "SYSTEM") {
       if (!isRoot) {
@@ -246,9 +258,17 @@ export async function DELETE(request: NextRequest) {
           { status: 403 }
         );
       }
-      await deleteSystemProvider(provider);
+      if (id) {
+        await deleteSystemProviderById(id);
+      } else if (provider) {
+        await deleteSystemProvider(provider);
+      }
     } else {
-      await deleteApiKey(userId, provider);
+      if (id) {
+        await deleteApiKeyById(id, userId);
+      } else if (provider) {
+        await deleteApiKey(userId, provider);
+      }
     }
 
     return NextResponse.json({

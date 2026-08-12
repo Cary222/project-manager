@@ -1,5 +1,5 @@
 /** 任务类型：用于模型路由决策 */
-export type TaskType = "chat" | "search" | "rag" | "complex" | "quick";
+export type TaskType = "chat" | "search" | "rag" | "complex" | "quick" | "image" | "video" | "audio";
 
 /** 模型能力标签 */
 export type ModelCapability =
@@ -7,7 +7,10 @@ export type ModelCapability =
   | "standard"
   | "strong"
   | "vision"
-  | "reasoning";
+  | "reasoning"
+  | "image"
+  | "video"
+  | "audio";
 
 /**
  * API 协议格式，决定使用哪个 SDK

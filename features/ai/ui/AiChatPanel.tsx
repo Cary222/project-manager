@@ -9,7 +9,9 @@ import { UserProfilePanel, type AiUserProfile } from "./UserProfilePanel";
 import { ModelSelector } from "@/features/ai/llm/model-selector";
 import {
   AI_MODE_OPTIONS,
+  CHAT_SUB_MODE_OPTIONS,
   type AiMode,
+  type ChatToolMode,
   type TaskRecord,
   buildStepPlan,
 } from "@/features/ai/types";
@@ -165,6 +167,7 @@ export function AiChatPanel({
   const [streamingContent, setStreamingContent] = useState("");
   const [pendingSources, setPendingSources] = useState<SourceReference[]>([]);
   const [aiMode, setAiMode] = useState<AiMode>("auto");
+  const [chatToolMode, setChatToolMode] = useState<ChatToolMode>("chat");
   const [userProfile, setUserProfile] = useState<AiUserProfile | null>(null);
   const [activeToolCall, setActiveToolCall] = useState<{
     toolName: string;
@@ -230,6 +233,28 @@ export function AiChatPanel({
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Tracks if we should skip the next assistant message (workflow match case)
   const skipAssistantMessageRef = useRef<string | null>(null);
+  // Ref for chat sub-mode dropdown open state
+  const chatToolModeRef = useRef<ChatToolMode>("chat");
+  // Dropdown open state
+  const [chatToolModeOpen, setChatToolModeOpen] = useState(false);
+  const chatToolModeDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Sync chatToolMode to ref
+  useLayoutEffect(() => {
+    chatToolModeRef.current = chatToolMode;
+  }, [chatToolMode]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!chatToolModeOpen) return;
+    function handler(e: MouseEvent) {
+      if (chatToolModeDropdownRef.current && !chatToolModeDropdownRef.current.contains(e.target as Node)) {
+        setChatToolModeOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [chatToolModeOpen]);
 
   // Keep refs in sync with state — useLayoutEffect runs synchronously after
   // render, avoiding the "Cannot update ref during render" lint error.
@@ -1246,22 +1271,62 @@ export function AiChatPanel({
               setSelectedModel(model);
               localStorage.setItem("preferredModel", model);
             }}
+            category={aiMode === "auto" ? "auto" : aiMode === "image" ? "image" : aiMode === "video" ? "video" : "chat"}
+            toolMode={chatToolMode}
           />
           <div className="mx-1 h-4 w-px bg-ink-200" />
           <div className="flex items-center rounded-lg bg-ink-100 p-0.5">
             {AI_MODE_OPTIONS.map((option) => (
-              <button
-                key={option.key}
-                onClick={() => setAiMode(option.key)}
-                className={`rounded-md px-2 py-1 text-xs font-medium transition-all ${
-                  aiMode === option.key
-                    ? "bg-white text-brand-700 shadow-sm"
-                    : "text-ink-500 hover:text-ink-700"
-                }`}
-                title={option.description}
-              >
-                {option.label}
-              </button>
+              <div key={option.key} className="relative">
+                <button
+                  onClick={() => {
+                    if (option.key === "chat") {
+                      setAiMode("chat");
+                      setChatToolModeOpen((v) => !v);
+                    } else {
+                      setAiMode(option.key);
+                    }
+                  }}
+                  className={`rounded-md px-2 py-1 text-xs font-medium transition-all ${
+                    (aiMode === option.key || (option.key === "chat" && (aiMode === "chat" || aiMode === "search" || aiMode === "web")))
+                      ? "bg-white text-brand-700 shadow-sm"
+                      : "text-ink-500 hover:text-ink-700"
+                  }`}
+                  title={option.description}
+                >
+                  {option.label}
+                  {option.key === "chat" && (
+                    <svg className={`ml-0.5 inline h-2.5 w-2.5 transition-transform ${chatToolModeOpen ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  )}
+                </button>
+                {/* Chat sub-mode dropdown */}
+                {option.key === "chat" && chatToolModeOpen && (
+                  <div
+                    ref={chatToolModeDropdownRef}
+                    className="absolute left-0 top-full z-50 mt-1 min-w-[120px] rounded-lg border border-ink-200 bg-white shadow-base"
+                  >
+                    {CHAT_SUB_MODE_OPTIONS.map((sub: { key: ChatToolMode; label: string; icon: string }) => (
+                      <button
+                        key={sub.key}
+                        onClick={() => {
+                          setChatToolMode(sub.key);
+                          setAiMode(sub.key === "chat" ? "chat" : sub.key);
+                          setChatToolModeOpen(false);
+                        }}
+                        className={`flex w-full items-center gap-2 px-3 py-2 text-xs transition-colors first:rounded-t-lg last:rounded-b-lg ${
+                          chatToolMode === sub.key
+                            ? "bg-brand-50 text-brand-700 font-medium"
+                            : "text-ink-700 hover:bg-ink-50"
+                        }`}
+                      >
+                        <span>{sub.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             ))}
           </div>
           <button

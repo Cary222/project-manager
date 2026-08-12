@@ -37,7 +37,7 @@ export interface PendingHumanActionState {
     sourceResult?: { queryType?: string; [key: string]: unknown };
   };
   lastAssistantMessage: string;
-  mode: "auto" | "search" | "chat" | "web";
+  mode: "auto" | "search" | "chat" | "web" | "image" | "video";
   /** 最近讨论的用户 — 用于"他/她"等代词指代 */
   lastMentionedUser?: { id: string; name: string } | null;
 }
