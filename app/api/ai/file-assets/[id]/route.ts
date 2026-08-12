@@ -43,6 +43,32 @@ export async function GET(
       return NextResponse.redirect(asset.storageKey);
     }
 
+    // REMOTE_URL: 安全校验后 302 重定向
+    if (asset.storageType === "REMOTE_URL" && asset.storageKey) {
+      let url: URL;
+      try {
+        url = new URL(asset.storageKey);
+      } catch {
+        return NextResponse.json({ error: "Invalid storage URL" }, { status: 400 });
+      }
+
+      // 只允许 https
+      if (url.protocol !== "https:") {
+        return NextResponse.json({ error: "Invalid URL protocol" }, { status: 400 });
+      }
+
+      // 只允许已知 Provider 域名
+      const ALLOWED_DOMAINS = ["apihub.agnes-ai.com", "agnes-ai.com"];
+      const isAllowed = ALLOWED_DOMAINS.some(
+        (d) => url.hostname === d || url.hostname.endsWith(`.${d}`)
+      );
+      if (!isAllowed) {
+        return NextResponse.json({ error: "Provider domain not allowed" }, { status: 400 });
+      }
+
+      return NextResponse.redirect(asset.storageKey, 302);
+    }
+
     return NextResponse.json({ error: "File data not available" }, { status: 404 });
   } catch (error) {
     console.error("[api/ai/file-assets/[id]] error:", error);

@@ -22,8 +22,10 @@ export interface GenerateVideoParams {
 }
 
 export interface GeneratedVideo {
-  bytes: Buffer;
+  /** Provider 返回的视频 URL（REMOTE_URL 模式） */
+  url: string;
   mimeType: string;
+  /** 文件大小（字节），undefined 表示未知 */
   size?: number;
 }
 
@@ -241,20 +243,12 @@ async function generateWithAgnes(
       onProgress(100, "视频生成完成，正在下载...");
     }
 
-    // Step 3: 下载视频
-    const videoRes = await fetch(videoUrl);
-    if (!videoRes.ok) {
-      throw new Error(`下载视频失败: ${videoRes.statusText}`);
-    }
-
-    const arrayBuffer = await videoRes.arrayBuffer();
-    const mimeType = videoRes.headers.get("content-type") ?? "video/mp4";
-
+    // Step 3: 返回 URL（REMOTE_URL 模式，不下载 bytes）
     const videos: GeneratedVideo[] = [
       {
-        bytes: Buffer.from(arrayBuffer),
-        mimeType,
-        size: arrayBuffer.byteLength,
+        url: videoUrl,
+        mimeType: "video/mp4",
+        size: undefined,
       },
     ];
 
@@ -294,11 +288,10 @@ export async function generateVideos(
   console.warn(
     `[video-generator] provider=${provider} 未实现或未配置，使用占位视频`
   );
-  const placeholderBytes = Buffer.alloc(0);
 
   const videos: GeneratedVideo[] = [
     {
-      bytes: placeholderBytes,
+      url: "",
       mimeType: "video/mp4",
       size: 0,
     },

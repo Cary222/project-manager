@@ -933,6 +933,7 @@ enum AiAttachmentType {
 enum AiFileStorageType {
   DATABASE
   OBJECT_STORAGE
+  REMOTE_URL
 
   @@schema("pm")
 }
