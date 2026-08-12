@@ -74,7 +74,7 @@ interface Message {
   thinkingSteps?: TaskRecord[];
   /** Total thinking duration in ms — persisted from DB for historical messages */
   totalThinkingMs?: number;
-  /** 执行状态：QUEUED / PROCESSING / COMPLETED / FAILED（生图模式） */
+  /** 执行状态：QUEUED / PROCESSING / COMPLETED / FAILED（生图/视频模式） */
   executionStatus?: string;
   /** 附件列表（生图模式） */
   attachments?: Array<{
@@ -82,6 +82,12 @@ interface Message {
     type: string;
     fileAssetId: string;
   }>;
+  /** 进度信息（生图/视频模式） */
+  progress?: {
+    step: string;
+    percent?: number;
+    detail?: string;
+  };
 }
 
 /** Map ThinkingNodeName → TaskCategory for placeholder tasks. */
@@ -319,6 +325,7 @@ export function AiChatPanel({
                   ?.totalThinkingMs,
                 executionStatus: m.executionStatus,
                 attachments: m.attachments,
+                progress: (m.metadata as { progress?: Message["progress"] } | undefined)?.progress,
               })
             )
           );
@@ -649,51 +656,78 @@ export function AiChatPanel({
 
   // ─── Image generation polling (cross-process: worker → DB → poll) ─────────────
 
-  const startPolling = useCallback((messageId: string, startTime: number) => {
-    if (pollingRef.current) clearInterval(pollingRef.current);
-    pollingRef.current = setInterval(async () => {
-      // 超时保护：3 分钟
-      if (Date.now() - startTime > 3 * 60 * 1000) {
-        if (pollingRef.current) clearInterval(pollingRef.current);
-        pollingRef.current = null;
-        return;
-      }
-      try {
-        const res = await fetch(`/api/ai/messages/${messageId}`);
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          id: string;
-          executionStatus: string;
-          attachments: Array<{ id: string; type: string; fileAssetId: string }>;
-        };
-        if (
-          data.executionStatus === "COMPLETED" ||
-          data.executionStatus === "FAILED"
-        ) {
+  const startPolling = useCallback(
+    (
+      messageId: string,
+      startTime: number,
+      timeoutMs = 3 * 60 * 1000,
+      contentTexts?: { success: string; failure: string }
+    ) => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      pollingRef.current = setInterval(async () => {
+        // 超时保护：默认 3 分钟（图片），可配置（视频 5 分钟）
+        if (Date.now() - startTime > timeoutMs) {
           if (pollingRef.current) clearInterval(pollingRef.current);
           pollingRef.current = null;
-          // 更新 messages state，把占位替换为包含 attachments 的真实 message
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === messageId
-                ? {
-                    ...m,
-                    content:
-                      data.executionStatus === "COMPLETED"
-                        ? "图片已生成"
-                        : "图片生成失败",
-                    executionStatus: data.executionStatus,
-                    attachments: data.attachments,
-                  }
-                : m,
-            ),
-          );
+          return;
         }
-      } catch {
-        // 忘记错误，下次轮询继续尝试
-      }
-    }, 2000);
-  }, []);
+        try {
+          const res = await fetch(`/api/ai/messages/${messageId}`);
+          if (!res.ok) return;
+          const data = (await res.json()) as {
+            id: string;
+            executionStatus: string;
+            metadata?: {
+              progress?: { step: string; percent?: number; detail?: string };
+            };
+            attachments: Array<{ id: string; type: string; fileAssetId: string }>;
+          };
+          const progress = data.metadata?.progress;
+          if (
+            data.executionStatus === "COMPLETED" ||
+            data.executionStatus === "FAILED"
+          ) {
+            if (pollingRef.current) clearInterval(pollingRef.current);
+            pollingRef.current = null;
+            // 更新 messages state，把占位替换为包含 attachments 的真实 message
+            const successText = contentTexts?.success ?? "图片已生成";
+            const failureText = contentTexts?.failure ?? "图片生成失败";
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === messageId
+                  ? {
+                      ...m,
+                      content:
+                        data.executionStatus === "COMPLETED" ? successText : failureText,
+                      executionStatus: data.executionStatus,
+                      attachments: data.attachments,
+                      progress: undefined, // 完成后清除进度
+                    }
+                  : m,
+              ),
+            );
+          } else {
+            // 更新进度
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === messageId
+                  ? {
+                      ...m,
+                      content: progress?.detail ?? m.content,
+                      executionStatus: data.executionStatus,
+                      progress: progress ?? m.progress,
+                    }
+                  : m,
+              ),
+            );
+          }
+        } catch {
+          // 忘记错误，下次轮询继续尝试
+        }
+      }, 2000);
+    },
+    []
+  );
 
   // ─── Send message ───────────────────────────────────────────────────────────
 
@@ -769,6 +803,82 @@ export function AiChatPanel({
         return;
       }
       // ── End image mode ─────────────────────────────────────────────────────
+
+      // ── Video generation mode (提前 return，不走 SSE 流) ───────────────────
+      if (aiModeRef.current === "video") {
+        // Optimistically add user message
+        const tempUserId = `user-${Date.now()}`;
+        setMessages((prev) => [
+          ...prev,
+          { id: tempUserId, role: "user", content: message },
+        ]);
+
+        try {
+          // 生视频模式下新对话没有 conversationId：先建对话再入队，
+          // 与普通对话首条消息隐式建会话保持一致的用户体验。
+          let convId = conversationIdRef.current;
+          if (!convId) {
+            const createRes = await fetch("/api/ai/conversations", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ title: message }),
+            });
+            if (!createRes.ok) throw new Error(`HTTP ${createRes.status}`);
+            const created = (await createRes.json()) as {
+              data: { id: string } | null;
+              error: string | null;
+            };
+            if (!created.data) throw new Error(created.error ?? "创建对话失败");
+            convId = created.data.id;
+            conversationIdRef.current = convId;
+            onConversationCreated?.(convId);
+          }
+
+          const res = await fetch("/api/ai/generate/video", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              conversationId: convId,
+              prompt: message,
+              modelName: selectedModelRef.current,
+            }),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = (await res.json()) as {
+            messageId: string;
+            executionStatus: string;
+          };
+          // 展示占位 message
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: data.messageId,
+              role: "assistant" as const,
+              content: "正在生成视频...",
+              executionStatus: "QUEUED",
+              attachments: [],
+            },
+          ]);
+          // 开始轮询（视频生成较慢，超时设为 5 分钟）
+          startPolling(
+            data.messageId,
+            Date.now(),
+            5 * 60 * 1000,
+            { success: "视频已生成", failure: "视频生成失败" }
+          );
+        } catch {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `err-${Date.now()}`,
+              role: "assistant" as const,
+              content: "视频生成失败，请稍后重试。",
+            },
+          ]);
+        }
+        return;
+      }
+      // ── End video mode ────────────────────────────────────────────────────
 
       const conversationVersion = conversationVersionRef.current;
       const requestController = new AbortController();
@@ -1246,7 +1356,9 @@ export function AiChatPanel({
                       ? "知识检索模式"
                       : aiMode === "image"
                         ? "生图模式"
-                        : "通用对话模式"}
+                        : aiMode === "video"
+                          ? "视频模式"
+                          : "通用对话模式"}
               </p>
             </div>
             {onSwitchToWorkMode && (
@@ -1392,6 +1504,8 @@ export function AiChatPanel({
                   totalThinkingMs={msg.totalThinkingMs}
                   executionStatus={msg.executionStatus}
                   attachments={msg.attachments}
+                  loadingType={aiMode === "video" ? "video" : "image"}
+                  progress={msg.progress}
                   onCandidateSelect={(candidateId) => handleSend(candidateId)}
                 />
               </div>

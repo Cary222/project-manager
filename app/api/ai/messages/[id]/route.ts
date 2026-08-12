@@ -18,6 +18,7 @@ export async function GET(
         content: true,
         executionStatus: true,
         errorMessage: true,
+        metadata: true, // 包含 progress
         createdAt: true,
         updatedAt: true,
         conversation: {

@@ -18,6 +18,8 @@ export interface GenerateImageParams {
   size?: string;
   apiKey?: string;
   baseURL?: string; // OpenAI 兼容端点需要此字段
+  /** 进度回调：接收 (percent: number, detail: string) */
+  onProgress?: (percent: number, detail: string) => void;
 }
 
 export interface GeneratedImage {
@@ -329,7 +331,7 @@ async function generateWithOpenAI(
  * 生成图片（路由到对应 provider）
  */
 export async function generateImages(params: GenerateImageParams): Promise<GenerateImageResult> {
-  const { prompt, modelRef = "dall-e-3", n = 1, size, apiKey, baseURL } = params;
+  const { prompt, modelRef = "dall-e-3", n = 1, size, apiKey, baseURL, onProgress } = params;
 
   const provider = detectProvider(modelRef, baseURL);
   console.log(`[image-generator] detectProvider modelRef=${modelRef} baseURL=${baseURL} → provider=${provider}`);
@@ -338,26 +340,38 @@ export async function generateImages(params: GenerateImageParams): Promise<Gener
     if (!apiKey || !baseURL) {
       throw new Error("DashScope Wan 端点需要 apiKey 和 baseURL");
     }
-    return generateWithDashScopeWan(params, apiKey, baseURL);
+    onProgress?.(10, "正在调用图片生成模型...");
+    const result = await generateWithDashScopeWan(params, apiKey, baseURL);
+    onProgress?.(80, "正在处理生成的图片...");
+    return result;
   }
 
   if (provider === "agnes") {
     if (!apiKey || !baseURL) {
       throw new Error("Agnes 端点需要 apiKey 和 baseURL");
     }
-    return generateWithAgnes(params, apiKey, baseURL);
+    onProgress?.(10, "正在调用图片生成模型...");
+    const result = await generateWithAgnes(params, apiKey, baseURL);
+    onProgress?.(80, "正在处理生成的图片...");
+    return result;
   }
 
   if (provider === "openai-compatible") {
     if (!apiKey || !baseURL) {
       throw new Error("OpenAI 兼容端点需要 apiKey 和 baseURL");
     }
-    return generateWithOpenAI(params, apiKey, baseURL);
+    onProgress?.(10, "正在调用图片生成模型...");
+    const result = await generateWithOpenAI(params, apiKey, baseURL);
+    onProgress?.(80, "正在处理生成的图片...");
+    return result;
   }
 
   if (provider === "wanx") {
     if (!apiKey) throw new Error("Wanx API key 未配置，请设置 DASHSCOPE_API_KEY");
-    return generateWithWanx({ prompt, modelRef, n, size }, apiKey);
+    onProgress?.(10, "正在提交图片生成任务...");
+    const result = await generateWithWanx({ prompt, modelRef, n, size }, apiKey);
+    onProgress?.(80, "正在处理生成的图片...");
+    return result;
   }
 
   // placeholder（默认 / 未配置 key 时）
@@ -383,8 +397,9 @@ export async function generateImages(params: GenerateImageParams): Promise<Gener
  * 生成单张图片（便捷函数）
  */
 export async function generateSingleImage(
-  params: Omit<GenerateImageParams, "n">
+  params: Omit<GenerateImageParams, "n">,
+  onProgress?: (percent: number, detail: string) => void
 ): Promise<GeneratedImage> {
-  const result = await generateImages({ ...params, n: 1 });
+  const result = await generateImages({ ...params, n: 1, onProgress });
   return result.images[0];
 }

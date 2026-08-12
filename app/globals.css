@@ -99,6 +99,25 @@ body {
   animation: pm-fade-in 0.25s ease-out;
 }
 
+/* 加载进度条动画 */
+@keyframes pm-progress-bar {
+  0% {
+    width: 0%;
+    opacity: 1;
+  }
+  80% {
+    width: 85%;
+    opacity: 1;
+  }
+  100% {
+    width: 100%;
+    opacity: 0;
+  }
+}
+.animate-progress-bar {
+  animation: pm-progress-bar 2s ease-in-out infinite;
+}
+
 /*
  * DOCX 预览样式（mammoth.convertToHtml 输出）
  * mammoth 会生成语义化 HTML（h1-h6、p、ul/ol、table/tr/td/thead/th、strong、em），

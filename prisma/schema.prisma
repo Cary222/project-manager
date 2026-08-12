@@ -513,7 +513,7 @@ model AiChatMessage {
   role            String
   content         String
   sources         Json?
-  metadata        Json?
+  metadata        Json? // { progress?: { step: string; percent?: number; detail?: string } }
   createdAt       DateTime                 @default(now())
   updatedAt       DateTime                 @updatedAt
   executionStatus AiMessageExecutionStatus @default(COMPLETED)
@@ -896,6 +896,7 @@ enum AiMessageExecutionStatus {
 
 enum BackgroundJobType {
   IMAGE_GENERATE
+  VIDEO_GENERATE
   DOCUMENT_INDEX
   TEXT_SUMMARY
 
@@ -923,6 +924,7 @@ enum JobOutputStatus {
 
 enum AiAttachmentType {
   IMAGE
+  VIDEO
   FILE
 
   @@schema("pm")

@@ -2,25 +2,25 @@ import { prisma } from "@/shared/db/client";
 import type { BackgroundJob } from "@prisma/client";
 import { updateBackgroundJobStatus } from "../jobs";
 import { emitMessageDelta } from "@/features/ai/lib/domain-events";
-import { generateSingleImage } from "@/features/ai/llm/image-generator";
+import { generateSingleVideo } from "@/features/ai/llm/video-generator";
 import { sha256Hex } from "@/shared/lib/hash";
 import { resolveCredentialWithFallback } from "@/features/ai/llm/credentials/api-key-store";
 
-interface ImagePayload {
+interface VideoPayload {
   messageId: string;
   userId: string;
   prompt: string;
   modelRef?: string;
-  n?: number;
+  imageUrl?: string;
 }
 
-/** 解析生图 API Key — 从 DB SYSTEM/USER provider 读取 */
-async function resolveImageApiKey(
+/** 解析视频生成 API Key — 从 DB SYSTEM/USER provider 读取 */
+async function resolveVideoApiKey(
   userId: string,
   modelRef: string
 ): Promise<{ apiKey: string; baseURL: string } | null> {
-  // modelRef 格式: "openai:wan2.7-image" 或 "wanx-v1"
-  const [provider] = modelRef.includes(":") ? modelRef.split(":") : ["wanx", modelRef];
+  // modelRef 格式: "agnes:agnes-video-v2.0" 或 "openai:wan2.7-video"
+  const [provider] = modelRef.includes(":") ? modelRef.split(":") : ["agnes", modelRef];
 
   const cred = await resolveCredentialWithFallback(userId, provider);
   if (cred?.apiKey) {
@@ -30,21 +30,21 @@ async function resolveImageApiKey(
   return null;
 }
 
-export async function handleImageGenerate(
+export async function handleVideoGenerate(
   job: BackgroundJob,
   _workerId: string,
 ): Promise<void> {
-  const { messageId, userId, prompt, modelRef = "openai:wan2.7-image" } = job.payload as unknown as ImagePayload;
+  const { messageId, userId, prompt, modelRef = "agnes:agnes-video-v2.0", imageUrl } = job.payload as unknown as VideoPayload;
   const startTime = Date.now();
 
-  // 解析生图 API Key（支持 openai provider 的 wan2.7-image 或独立 wanx provider）
-  const credential = await resolveImageApiKey(userId, modelRef);
-  console.log(`[image-handler] userId=${userId} modelRef=${modelRef} credential=`, 
+  // 解析视频生成 API Key（支持 agnes provider 的 video 模型）
+  const credential = await resolveVideoApiKey(userId, modelRef);
+  console.log(`[video-handler] userId=${userId} modelRef=${modelRef} credential=`, 
     credential ? `{ apiKey: ${credential.apiKey.substring(0, 10)}..., baseURL: ${credential.baseURL} }` : null);
   
   if (!credential) {
-    const msg = `生图模型 ${modelRef} 的 API Key 未配置，请在设置中添加对应 provider 的 API Key`;
-    console.error(`[image-handler] ${msg}`);
+    const msg = `视频生成模型 ${modelRef} 的 API Key 未配置，请在设置中添加对应 provider 的 API Key`;
+    console.error(`[video-handler] ${msg}`);
     await prisma.aiChatMessage.update({
       where: { id: messageId },
       data: { executionStatus: "FAILED", errorMessage: msg },
@@ -57,14 +57,14 @@ export async function handleImageGenerate(
   // 更新 message 状态
   await prisma.aiChatMessage.update({
     where: { id: messageId },
-    data: {
+    data: { 
       executionStatus: "PROCESSING",
-      metadata: { progress: { step: "calling_model", percent: 0, detail: "正在调用图片生成模型..." } }
+      metadata: { progress: { step: "calling_model", detail: "正在调用视频生成模型..." } }
     },
   });
   emitMessageDelta(messageId, {
     executionStatus: "PROCESSING",
-    progress: { step: "calling_model", percent: 0, detail: "正在调用图片生成模型..." },
+    progress: { step: "calling_model", detail: "正在调用视频生成模型..." },
   });
 
   // 幂等检查：sequence=0 是否已完成
@@ -88,9 +88,9 @@ export async function handleImageGenerate(
       data: { jobId: job.id, sequence: 0, status: "GENERATING" },
     }));
 
-  // 调用 AI 生图（传入进度回调）
-  const imageResult = await generateSingleImage(
-    { prompt, modelRef, apiKey: credential.apiKey, baseURL: credential.baseURL },
+  // 调用 AI 视频生成（传入进度回调）
+  const videoResult = await generateSingleVideo(
+    { prompt, modelRef, apiKey: credential.apiKey, baseURL: credential.baseURL, imageUrl },
     async (percent: number, detail: string) => {
       // 更新 DB 和 SSE
       await prisma.aiChatMessage.update({
@@ -100,7 +100,7 @@ export async function handleImageGenerate(
       emitMessageDelta(messageId, { progress: { step: "generating", percent, detail } });
     }
   );
-  const { bytes, mimeType } = imageResult;
+  const { bytes, mimeType } = videoResult;
 
   // 计算 checksum
   const checksum = sha256Hex(bytes);
@@ -131,7 +131,7 @@ export async function handleImageGenerate(
       messageId,
       fileAssetId: asset.id,
       jobOutputId: output.id,
-      type: "IMAGE",
+      type: "VIDEO",
     },
   });
 
@@ -140,9 +140,8 @@ export async function handleImageGenerate(
     where: { id: messageId },
     data: { executionStatus: "COMPLETED" },
   });
-  const provider = (modelRef ?? "").toLowerCase().includes("wanx") ? "wanx" : "placeholder";
   await updateBackgroundJobStatus(job.id, "COMPLETED", {
-    result: { duration: Date.now() - startTime, model: modelRef, provider },
+    result: { duration: Date.now() - startTime, model: modelRef, provider: "agnes" },
   });
   emitMessageDelta(messageId, { executionStatus: "COMPLETED" });
 }

@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { AiResponsePanel } from "./AiResponsePanel";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
+import { AiLoadingIndicator } from "./AiLoadingIndicator";
 import type { TaskRecord } from "@/features/ai/types";
 import type { SourceReference } from "./AiSourcesList";
 
@@ -32,6 +34,14 @@ interface AiMessageBubbleProps {
     fileAssetId: string;
   }>;
   onCandidateSelect?: (candidateId: string) => void;
+  /** 加载指示器类型（用于 QUEUED/PROCESSING 状态） */
+  loadingType?: "image" | "video";
+  /** 进度信息（生图/视频模式使用） */
+  progress?: {
+    step: string;
+    percent?: number;
+    detail?: string;
+  };
 }
 
 // Typewriter timing (in milliseconds per character):
@@ -54,6 +64,8 @@ export function AiMessageBubble({
   executionStatus,
   attachments,
   onCandidateSelect,
+  loadingType = "image",
+  progress,
 }: AiMessageBubbleProps) {
   const isUserMessage = role === "user";
   const hasCandidates = candidates && candidates.length > 0;
@@ -200,11 +212,16 @@ export function AiMessageBubble({
         totalThinkingMs={totalThinkingMs}
       />
 
-      {/* 执行状态指示器（QUEUED / PROCESSING） */}
+      {/* 执行状态指示器（QUEUED / PROCESSING）— 统一使用 AiLoadingIndicator */}
       {(executionStatus === "QUEUED" || executionStatus === "PROCESSING") && (
-        <div className="mt-2 flex items-center gap-2 text-ink-secondary text-sm">
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-brand border-t-transparent" />
-          <span>正在生成图片...</span>
+        <div className="mt-2">
+          <AiLoadingIndicator
+            type={loadingType}
+            label={progress?.detail ?? (loadingType === "video" ? "正在生成视频..." : "正在生成图片...")}
+            progress={progress?.percent}
+            aspectRatio={loadingType === "video" ? "wide" : "square"}
+            estimatedWidth={loadingType === "video" ? 480 : 320}
+          />
         </div>
       )}
 
@@ -222,9 +239,11 @@ export function AiMessageBubble({
                   onClick={() => setLightboxImage({ src: imgSrc, name: `ai-image-${att.id}` })}
                   className="group relative max-w-sm overflow-hidden rounded-lg border border-ink-subtle shadow-sm transition-all hover:shadow-md hover:scale-[1.02]"
                 >
-                  <img
+                  <Image
                     src={imgSrc}
                     alt="AI 生成图片"
+                    width={320}
+                    height={320}
                     className="object-cover"
                     loading="lazy"
                   />
@@ -234,6 +253,23 @@ export function AiMessageBubble({
                     </span>
                   </div>
                 </button>
+              );
+            })}
+
+          {/* 视频附件 */}
+          {attachments
+            .filter((a) => a.type === "VIDEO")
+            .map((att) => {
+              const videoSrc = `/api/ai/file-assets/${att.fileAssetId}`;
+              return (
+                <video
+                  key={att.id}
+                  src={videoSrc}
+                  controls
+                  className="max-w-sm overflow-hidden rounded-lg border border-ink-subtle shadow-sm"
+                >
+                  您的浏览器不支持视频播放。
+                </video>
               );
             })}
         </div>
