@@ -1,0 +1,5 @@
+
+> project-manager@0.1.0 worker:background
+> tsx worker/background/index.ts
+
+[bg-worker] starting (pid=55710)

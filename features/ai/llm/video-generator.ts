@@ -19,6 +19,10 @@ export interface GenerateVideoParams {
   baseURL?: string;
   imageUrl?: string; // 图生视频：输入图片 URL
   duration?: number; // 视频时长（秒）
+  /** 已有 Agnes task_id，跳过 POST /videos 直接轮询该任务 */
+  agnesTaskId?: string;
+  /** 已有 Agnes video_id，需配合 agnesTaskId 使用 */
+  agnesVideoId?: string;
 }
 
 export interface GeneratedVideo {
@@ -127,11 +131,36 @@ async function pollVideoTask(
     }
 
     if (data.status === "completed") {
-      if (!data.metadata?.url) {
-        throw new Error("视频生成完成但无 URL");
+      // 精确探测各可能 URL 字段，打印完整结构供调试
+      const possibleUrl =
+        data.metadata?.url ||
+        (data as unknown as { url?: string }).url ||
+        (data as unknown as { video_url?: string }).video_url ||
+        (data as unknown as { output?: { url?: string } }).output?.url ||
+        (data as unknown as { result?: { url?: string } }).result?.url ||
+        (data as unknown as { data?: { url?: string } }).data?.url;
+
+      console.log("[agnes-video] completed 原始响应结构:", {
+        topLevel: Object.keys(data),
+        metadata: data.metadata ? Object.keys(data.metadata) : null,
+        url: possibleUrl ? "FOUND" : "MISSING",
+        raw: {
+          id: data.id,
+          video_id: data.video_id,
+          task_id: data.task_id,
+          status: data.status,
+          progress: data.progress,
+          seconds: data.seconds,
+          size: data.size,
+          metadataUrl: data.metadata?.url,
+        },
+      });
+
+      if (!possibleUrl) {
+        throw new Error(`视频生成完成但无 URL - metadata: ${JSON.stringify(data.metadata)}`);
       }
       return {
-        url: data.metadata.url,
+        url: possibleUrl,
         size: data.size,
         seconds: data.seconds,
       };
@@ -164,6 +193,8 @@ async function generateWithAgnes(
     prompt,
     modelRef = "agnes-video-v2.0",
     imageUrl,
+    agnesTaskId: existingTaskId,
+    agnesVideoId: existingVideoId,
   } = params;
   const [, modelName] = modelRef.includes(":")
     ? modelRef.split(":")
@@ -172,94 +203,109 @@ async function generateWithAgnes(
   // Agnes 视频端点：POST /v1/videos
   const endpoint = `${baseURL.replace(/\/$/, "")}/videos`;
 
-  console.log(
-    `[agnes-video] 发起视频生成: endpoint=${endpoint}, model=${modelName}, prompt="${prompt}", imageUrl=${imageUrl}`
-  );
+  let taskId: string;
+  let videoId: string;
 
-  // Step 1: 创建视频任务
-  const controller = new AbortController();
-  const createTimeout = setTimeout(() => controller.abort(), 60000); // 创建任务 60s 超时
-
-  try {
-    const requestBody: Record<string, unknown> = {
-      model: modelName,
-      prompt,
-    };
-
-    // 图生视频：传入 image
-    if (imageUrl) {
-      requestBody.image = imageUrl;
-    }
-
-    // 默认参数：5 秒视频
-    // num_frames: 121 (8*15+1), frame_rate: 24
-    requestBody.num_frames = 121;
-    requestBody.frame_rate = 24;
-
-    const res = await fetch(endpoint, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    clearTimeout(createTimeout);
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      console.error(`[agnes-video] HTTP ${res.status}:`, errText);
-      throw new Error(`创建视频任务失败: ${res.status} ${errText}`);
-    }
-
-    const data = (await res.json()) as AgnesTaskResponse;
-    console.log(`[agnes-video] 任务创建成功: video_id=${data.video_id} status=${data.status}`);
-
-    if (data.status === "failed") {
-      throw new Error(`视频任务创建失败: ${data.error?.message ?? "未知错误"}`);
-    }
-
-    // 触发排队阶段进度
-    if (onProgress) {
-      onProgress(0, "任务已提交，等待模型处理...");
-    }
-
-    // Step 2: 轮询直到完成
-    const { url: videoUrl, size, seconds } = await pollVideoTask(
-      data.task_id,
-      data.video_id,
-      apiKey,
-      baseURL,
-      300000,
-      onProgress
+  // 已有 Agnes task_id → 直接跳到轮询阶段（不重复创建）
+  if (existingTaskId && existingVideoId) {
+    console.log(
+      `[agnes-video] 复用已有任务: taskId=${existingTaskId} videoId=${existingVideoId} prompt="${prompt}"`
+    );
+    taskId = existingTaskId;
+    videoId = existingVideoId;
+  } else {
+    console.log(
+      `[agnes-video] 发起视频生成: endpoint=${endpoint}, model=${modelName}, prompt="${prompt}", imageUrl=${imageUrl}`
     );
 
-    console.log(`[agnes-video] 视频生成完成: url=${videoUrl} size=${size} seconds=${seconds}`);
+    // Step 1: 创建视频任务
+    const controller = new AbortController();
+    const createTimeout = setTimeout(() => controller.abort(), 60000); // 创建任务 60s 超时
 
-    // 触发下载阶段进度
-    if (onProgress) {
-      onProgress(100, "视频生成完成，正在下载...");
+    try {
+      const requestBody: Record<string, unknown> = {
+        model: modelName,
+        prompt,
+      };
+
+      if (imageUrl) {
+        requestBody.image = imageUrl;
+      }
+
+      // 默认参数：5 秒视频，num_frames: 121 (8*15+1), frame_rate: 24
+      requestBody.num_frames = 121;
+      requestBody.frame_rate = 24;
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      clearTimeout(createTimeout);
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        console.error(`[agnes-video] HTTP ${res.status}:`, errText);
+        throw new Error(`创建视频任务失败: ${res.status} ${errText}`);
+      }
+
+      const createData = (await res.json()) as AgnesTaskResponse;
+      console.log(
+        `[agnes-video] 任务创建成功: task_id=${createData.task_id} video_id=${createData.video_id} status=${createData.status}`
+      );
+
+      if (createData.status === "failed") {
+        throw new Error(`视频任务创建失败: ${createData.error?.message ?? "未知错误"}`);
+      }
+
+      taskId = createData.task_id;
+      videoId = createData.video_id;
+    } catch (error) {
+      clearTimeout(createTimeout);
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error("创建视频任务超时（60s）");
+      }
+      throw error;
     }
-
-    // Step 3: 返回 URL（REMOTE_URL 模式，不下载 bytes）
-    const videos: GeneratedVideo[] = [
-      {
-        url: videoUrl,
-        mimeType: "video/mp4",
-        size: undefined,
-      },
-    ];
-
-    return { videos, model: modelName, provider: "agnes" };
-  } catch (error) {
-    clearTimeout(createTimeout);
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error("创建视频任务超时（60s）");
-    }
-    throw error;
   }
+
+  // 触发排队阶段进度
+  if (onProgress) {
+    onProgress(0, "任务已提交，等待模型处理...");
+  }
+
+  // Step 2: 轮询直到完成
+  const { url: videoUrl, size, seconds } = await pollVideoTask(
+    taskId,
+    videoId,
+    apiKey,
+    baseURL,
+    300000,
+    onProgress
+  );
+
+  console.log(`[agnes-video] 视频生成完成: url=${videoUrl} size=${size} seconds=${seconds}`);
+
+  // 触发下载阶段进度
+  if (onProgress) {
+    onProgress(100, "视频生成完成，正在下载...");
+  }
+
+  // Step 3: 返回 URL（REMOTE_URL 模式，不下载 bytes）
+  const videos: GeneratedVideo[] = [
+    {
+      url: videoUrl,
+      mimeType: "video/mp4",
+      size: undefined,
+    },
+  ];
+
+  return { videos, model: modelName, provider: "agnes" };
 }
 
 /**

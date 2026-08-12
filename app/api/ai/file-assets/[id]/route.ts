@@ -72,6 +72,14 @@ export async function GET(
     return NextResponse.json({ error: "File data not available" }, { status: 404 });
   } catch (error) {
     console.error("[api/ai/file-assets/[id]] error:", error);
+    // 区分错误类型，返回适当的 HTTP 状态码
+    const message = error instanceof Error ? error.message : "Internal server error";
+    if (message === "UNAUTHORIZED") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (message === "FORBIDDEN") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

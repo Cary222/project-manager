@@ -27,7 +27,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 
-    // 创建 message（executionStatus=QUEUED）
+    // 先存用户消息
+    const userMessage = await prisma.aiChatMessage.create({
+      data: {
+        conversationId,
+        role: "user",
+        content: prompt,
+      },
+      select: { id: true, createdAt: true },
+    });
+
+    // 创建 assistant 消息（executionStatus=QUEUED）
     const message = await prisma.aiChatMessage.create({
       data: {
         conversationId,
@@ -39,10 +49,10 @@ export async function POST(req: NextRequest) {
       select: { id: true, createdAt: true, executionStatus: true },
     });
 
-    // 更新对话 lastMessageAt
+    // 更新对话 lastMessageAt（算用户+AI 两条）
     await prisma.aiConversation.update({
       where: { id: conversationId },
-      data: { lastMessageAt: message.createdAt, messageCount: { increment: 1 } },
+      data: { lastMessageAt: message.createdAt, messageCount: { increment: 2 } },
     });
 
     // enqueue BackgroundJob

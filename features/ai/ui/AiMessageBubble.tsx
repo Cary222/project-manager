@@ -246,6 +246,7 @@ export function AiMessageBubble({
                     height={320}
                     className="object-cover"
                     loading="lazy"
+                    unoptimized
                   />
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
                     <span className="opacity-0 group-hover:opacity-100 text-white text-sm bg-black/50 px-3 py-1 rounded-full transition-opacity">

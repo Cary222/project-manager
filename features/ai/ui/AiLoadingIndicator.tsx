@@ -23,6 +23,13 @@ const DEFAULT_LABELS: Record<LoadingType, string> = {
   video: "正在生成视频...",
 };
 
+/** orb 状态映射：不同生成类型使用不同的动画 */
+const ORB_STATES: Record<LoadingType, "working" | "searching" | "solving" | "listening" | "connecting" | "weaving" | "composing" | "breathing" | "shaping"> = {
+  thinking: "working",
+  image: "shaping",
+  video: "weaving",
+};
+
 export function AiLoadingIndicator({
   type,
   label,
@@ -33,6 +40,7 @@ export function AiLoadingIndicator({
 }: AiLoadingIndicatorProps) {
   const displayLabel = label ?? DEFAULT_LABELS[type];
 
+  // 思考状态：纯 orb
   if (type === "thinking") {
     return (
       <div className={`flex items-center gap-3 ${className}`}>
@@ -42,7 +50,7 @@ export function AiLoadingIndicator({
     );
   }
 
-  // 图片/视频占位动画：深色占位框 + 脉冲动画 + 状态文字
+  // 图片/视频占位框：脉冲背景 + SVG图标 + orb + 进度条
   const aspectClass = {
     square: "aspect-square",
     wide: "aspect-video",
@@ -56,7 +64,7 @@ export function AiLoadingIndicator({
         className={`relative overflow-hidden rounded-xl bg-ink-100 ${aspectClass}`}
         style={{ width: estimatedWidth, maxWidth: "100%" }}
       >
-        {/* 脉冲背景 */}
+        {/* 脉冲渐变背景 */}
         <div className="absolute inset-0 flex items-center justify-center">
           <div
             className="h-full w-full animate-pulse rounded-xl bg-gradient-to-br from-ink-200/50 to-ink-100/30"
@@ -64,11 +72,14 @@ export function AiLoadingIndicator({
           />
         </div>
 
-        {/* 中心图标 */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+        {/* 中心内容：orb + 图标叠加 */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+          {/* orb 动画 */}
+          <ThinkingOrb state={ORB_STATES[type]} size={64} />
+          {/* SVG 图标（叠加在 orb 下方） */}
           {type === "image" ? (
             <svg
-              className="h-8 w-8 text-ink-400"
+              className="h-5 w-5 text-ink-400"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -82,7 +93,7 @@ export function AiLoadingIndicator({
             </svg>
           ) : (
             <svg
-              className="h-8 w-8 text-ink-400"
+              className="h-5 w-5 text-ink-400"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -93,36 +104,31 @@ export function AiLoadingIndicator({
               <polygon points="5 3 19 12 5 21 5 3" />
             </svg>
           )}
+        </div>
 
-          {/* 进度条 */}
-          <div className="h-1 w-3/4 overflow-hidden rounded-full bg-ink-200/50">
-            {progress !== undefined ? (
-              // 真实进度条
-              <div
-                className="h-full rounded-full bg-brand-500 transition-all duration-500"
-                style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
-              />
-            ) : (
-              // 动画进度条
-              <div
-                className="h-full animate-progress-bar rounded-full bg-brand-400/60"
-                style={{
-                  animationDuration: "2s",
-                  animationIterationCount: "infinite",
-                }}
-              />
-            )}
-          </div>
-
-          {/* 百分比显示 */}
-          {progress !== undefined && (
-            <span className="text-xs font-medium text-ink-500">{progress}%</span>
+        {/* 底部进度条 */}
+        <div className="absolute bottom-0 left-0 right-0 h-1.5 overflow-hidden rounded-b-xl bg-ink-200/50">
+          {progress !== undefined ? (
+            <div
+              className="h-full rounded-b-xl bg-brand-500 transition-all duration-500"
+              style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
+            />
+          ) : (
+            <div
+              className="h-full animate-progress-bar rounded-b-xl bg-brand-400/60"
+              style={{ animationDuration: "2s", animationIterationCount: "infinite" }}
+            />
           )}
         </div>
       </div>
 
-      {/* 状态文字 */}
-      <span className="text-sm text-ink-secondary">{displayLabel}</span>
+      {/* 底部文字 */}
+      <span className="text-sm font-medium text-ink-600">{displayLabel}</span>
+
+      {/* 百分比显示 */}
+      {progress !== undefined && (
+        <span className="text-xs font-medium text-ink-500">{progress}%</span>
+      )}
     </div>
   );
 }

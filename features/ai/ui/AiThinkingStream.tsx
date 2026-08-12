@@ -18,6 +18,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { ThinkingOrb } from "thinking-orbs";
 import type { TaskRecord, TaskCategory } from "@/features/ai/types";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -81,12 +82,7 @@ function StatusIcon({ status }: { status: TaskRecord["status"] }) {
   switch (status) {
     case "running":
       return (
-        <span className="relative inline-flex h-3.5 w-3.5">
-          <span className="absolute inset-0 animate-spin rounded-full border-2 border-brand-200 border-t-brand-500" />
-          <span className="absolute inset-0 flex items-center justify-center">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-500" />
-          </span>
-        </span>
+        <ThinkingOrb state="working" size={20} />
       );
     case "success":
       return (
@@ -330,10 +326,7 @@ export function AiThinkingStream({
       >
         {isRunning ? (
           <>
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-500" />
-            </span>
+            <ThinkingOrb state="working" size={20} />
             <span className="font-medium text-brand-700">正在思考</span>
           </>
         ) : (
@@ -388,10 +381,7 @@ export function AiThinkingStream({
       {/* Running indicator */}
       {isRunning && (
         <div className="mb-1 flex items-center gap-2">
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-75" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-500" />
-          </span>
+          <ThinkingOrb state="working" size={20} />
           <span className="text-xs font-medium text-brand-700">正在思考</span>
           <span className="font-mono text-xs text-brand-500">{formatDuration(totalMs)}</span>
         </div>

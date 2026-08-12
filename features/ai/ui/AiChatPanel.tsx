@@ -88,6 +88,8 @@ interface Message {
     percent?: number;
     detail?: string;
   };
+  /** 生成时的 loading 类型（图片/视频），用于显示正确的占位动画 */
+  loadingType?: "image" | "video";
 }
 
 /** Map ThinkingNodeName → TaskCategory for placeholder tasks. */
@@ -786,6 +788,7 @@ export function AiChatPanel({
               content: "正在生成图片...",
               executionStatus: "QUEUED",
               attachments: [],
+              loadingType: "image",
             },
           ]);
           // 开始轮询
@@ -857,6 +860,7 @@ export function AiChatPanel({
               content: "正在生成视频...",
               executionStatus: "QUEUED",
               attachments: [],
+              loadingType: "video",
             },
           ]);
           // 开始轮询（视频生成较慢，超时设为 5 分钟）
@@ -1504,7 +1508,7 @@ export function AiChatPanel({
                   totalThinkingMs={msg.totalThinkingMs}
                   executionStatus={msg.executionStatus}
                   attachments={msg.attachments}
-                  loadingType={aiMode === "video" ? "video" : "image"}
+                  loadingType={msg.loadingType ?? (aiMode === "video" ? "video" : "image")}
                   progress={msg.progress}
                   onCandidateSelect={(candidateId) => handleSend(candidateId)}
                 />

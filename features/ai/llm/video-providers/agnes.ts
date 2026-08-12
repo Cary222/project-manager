@@ -69,11 +69,36 @@ async function pollVideoTask(
     }
 
     if (data.status === "completed") {
-      if (!data.metadata?.url) {
-        throw new Error("视频生成完成但无 URL");
+      // 按优先级探测各可能字段，打印结构供调试
+      const possibleUrl =
+        data.metadata?.url ||
+        (data as unknown as { url?: string }).url ||
+        (data as unknown as { video_url?: string }).video_url ||
+        (data as unknown as { output?: { url?: string } }).output?.url ||
+        (data as unknown as { result?: { url?: string } }).result?.url ||
+        (data as unknown as { data?: { url?: string } }).data?.url;
+
+      console.log("[agnes-video] completed 原始响应结构:", {
+        topLevel: Object.keys(data),
+        metadata: data.metadata ? Object.keys(data.metadata) : null,
+        url: possibleUrl ? "FOUND" : "MISSING",
+        raw: {
+          id: data.id,
+          video_id: data.video_id,
+          task_id: data.task_id,
+          status: data.status,
+          progress: data.progress,
+          seconds: data.seconds,
+          size: data.size,
+          metadataUrl: data.metadata?.url,
+        },
+      });
+
+      if (!possibleUrl) {
+        throw new Error(`视频生成完成但无 URL - metadata: ${JSON.stringify(data.metadata)}`);
       }
       return {
-        url: data.metadata.url,
+        url: possibleUrl,
         size: data.size,
         seconds: data.seconds,
       };
