@@ -40,16 +40,6 @@ export interface GenerateVideoResult {
 }
 
 /**
- * 可重试错误：触发指数退避重试（而非固定重试次数）
- */
-export class RetryableError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "RetryableError";
-  }
-}
-
-/**
  * 根据 modelRef 和 baseURL 判断使用哪个 provider
  *
  * agnes: apihub.agnes-ai.com 的视频生成 API（异步任务）
