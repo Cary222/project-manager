@@ -5,37 +5,10 @@ set -e
 
 WORK="/home/hxy/work/personal/project-manager"
 LOG="/tmp/pm-deploy.log"
-PORT=3003
 DEPLOY_LOCK="/tmp/pm-deploy.lock"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG"
-}
-
-kill_port() {
-    local port="$1"
-    local pids
-    pids=$(ss -ltnp "sport = :$port" 2>/dev/null | awk -F'pid=' '/users:\(\("next-server|next-server|node/ {gsub(/,.*/,"",$2); print $2}' | sort -u || true)
-    if [ -n "$pids" ]; then
-        log "停止占用 ${port} 端口的进程: ${pids}"
-        kill $pids 2>/dev/null || true
-    fi
-    fuser -k "${port}/tcp" 2>/dev/null || true
-}
-
-wait_for_port_free() {
-    local port="$1"
-    local timeout="${2:-20}"
-    local elapsed=0
-
-    while ss -ltn "sport = :$port" | tail -n +2 | grep -q ":$port"; do
-        if [ "$elapsed" -ge "$timeout" ]; then
-            log "等待端口 ${port} 释放超时"
-            return 1
-        fi
-        sleep 1
-        elapsed=$((elapsed + 1))
-    done
 }
 
 if ! ( set -o noclobber; : > "$DEPLOY_LOCK" ) 2>/dev/null; then
@@ -81,28 +54,33 @@ if ! npm run build >> "$LOG" 2>&1; then
     exit 1
 fi
 
-log "检查并停止当前服务..."
-kill_port "$PORT"
-wait_for_port_free "$PORT" 20 || {
-    log "端口 ${PORT} 未能及时释放，取消本次启动"
-    exit 1
-}
+log "重启 project-manager 服务..."
 
-log "启动服务..."
-nohup npm run start >> "$LOG" 2>&1 &
+systemctl --user restart project-manager-web.service
+systemctl --user restart project-manager-worker.service
+systemctl --user restart project-manager-background-worker.service
+systemctl --user restart embedding-api.service
 
-elapsed=0
-while ! ss -ltn | tail -n +2 | grep -q ":$PORT"; do
-    if [ "$elapsed" -ge 20 ]; then
-        log "服务启动超时！最近日志："
-        tail -60 "$LOG" | tee -a "$LOG"
-        exit 1
+# 健康检查
+sleep 5
+for svc in project-manager-web project-manager-worker project-manager-background-worker embedding-api; do
+    if ! systemctl --user is-active --quiet "${svc}.service"; then
+        log "警告: ${svc} 未达到 active 状态"
     fi
-    sleep 1
-    elapsed=$((elapsed + 1))
 done
 
-log "服务启动成功 (port ${PORT})"
+# HTTP health check
+if curl -fsS --retry 3 --retry-delay 1 http://127.0.0.1:3003 > /dev/null 2>&1; then
+    log "Web health check 通过"
+else
+    log "警告: Web health check 未通过，请检查日志"
+fi
+
+if curl -fsS --retry 3 --retry-delay 1 http://127.0.0.1:5000/health > /dev/null 2>&1; then
+    log "Embedding API health check 通过"
+else
+    log "警告: Embedding API health check 未通过"
+fi
 
 # 重试失败的 IndexJob（FILE_ASSET 类型）
 log "重试失败的索引任务..."

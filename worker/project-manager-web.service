@@ -1,0 +1,33 @@
+# ~/.config/systemd/user/project-manager-web.service
+#
+# 安装步骤：
+#   1. 把这份文件放到目标机器的 ~/.config/systemd/user/project-manager-web.service
+#      （按需替换 WorkingDirectory / ExecStart / EnvironmentFile 路径）
+#   2. systemctl --user daemon-reload
+#   3. systemctl --user enable --now project-manager-web.service
+#   4. 验证：systemctl --user status project-manager-web.service
+#   5. 看日志：journalctl --user -u project-manager-web -f
+#
+# 注意事项：
+#   - 这是 user-level unit（不用 sudo）
+#   - Restart=always + RestartSec=5：崩溃自动重启
+#   - Next.js 生产模式监听 0.0.0.0:3003
+
+[Unit]
+Description=project-manager Next.js Web Server (:3003)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/hxy/work/personal/project-manager
+Environment=NODE_ENV=production
+EnvironmentFile=/home/hxy/work/personal/project-manager/.env.production
+ExecStart=/home/hxy/work/personal/project-manager/node_modules/.bin/next start -H 0.0.0.0 -p 3003
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=project-manager-web
+
+[Install]
+WantedBy=default.target

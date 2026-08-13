@@ -1,0 +1,33 @@
+# ~/.config/systemd/user/embedding-api.service
+#
+# 安装步骤：
+#   1. 把这份文件放到目标机器的 ~/.config/systemd/user/embedding-api.service
+#      （按需替换 WorkingDirectory / ExecStart / EnvironmentFile 路径）
+#   2. systemctl --user daemon-reload
+#   3. systemctl --user enable --now embedding-api.service
+#   4. 验证：systemctl --user status embedding-api.service
+#   5. 看日志：journalctl --user -u embedding-api.service -f
+#
+# 注意事项：
+#   - 这是 user-level unit（不用 sudo）
+#   - Restart=always + RestartSec=10：崩溃自动重启
+#   - 健康检查端点：http://127.0.0.1:5000/health
+
+[Unit]
+Description=project-manager Embedding API (BGE-M3 FastAPI :5000)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/hxy/work/personal/project-manager/embedding
+EnvironmentFile=/home/hxy/work/personal/project-manager/.env.production
+ExecStart=/usr/bin/python3 -m uvicorn api:app --host 0.0.0.0 --port 5000
+Restart=always
+RestartSec=10
+TimeoutStartSec=120
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=embedding-api
+
+[Install]
+WantedBy=default.target
