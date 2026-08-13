@@ -26,9 +26,9 @@ export async function GET(
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
-    if (asset.storageType === "DATABASE" && asset.bytes) {
+    // DATABASE / BASE64: Prisma stores as bytes — stream back as binary
+    if ((asset.storageType === "DATABASE" || asset.storageType === "BASE64") && asset.bytes) {
       const contentType = asset.mimeType ?? "application/octet-stream";
-      // Prisma returns Buffer; convert to Uint8Array for NextResponse compatibility
       const uint8 = new Uint8Array(asset.bytes as Buffer);
       return new NextResponse(uint8, {
         headers: {
@@ -58,7 +58,11 @@ export async function GET(
       }
 
       // 只允许已知 Provider 域名
-      const ALLOWED_DOMAINS = ["apihub.agnes-ai.com", "agnes-ai.com"];
+      const ALLOWED_DOMAINS = [
+        "apihub.agnes-ai.com",
+        "agnes-ai.com",
+        "platform-outputs.agnes-ai.space",
+      ];
       const isAllowed = ALLOWED_DOMAINS.some(
         (d) => url.hostname === d || url.hostname.endsWith(`.${d}`)
       );

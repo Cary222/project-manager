@@ -934,6 +934,14 @@ enum AiFileStorageType {
   DATABASE
   OBJECT_STORAGE
   REMOTE_URL
+  BASE64
+
+  @@schema("pm")
+}
+
+enum AiAttachmentDirection {
+  INPUT // 用户输入的参考图片
+  OUTPUT // AI 生成的图片/视频
 
   @@schema("pm")
 }
@@ -981,12 +989,13 @@ model JobOutput {
 }
 
 model AiMessageAttachment {
-  id          String           @id @default(cuid())
+  id          String                @id @default(cuid())
   messageId   String
   fileAssetId String
-  jobOutputId String?          @unique
+  jobOutputId String?               @unique
   type        AiAttachmentType
-  createdAt   DateTime         @default(now())
+  direction   AiAttachmentDirection @default(OUTPUT)
+  createdAt   DateTime              @default(now())
 
   message   AiChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
   fileAsset AiFileAsset   @relation(fields: [fileAssetId], references: [id], onDelete: Cascade)

@@ -4,7 +4,9 @@ import { getRealtimeConfig } from "@/features/ai/audio/realtime/dashscope";
 
 /**
  * POST /api/ai/audio/realtime/config
- * 获取 DashScope Realtime 配置（WebSocket URL + token）
+ * 获取 DashScope Realtime 配置（WebSocket URL + 认证 cookie）
+ *
+ * 注意：WebSocket 无法传递自定义 headers，改用 HttpOnly cookie 认证
  */
 export async function POST() {
   try {
@@ -18,7 +20,20 @@ export async function POST() {
 
     const config = await getRealtimeConfig(session.user.id);
 
-    return NextResponse.json({ data: config, error: null });
+    const response = NextResponse.json({ data: config, error: null });
+
+    // 如果有 token，设置 HttpOnly cookie（WebSocket 认证用）
+    if (config.token) {
+      response.cookies.set("dashscope_realtime_token", config.token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 60 * 5, // 5 分钟
+        path: "/",
+      });
+    }
+
+    return response;
   } catch (error) {
     console.error("[POST /api/ai/audio/realtime/config] error:", error);
 

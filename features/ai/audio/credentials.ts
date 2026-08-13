@@ -336,15 +336,16 @@ function getDefaultModelForCapability(capability: VoiceCapability): string {
 
 /**
  * 获取 Token Plan MaaS 的已知模型（基于终端显示的模型列表）
+ *
+ * 注意：Token Plan MaaS (sk-sp- Key) 不支持 WebSocket Realtime 和 STT，
+ * 因为其鉴权协议与标准 DashScope 不同。TTS 能力可用。
  */
 function getKnownMaaSModel(capability: VoiceCapability): string | null {
   switch (capability) {
     case "tts":
       return "qwen-audio-3.0-tts-plus";
     case "stt":
-      // Token Plan MaaS 不提供独立的 STT 模型
-      // 回退到标准 DashScope API
-      return null;
+      return "paraformer-v3";
     case "realtime":
       return "qwen-audio-3.0-realtime-plus";
     default:

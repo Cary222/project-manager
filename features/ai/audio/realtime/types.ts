@@ -3,6 +3,7 @@ export interface RealtimeConfig {
   url: string;
   token?: string;
   expiresAt?: number;
+  headers?: Record<string, string>;
 }
 
 export interface RealtimeMessage {

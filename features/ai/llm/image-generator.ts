@@ -18,6 +18,8 @@ export interface GenerateImageParams {
   size?: string;
   apiKey?: string;
   baseURL?: string; // OpenAI 兼容端点需要此字段
+  /** 输入图片 URL 数组（I2I 模式） */
+  imageUrls?: string[];
   /** 进度回调：接收 (percent: number, detail: string) */
   onProgress?: (percent: number, detail: string) => void;
 }
@@ -88,13 +90,25 @@ async function generateWithDashScopeWan(
   apiKey: string,
   baseURL: string
 ): Promise<GenerateImageResult> {
-  const { prompt, modelRef = "wan2.7-image", n = 1, size = "2K" } = params;
+  const { prompt, modelRef = "wan2.7-image", n = 1, size = "2K", imageUrls } = params;
   const [_provider, modelName] = modelRef.includes(":") ? modelRef.split(":") : ["", modelRef];
 
   // 从 compatible-mode baseURL 推导 multimodal-generation 端点
   // https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
   // → https://token-plan.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
   const endpoint = baseURL.replace(/\/compatible-mode\/v1.*$/, "/api/v1/services/aigc/multimodal-generation/generation");
+
+  // 构建消息内容
+  const content: Array<{ type: string; text?: string; image?: string }> = [];
+
+  // I2I 模式：添加输入图片
+  if (imageUrls && imageUrls.length > 0) {
+    content.push({ type: "image", image: imageUrls[0] });
+    console.log(`[dashscope-wan] I2I mode: using input image ${imageUrls[0]}`);
+  }
+
+  // 添加文本 prompt
+  content.push({ type: "text", text: prompt });
 
   console.log(`[dashscope-wan] 发起生图: endpoint=${endpoint}, model=${modelName}, prompt="${prompt}"`);
 
@@ -115,7 +129,7 @@ async function generateWithDashScopeWan(
           messages: [
             {
               role: "user",
-              content: [{ text: prompt }],
+              content,
             },
           ],
         },
@@ -189,12 +203,30 @@ async function generateWithAgnes(
   apiKey: string,
   baseURL: string
 ): Promise<GenerateImageResult> {
-  const { prompt, modelRef = "agnes-image-2.1-flash", n = 1, size = "1K" } = params;
+  const { prompt, modelRef = "agnes-image-2.1-flash", n = 1, size = "1K", imageUrls } = params;
   const [_provider, modelName] = modelRef.includes(":") ? modelRef.split(":") : ["", modelRef];
 
   // Agnes 图片端点：apihub.agnes-ai.com/v1/images/generations
   // baseURL 通常是 apihub.agnes-ai.com/v1，构造完整端点
   const endpoint = `${baseURL.replace(/\/$/, "")}/images/generations`;
+
+  // 构建请求体
+  const requestBody: Record<string, unknown> = {
+    model: modelName,
+    prompt,
+    size,
+    n,
+  };
+
+  // I2I 模式：传入输入图片 URL
+  // Agnes API 要求图片放在 extra_body.image 中（文档：https://wiki.agnes-ai.com/en/docs/agnes-image-21-flash.md）
+  if (imageUrls && imageUrls.length > 0) {
+    requestBody.extra_body = {
+      image: imageUrls,
+      response_format: "url",
+    };
+    console.log(`[agnes-image] I2I mode: using input images ${JSON.stringify(imageUrls)}`);
+  }
 
   console.log(`[agnes-image] 发起生图: endpoint=${endpoint}, model=${modelName}, prompt="${prompt}"`);
 
@@ -209,12 +241,7 @@ async function generateWithAgnes(
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: modelName,
-        prompt,
-        size,
-        n,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     clearTimeout(timeout);

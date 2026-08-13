@@ -188,6 +188,9 @@ export function AiChatPanel({
   const [pendingCandidates, setPendingCandidates] = useState<CandidateUser[] | null>(null);
   const [selectedModel, setSelectedModel] = useState<string>("agnes:agnes-2.5-flash");
 
+  // Image 模式参考图 state（用于 I2I）
+  const [inputFileIds, setInputFileIds] = useState<{ id: string; url: string; name: string }[]>([]);
+
   // Workflow match state: passed to parent for optimistic mode switch
   const [workflowMatch, setWorkflowMatch] = useState<{
     workflowType: string;
@@ -214,11 +217,45 @@ export function AiChatPanel({
   // State derived from ref — triggers re-render when ref changes so
   // AiMessageBubble always gets fresh tasks without state batching delays.
   const [streamingTasks, setStreamingTasks] = useState<TaskRecord[]>([]);
-  // Load preferred model from localStorage
+
+  // Load preferred model from localStorage (per-mode storage)
   useEffect(() => {
     const saved = localStorage.getItem("preferredModel");
     if (saved) setSelectedModel(saved);
   }, []);
+
+  // 获取模式类别（chat/image/video）用于模型偏好存储
+  const getModeCategory = (mode: AiMode): string => {
+    if (mode === "image") return "image";
+    if (mode === "video") return "video";
+    return "chat";
+  };
+
+  // Switch model when mode changes (user preference > system default)
+  useEffect(() => {
+    const modeCategory = getModeCategory(aiMode);
+    // 优先读取用户在该模式类别下的偏好
+    const modeKey = `preferredModel_${modeCategory}`;
+    const saved = localStorage.getItem(modeKey);
+    if (saved) {
+      setSelectedModel(saved);
+      return;
+    }
+    // 没有保存过偏好，使用模式系统默认模型
+    const defaults: Record<string, string> = {
+      chat: "agnes:agnes-2.5-flash",
+      image: "agnes:agnes-image-2.1-flash",
+      video: "agnes:agnes-video-v2.0",
+    };
+    setSelectedModel(defaults[modeCategory] ?? "agnes:agnes-2.5-flash");
+  }, [aiMode]);
+
+  // 模式切换时清空参考图
+  useEffect(() => {
+    if (aiMode !== "image") {
+      setInputFileIds([]);
+    }
+  }, [aiMode]);
 
   // Tracks whether the static preset-welcome typewriter is currently running
   // for the active conversation. Used to skip auto-scrolling to the typing
@@ -734,7 +771,11 @@ export function AiChatPanel({
   // ─── Send message ───────────────────────────────────────────────────────────
 
   const handleSend = useCallback(
-    async (message: string) => {
+    async (
+      message: string,
+      images?: { src: string; name: string }[],
+      inputFileIds?: { id: string; url: string; name: string }[]
+    ) => {
       // ── Image generation mode (提前 return，不走 SSE 流) ────────────────────
       if (aiModeRef.current === "image") {
         // Optimistically add user message
@@ -772,6 +813,7 @@ export function AiChatPanel({
               conversationId: convId,
               prompt: message,
               modelName: selectedModelRef.current,
+              inputFileIds: inputFileIds?.map((img) => img.id) ?? [],
             }),
           });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1385,9 +1427,13 @@ export function AiChatPanel({
             value={selectedModel}
             onChange={(model) => {
               setSelectedModel(model);
+              // 同时保存到全局和当前模式类别特定的 key
               localStorage.setItem("preferredModel", model);
+              const modeCategory = getModeCategory(aiMode);
+              localStorage.setItem(`preferredModel_${modeCategory}`, model);
             }}
-            category={aiMode === "auto" ? "auto" : aiMode === "image" ? "image" : aiMode === "video" ? "video" : "chat"}
+            autoMode={aiMode === "auto"}
+            category={aiMode === "image" ? "image" : aiMode === "video" ? "video" : "chat"}
             toolMode={chatToolMode}
           />
           <div className="mx-1 h-4 w-px bg-ink-200" />
@@ -1508,7 +1554,7 @@ export function AiChatPanel({
                   totalThinkingMs={msg.totalThinkingMs}
                   executionStatus={msg.executionStatus}
                   attachments={msg.attachments}
-                  loadingType={msg.loadingType ?? (aiMode === "video" ? "video" : "image")}
+                  loadingType={msg.loadingType ?? (aiModeRef.current === "video" ? "video" : "image")}
                   progress={msg.progress}
                   onCandidateSelect={(candidateId) => handleSend(candidateId)}
                 />
@@ -1524,6 +1570,7 @@ export function AiChatPanel({
                 sources={pendingSources.length > 0 ? pendingSources : undefined}
                 isStreaming
                 thinkingSteps={streamingTasks}
+                loadingType={aiModeRef.current === "video" ? "video" : "image"}
               />
             </div>
           )}
@@ -1589,6 +1636,9 @@ export function AiChatPanel({
           onStop={handleStop}
           isGenerating={isLoading}
           placeholder={isPage ? "输入问题，向小星提问…" : "输入问题..."}
+          taskCategory={aiMode === "image" ? "image" : aiMode === "video" ? "video" : "chat"}
+          initialReferenceImages={aiMode === "image" ? inputFileIds : undefined}
+          onReferenceImagesChange={aiMode === "image" ? setInputFileIds : undefined}
         />
       </div>
     </div>

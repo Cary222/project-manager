@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { getSupportedMimeType } from "@/shared/media/audio/pcm/mime-type";
+import { useVoiceSession } from "./use-voice-session";
 
 export type SpeechInputStatus =
   | "idle"
@@ -28,7 +28,7 @@ export interface UseSpeechInputReturn {
   /** 开始录音 */
   startRecording: () => Promise<void>;
   /** 停止录音并触发识别 */
-  stopRecording: () => Promise<void>;
+  stopRecording: () => void;
   /** 重置状态 */
   reset: () => void;
   /** 主动设置识别结果（用于外部填充） */
@@ -36,13 +36,11 @@ export interface UseSpeechInputReturn {
 }
 
 /**
- * 语音输入 Hook
+ * 语音输入 Hook（封装 useVoiceSession 实现）
  *
- * 功能：
- * - 使用 MediaRecorder 录音
- * - 动态检测支持的 MIME 类型
- * - 60 秒超时保护
- * - 调用 /api/ai/audio/transcribe 进行识别
+ * 使用 Realtime WebSocket API 进行实时语音转文字
+ * - startRecording → 启动 WebSocket 会话，开始麦克风采集
+ * - stopRecording → 提交音频缓冲，触发 response.create
  */
 export function useSpeechInput(
   options: UseSpeechInputOptions = {}
@@ -53,10 +51,21 @@ export function useSpeechInput(
   const [duration, setDuration] = useState(0);
   const [transcript, setTranscriptState] = useState("");
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // 内部使用 useVoiceSession (input 模式)
+  const voiceSession = useVoiceSession({
+    mode: "input",
+    onTranscript: (text) => {
+      setTranscriptState(text);
+      onTranscribe?.(text);
+    },
+    onError: (error) => {
+      setStatus("error");
+      onError?.(error);
+    },
+  });
 
   const clearTimers = useCallback(() => {
     if (timerRef.current) {
@@ -74,36 +83,19 @@ export function useSpeechInput(
     setStatus("idle");
     setDuration(0);
     setTranscriptState("");
-    audioChunksRef.current = [];
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stream.getTracks().forEach((track) => track.stop());
-    }
-    mediaRecorderRef.current = null;
-  }, [clearTimers]);
+    voiceSession.stopSession();
+  }, [clearTimers, voiceSession]);
 
   const startRecording = useCallback(async () => {
     try {
       reset();
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = getSupportedMimeType();
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
-
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.start(1000); // 每秒收集一次数据块
-
       setStatus("recording");
       setDuration(0);
 
-      // 计时器：每秒更新时长
+      // 启动语音会话
+      await voiceSession.startSession();
+
+      // 启动计时器
       timerRef.current = setInterval(() => {
         setDuration((prev) => prev + 1);
       }, 1000);
@@ -113,93 +105,18 @@ export function useSpeechInput(
         void stopRecording();
       }, timeoutMs);
     } catch (error) {
-      let message = "无法访问麦克风";
-      
-      if (error instanceof Error) {
-        if (error.message.includes("Permission denied") || error.name === "NotAllowedError") {
-          message = "请允许麦克风权限。请在浏览器设置中启用麦克风访问。";
-        } else if (error.message.includes("Requested device not found") || error.name === "NotFoundError") {
-          message = "未检测到麦克风设备。请检查麦克风是否已连接。";
-        } else if (error.name === "NotReadableError") {
-          message = "麦克风被其他应用占用。请关闭其他使用麦克风的程序。";
-        } else if (error.name === "OverconstrainedError") {
-          message = "麦克风不支持请求的配置。";
-        } else {
-          message = `无法访问麦克风: ${error.message}`;
-        }
-      }
-      
+      const message = error instanceof Error ? error.message : "启动录音失败";
       setStatus("error");
       onError?.(message);
     }
-  }, [reset, timeoutMs, onError]);
+  }, [reset, timeoutMs, onError, voiceSession]);
 
-  const stopRecording = useCallback(async () => {
-    if (!mediaRecorderRef.current || mediaRecorderRef.current.state === "inactive") {
-      return;
-    }
-
+  const stopRecording = useCallback(() => {
     clearTimers();
-
-    const mediaRecorder = mediaRecorderRef.current;
-
-    return new Promise<void>((resolve) => {
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, {
-          type: getSupportedMimeType(),
-        });
-
-        setStatus("transcribing");
-
-        try {
-          const arrayBuffer = await audioBlob.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-
-          // 从 MIME 类型推断格式
-          const mimeType = getSupportedMimeType();
-          const format = mimeType.includes("mp4") ? "mp4" : mimeType.includes("wav") ? "wav" : "webm";
-
-          const response = await fetch("/api/ai/audio/transcribe", {
-            method: "POST",
-            body: JSON.stringify({
-              audio: buffer.toString("base64"),
-              format,
-            }),
-            headers: {
-              "Content-Type": "application/json",
-            },
-          });
-
-          if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error ?? `请求失败: ${response.status}`);
-          }
-
-          const data = await response.json();
-
-          if (data.error) {
-            throw new Error(data.error);
-          }
-
-          const text = data.data?.text ?? "";
-          setTranscriptState(text);
-          onTranscribe?.(text);
-          setStatus("idle");
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : "语音识别失败，请重试";
-          setStatus("error");
-          onError?.(message);
-        } finally {
-          // 停止所有音轨
-          mediaRecorder.stream.getTracks().forEach((track) => track.stop());
-          resolve();
-        }
-      };
-
-      mediaRecorder.stop();
-    });
-  }, [clearTimers, onTranscribe, onError]);
+    setStatus("transcribing");
+    // 提交音频缓冲并触发识别
+    voiceSession.finishInput();
+  }, [clearTimers, voiceSession]);
 
   return {
     status,

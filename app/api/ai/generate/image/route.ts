@@ -3,19 +3,72 @@ import { prisma } from "@/shared/db/client";
 import { requireSession } from "@/shared/lib/permissions";
 import { enqueueBackgroundJob } from "@/worker/background/jobs";
 import { z } from "zod";
+import { resolveGenerationMode } from "@/features/ai/routing/generation-mode";
 
 const generateImageSchema = z.object({
   conversationId: z.string(),
   prompt: z.string().min(1, "Prompt is required"),
   modelName: z.string().optional(),
-  n: z.number().int().min(1).max(4).optional().default(1), // 生成张数（预留多图）
+  n: z.number().int().min(1).max(4).optional().default(1),
+  inputFileIds: z.array(z.string()).optional(),
 });
 
 export async function POST(req: NextRequest) {
   try {
     const session = await requireSession();
     const body = await req.json();
-    const { conversationId, prompt, modelName, n } = generateImageSchema.parse(body);
+    const { conversationId, prompt, modelName, n, inputFileIds } = generateImageSchema.parse(body);
+
+    // 计算生成模式
+    const generationMode = resolveGenerationMode("image", inputFileIds);
+
+    // I2I 模式必须有输入图片
+    if (generationMode === "IMAGE_TO_IMAGE" && (!inputFileIds || inputFileIds.length === 0)) {
+      return NextResponse.json(
+        { error: "IMAGE_TO_IMAGE mode requires at least one input image" },
+        { status: 400 }
+      );
+    }
+
+    // 第一版限制：最多 1 张输入图
+    if (inputFileIds && inputFileIds.length > 1) {
+      return NextResponse.json(
+        { error: "Current version supports maximum 1 input image" },
+        { status: 400 }
+      );
+    }
+
+    // 验证输入文件（如果提供了的话）
+    if (inputFileIds && inputFileIds.length > 0) {
+      const inputFiles = await prisma.aiFileAsset.findMany({
+        where: {
+          id: { in: inputFileIds },
+        },
+        select: {
+          id: true,
+          mimeType: true,
+        },
+      });
+
+      // 检查是否全部找到
+      if (inputFiles.length !== inputFileIds.length) {
+        return NextResponse.json(
+          { error: "One or more input files not found" },
+          { status: 404 }
+        );
+      }
+
+      // 检查类型必须为 image/*
+      const nonImageFiles = inputFiles.filter(
+        (file) => !file.mimeType?.startsWith("image/")
+      );
+      if (nonImageFiles.length > 0) {
+        return NextResponse.json(
+          { error: "All input files must be images (image/* mime type)" },
+          { status: 400 }
+        );
+      }
+    }
 
     // 验证 conversation 归属
     const conversation = await prisma.aiConversation.findUnique({
@@ -35,6 +88,18 @@ export async function POST(req: NextRequest) {
       },
       select: { id: true, createdAt: true },
     });
+
+    // 如果有输入图片，为用户消息创建 INPUT 附件
+    if (inputFileIds && inputFileIds.length > 0) {
+      await prisma.aiMessageAttachment.createMany({
+        data: inputFileIds.map((fileAssetId) => ({
+          messageId: userMessage.id,
+          fileAssetId,
+          type: "IMAGE",
+          direction: "INPUT",
+        })),
+      });
+    }
 
     // 创建 assistant 消息（executionStatus=QUEUED）
     const message = await prisma.aiChatMessage.create({
@@ -63,6 +128,7 @@ export async function POST(req: NextRequest) {
         prompt,
         modelRef: modelName ?? "openai:wan2.7-image",
         n,
+        inputFileIds: inputFileIds ?? [],
       },
       priority: 50,
       correlationId: message.id,

@@ -5,6 +5,8 @@ import { emitMessageDelta } from "@/features/ai/lib/domain-events";
 import { generateSingleImage } from "@/features/ai/llm/image-generator";
 import { sha256Hex } from "@/shared/lib/hash";
 import { resolveCredentialWithFallback } from "@/features/ai/llm/credentials/api-key-store";
+import { resolveProviderImageSource } from "@/features/ai/lib/file-source";
+import { resolveGenerationMode } from "@/features/ai/routing/generation-mode";
 
 interface ImagePayload {
   messageId: string;
@@ -12,6 +14,8 @@ interface ImagePayload {
   prompt: string;
   modelRef?: string;
   n?: number;
+  /** 输入图片文件 ID 数组（I2I 模式） */
+  inputFileIds?: string[];
 }
 
 /** 解析生图 API Key — 从 DB SYSTEM/USER provider 读取 */
@@ -34,12 +38,45 @@ export async function handleImageGenerate(
   job: BackgroundJob,
   _workerId: string,
 ): Promise<void> {
-  const { messageId, userId, prompt, modelRef = "openai:wan2.7-image" } = job.payload as unknown as ImagePayload;
+  const { messageId, userId, prompt, modelRef = "openai:wan2.7-image", inputFileIds } = job.payload as unknown as ImagePayload;
   const startTime = Date.now();
+
+  // 计算生成模式（T2I vs I2I）
+  const generationMode = resolveGenerationMode("image", inputFileIds);
+  console.log(`[IMAGE_GENERATE] job=${job.id} mode=${generationMode} model=${modelRef}`);
+
+  // I2I 模式：解析输入图片为 Provider 可访问的 URL
+  let inputImageUrls: string[] = [];
+  if (generationMode === "IMAGE_TO_IMAGE" && inputFileIds) {
+    try {
+      // 并行解析所有输入图片
+      const sources = await Promise.all(
+        inputFileIds.map((id) => resolveProviderImageSource(id))
+      );
+      inputImageUrls = sources.map((s) => s.url);
+      console.log(`[IMAGE_GENERATE] I2I mode: ${inputImageUrls.length} input images resolved`);
+      if (inputImageUrls.length > 0) {
+        console.log(`[IMAGE_GENERATE] inputImages: ${inputImageUrls.join(", ")}`);
+      }
+    } catch (error) {
+      // 文件解析失败（DATABASE storage 等）
+      console.error(`[IMAGE_GENERATE] Failed to resolve input images:`, error);
+      await prisma.aiChatMessage.update({
+        where: { id: messageId },
+        data: {
+          executionStatus: "FAILED",
+          content: "输入图片无法访问，请使用外部图片链接。",
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+      });
+      emitMessageDelta(messageId, { executionStatus: "FAILED" });
+      throw error;
+    }
+  }
 
   // 解析生图 API Key（支持 openai provider 的 wan2.7-image 或独立 wanx provider）
   const credential = await resolveImageApiKey(userId, modelRef);
-  console.log(`[image-handler] userId=${userId} modelRef=${modelRef} credential=`, 
+  console.log(`[image-handler] userId=${userId} modelRef=${modelRef} credential=`,
     credential ? `{ apiKey: ${credential.apiKey.substring(0, 10)}..., baseURL: ${credential.baseURL} }` : null);
   
   if (!credential) {
@@ -90,7 +127,7 @@ export async function handleImageGenerate(
 
   // 调用 AI 生图（传入进度回调）
   const imageResult = await generateSingleImage(
-    { prompt, modelRef, apiKey: credential.apiKey, baseURL: credential.baseURL },
+    { prompt, modelRef, apiKey: credential.apiKey, baseURL: credential.baseURL, imageUrls: inputImageUrls },
     async (percent: number, detail: string) => {
       // 更新 DB 和 SSE
       await prisma.aiChatMessage.update({

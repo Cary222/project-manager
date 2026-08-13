@@ -305,3 +305,25 @@ export const IconVolumeOff = (p: IconProps) => (
     <line x1="17" y1="9" x2="23" y2="15" />
   </svg>
 );
+
+export const IconImage = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <circle cx="8.5" cy="8.5" r="1.5" />
+    <polyline points="21,15 16,10 5,21" />
+  </svg>
+);
+
+export const IconUpload = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="17 8 12 3 7 8" />
+    <line x1="12" y1="3" x2="12" y2="15" />
+  </svg>
+);
+
+export const IconPaperclip = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+  </svg>
+);

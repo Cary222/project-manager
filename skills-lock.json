@@ -103,11 +103,29 @@
       "skillPath": ".claude/skills/llm-streaming-response-handler/SKILL.md",
       "computedHash": "be2e51c55bb48af07641e03cd45b9701f3c79523134ca1d6f58cd25d46b39b41"
     },
+    "openai-whisper": {
+      "source": "openclaw/openclaw",
+      "sourceType": "github",
+      "skillPath": "skills/openai-whisper/SKILL.md",
+      "computedHash": "91dfa3149f593d2e794aadc9f78cffd5d274ff1366f01b777b77abfd2b5474d8"
+    },
+    "qianwen-audio-tts": {
+      "source": "qianwen-ai/qianwen-ai",
+      "sourceType": "github",
+      "skillPath": "skills/audio/qianwen-audio-tts/SKILL.md",
+      "computedHash": "41be3857ad6500ee023945dcba0937359c6c1160281eb267ee1fa3cac9fc9b8d"
+    },
     "rag-retrieval": {
       "source": "yonatangross/orchestkit",
       "sourceType": "github",
       "skillPath": "plugins/ork/skills/rag-retrieval/SKILL.md",
       "computedHash": "f3f9b009e0f563a3b74e4625b6c82e5abeb217f9c47b2b4acf63d18533d5e419"
+    },
+    "speech-engine": {
+      "source": "elevenlabs/skills",
+      "sourceType": "github",
+      "skillPath": "speech-engine/SKILL.md",
+      "computedHash": "5924f8fd6c5a3b94ad56652b40c82b52dc04d11958ef31161d4462c38fd65489"
     },
     "tdd": {
       "source": "mattpocock/skills",
