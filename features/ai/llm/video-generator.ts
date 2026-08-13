@@ -296,8 +296,8 @@ async function generateWithAgnes(
 
   // Step 2: 轮询直到完成
   const { url: videoUrl, size, seconds } = await pollVideoTask(
-    taskId,
-    videoId,
+    taskId!,
+    videoId!,
     apiKey,
     baseURL,
     300000,

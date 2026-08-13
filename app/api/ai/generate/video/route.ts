@@ -150,14 +150,13 @@ export async function POST(req: NextRequest) {
     console.error("[DEBUG-video-route] error name:", error instanceof Error ? error.constructor.name : typeof error);
     if (error instanceof Error) {
       console.error("[DEBUG-video-route] error message:", error.message);
+    }
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Invalid input", details: error.issues }, { status: 400 });
     }
-    if (error instanceof Error) {
-      if (error.message === "UNAUTHORIZED") {
-        console.error("[DEBUG-video-route] UNAUTHORIZED - returning 401");
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
+    if (error instanceof Error && error.message === "UNAUTHORIZED") {
+      console.error("[DEBUG-video-route] UNAUTHORIZED - returning 401");
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
