@@ -40,6 +40,16 @@ export interface GenerateVideoResult {
 }
 
 /**
+ * 可重试错误：触发指数退避重试（而非固定重试次数）
+ */
+export class RetryableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RetryableError";
+  }
+}
+
+/**
  * 根据 modelRef 和 baseURL 判断使用哪个 provider
  *
  * agnes: apihub.agnes-ai.com 的视频生成 API（异步任务）
@@ -218,59 +228,74 @@ async function generateWithAgnes(
       `[agnes-video] 发起视频生成: endpoint=${endpoint}, model=${modelName}, prompt="${prompt}", imageUrl=${imageUrl}`
     );
 
-    // Step 1: 创建视频任务
-    const controller = new AbortController();
-    const createTimeout = setTimeout(() => controller.abort(), 60000); // 创建任务 60s 超时
+    // Step 1: 创建视频任务（503 时指数退避重试）
+    const MAX_RETRIES = 5;
+    const BACKOFF_MS = [5_000, 15_000, 30_000, 60_000, 120_000]; // 5s ~ 2min
+    const PER_TRY_TIMEOUT_MS = 60_000;
 
-    try {
-      const requestBody: Record<string, unknown> = {
-        model: modelName,
-        prompt,
-      };
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const controller = new AbortController();
+      const createTimeout = setTimeout(() => controller.abort(), PER_TRY_TIMEOUT_MS);
 
-      if (imageUrl) {
-        requestBody.image = imageUrl;
-      }
+      try {
+        const requestBody: Record<string, unknown> = {
+          model: modelName,
+          prompt,
+        };
 
-      // 默认参数：5 秒视频，num_frames: 121 (8*15+1), frame_rate: 24
-      requestBody.num_frames = 121;
-      requestBody.frame_rate = 24;
+        if (imageUrl) {
+          requestBody.image = imageUrl;
+        }
 
-      const res = await fetch(endpoint, {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(requestBody),
-      });
+        // 默认参数：5 秒视频，num_frames: 121 (8*15+1), frame_rate: 24
+        requestBody.num_frames = 121;
+        requestBody.frame_rate = 24;
 
-      clearTimeout(createTimeout);
+        const res = await fetch(endpoint, {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestBody),
+        });
 
-      if (!res.ok) {
+        clearTimeout(createTimeout);
+
+        if (res.ok) {
+          const createData = (await res.json()) as AgnesTaskResponse;
+          console.log(
+            `[agnes-video] 任务创建成功: task_id=${createData.task_id} video_id=${createData.video_id} status=${createData.status}`
+          );
+
+          if (createData.status === "failed") {
+            throw new Error(`视频任务创建失败: ${createData.error?.message ?? "未知错误"}`);
+          }
+
+          taskId = createData.task_id;
+          videoId = createData.video_id;
+          break; // 成功，跳出重试循环
+        }
+
         const errText = await res.text().catch(() => "");
         console.error(`[agnes-video] HTTP ${res.status}:`, errText);
+
+        if (res.status === 503 && attempt < MAX_RETRIES) {
+          const waitMs = BACKOFF_MS[attempt] ?? BACKOFF_MS[BACKOFF_MS.length - 1];
+          console.warn(`[agnes-video] 队列满，第 ${attempt + 1} 次重试，等待 ${waitMs}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+          continue;
+        }
+
         throw new Error(`创建视频任务失败: ${res.status} ${errText}`);
+      } catch (error) {
+        clearTimeout(createTimeout);
+        if (error instanceof Error && error.name === "AbortError") {
+          throw new Error("创建视频任务超时（60s）");
+        }
+        throw error;
       }
-
-      const createData = (await res.json()) as AgnesTaskResponse;
-      console.log(
-        `[agnes-video] 任务创建成功: task_id=${createData.task_id} video_id=${createData.video_id} status=${createData.status}`
-      );
-
-      if (createData.status === "failed") {
-        throw new Error(`视频任务创建失败: ${createData.error?.message ?? "未知错误"}`);
-      }
-
-      taskId = createData.task_id;
-      videoId = createData.video_id;
-    } catch (error) {
-      clearTimeout(createTimeout);
-      if (error instanceof Error && error.name === "AbortError") {
-        throw new Error("创建视频任务超时（60s）");
-      }
-      throw error;
     }
   }
 

@@ -40,6 +40,8 @@ export async function POST(req: NextRequest) {
 
     // 验证输入文件（如果提供了的话）
     if (inputFileIds && inputFileIds.length > 0) {
+      // 安全：验证文件存在即可
+      // 注：参考图上传时已有会话权限控制，无需 attachment 关系
       const inputFiles = await prisma.aiFileAsset.findMany({
         where: {
           id: { in: inputFileIds },
