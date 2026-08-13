@@ -290,8 +290,8 @@ export function AiChatInput({
           hasImage = true;
           const file = item.getAsFile();
           if (file) {
-            // Image 模式：粘贴到参考图；Chat 模式：粘贴到聊天图片
-            if (taskCategory === "image") {
+            // Image/Video 模式：粘贴到参考图；Chat 模式：粘贴到聊天图片
+            if (taskCategory === "image" || taskCategory === "video") {
               void handleReferenceImageUpload(file);
             } else {
               void handleImageUpload(file);
@@ -315,14 +315,16 @@ export function AiChatInput({
       const trimmed = message.trim();
       if ((!trimmed && images.length === 0) || disabled) return;
 
-      // 传递参考图给 onSend（用于 I2I）
+      // 传递参考图给 onSend（用于 I2I / I2V）
       const inputFileIds =
-        taskCategory === "image" && referenceImages.length > 0 ? referenceImages : undefined;
+        (taskCategory === "image" || taskCategory === "video") && referenceImages.length > 0
+          ? referenceImages
+          : undefined;
       onSend(trimmed, images.length > 0 ? images : undefined, inputFileIds);
       setMessage("");
       setImages([]);
-      // 清空参考图（I2I 模式）
-      if (taskCategory === "image") {
+      // 清空参考图（I2I / I2V 模式）
+      if (taskCategory === "image" || taskCategory === "video") {
         setReferenceImages([]);
         onReferenceImagesChange?.([]);
       }
@@ -402,8 +404,8 @@ export function AiChatInput({
   return (
     <form onSubmit={handleSubmit} className="flex items-center gap-2">
       <div className="relative flex-1">
-        {/* Image 模式参考图上传区域（I2I） */}
-        {taskCategory === "image" && (
+        {/* Image/Video 模式参考图上传区域（I2I / I2V） */}
+        {(taskCategory === "image" || taskCategory === "video") && (
           <div className="mb-2 flex items-center gap-2">
             <input
               type="file"
@@ -449,7 +451,11 @@ export function AiChatInput({
             ))}
 
             {referenceImages.length === 0 && !uploadingReference && (
-              <span className="text-xs text-ink-400">可选：上传参考图进行图生图</span>
+              <span className="text-xs text-ink-400">
+                {taskCategory === "video"
+                  ? "可选：上传参考图进行图生视频"
+                  : "可选：上传参考图进行图生图"}
+              </span>
             )}
           </div>
         )}
