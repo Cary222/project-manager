@@ -256,9 +256,9 @@ export function AiChatPanel({
     setSelectedModel(defaults[modeCategory] ?? "agnes:agnes-2.5-flash");
   }, [aiMode]);
 
-  // 模式切换时清空参考图
+  // 模式切换时清空参考图（Image 和 Video 模式都支持参考图）
   useEffect(() => {
-    if (aiMode !== "image") {
+    if (aiMode !== "image" && aiMode !== "video") {
       setInputFileIds([]);
     }
   }, [aiMode]);
@@ -333,6 +333,14 @@ export function AiChatPanel({
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         const conv = json.data;
+        // #region DEBUG: log attachments from API response
+        console.log("[DEBUG loadMessages] messages count:", conv?.messages?.length);
+        conv?.messages?.forEach((m: { role?: string; attachments?: unknown; id?: string }) => {
+          if (m.role === "user") {
+            console.log("[DEBUG loadMessages] user message id=", m.id, "attachments:", JSON.stringify(m.attachments));
+          }
+        });
+        // #endregion
         if (conv?.messages && Array.isArray(conv.messages)) {
           setMessages(
             conv.messages.map(
@@ -866,11 +874,20 @@ export function AiChatPanel({
 
       // ── Video generation mode (提前 return，不走 SSE 流) ───────────────────
       if (aiModeRef.current === "video") {
-        // Optimistically add user message
+        // Optimistically add user message with reference images
         const tempUserId = `user-${Date.now()}`;
         setMessages((prev) => [
           ...prev,
-          { id: tempUserId, role: "user", content: message },
+          {
+            id: tempUserId,
+            role: "user",
+            content: message,
+            userImages: inputFileIds?.map((img) => ({
+              id: img.id,
+              url: img.url,
+              name: img.name,
+            })),
+          },
         ]);
 
         try {
@@ -901,6 +918,7 @@ export function AiChatPanel({
               conversationId: convId,
               prompt: message,
               modelName: selectedModelRef.current,
+              inputFileIds: inputFileIds?.map((img) => img.id) ?? [],
             }),
           });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1652,9 +1670,9 @@ export function AiChatPanel({
           onStop={handleStop}
           isGenerating={isLoading}
           placeholder={isPage ? "输入问题，向小星提问…" : "输入问题..."}
-          taskCategory={aiMode === "image" ? "image" : aiMode === "video" ? "video" : "chat"}
-          initialReferenceImages={aiMode === "image" ? inputFileIds : undefined}
-          onReferenceImagesChange={aiMode === "image" ? setInputFileIds : undefined}
+          taskCategory={aiMode === "image" || aiMode === "video" ? aiMode : "chat"}
+          initialReferenceImages={aiMode === "image" || aiMode === "video" ? inputFileIds : undefined}
+          onReferenceImagesChange={aiMode === "image" || aiMode === "video" ? setInputFileIds : undefined}
         />
       </div>
     </div>
