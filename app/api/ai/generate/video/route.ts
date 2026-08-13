@@ -42,10 +42,8 @@ export async function POST(req: NextRequest) {
 
     // 验证输入文件（如果提供了的话）
     if (inputFileIds && inputFileIds.length > 0) {
-      console.log("[DEBUG-video-route] validating inputFiles:", inputFileIds);
-      // 安全：验证文件存在且属于当前用户
+      // 安全：验证文件存在即可
       // 注：参考图上传时已有会话权限控制，无需 attachment 关系
-      // （参考图是在对话消息之前上传的，尚未关联到任何消息）
       const inputFiles = await prisma.aiFileAsset.findMany({
         where: {
           id: { in: inputFileIds },
@@ -55,11 +53,9 @@ export async function POST(req: NextRequest) {
           mimeType: true,
         },
       });
-      console.log("[DEBUG-video-route] inputFiles found:", inputFiles.length, "expected:", inputFileIds.length);
 
       // 检查是否全部找到
       if (inputFiles.length !== inputFileIds.length) {
-        console.log("[DEBUG-video-route] file not found - returning 404");
         return NextResponse.json(
           { error: "One or more input files not found" },
           { status: 404 }
