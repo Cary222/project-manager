@@ -204,33 +204,6 @@ export function AiChatInput({
     [compressImageBlob, uploadingImage]
   );
 
-  const handlePaste = useCallback(
-    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      // 只在 Chat 模式处理粘贴图片，Image 模式不支持粘贴
-      if (taskCategory !== "chat") return;
-
-      const items = e.clipboardData.items;
-      let hasImage = false;
-      
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (item.type.startsWith("image/")) {
-          hasImage = true;
-          const file = item.getAsFile();
-          if (file) {
-            void handleImageUpload(file);
-          }
-        }
-      }
-      
-      // 如果粘贴的是图片，阻止默认行为（不插入文本）
-      if (hasImage) {
-        e.preventDefault();
-      }
-    },
-    [handleImageUpload]
-  );
-
   const removeImage = useCallback((index: number) => {
     setImages((prev) => prev.filter((_, i) => i !== index));
   }, []);
@@ -303,6 +276,36 @@ export function AiChatInput({
       onReferenceImagesChange?.(updated);
     },
     [referenceImages, onReferenceImagesChange]
+  );
+
+  // ── 粘贴图片处理 ─────────────────────────────────────────────────────────
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = e.clipboardData.items;
+      let hasImage = false;
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith("image/")) {
+          hasImage = true;
+          const file = item.getAsFile();
+          if (file) {
+            // Image 模式：粘贴到参考图；Chat 模式：粘贴到聊天图片
+            if (taskCategory === "image") {
+              void handleReferenceImageUpload(file);
+            } else {
+              void handleImageUpload(file);
+            }
+          }
+        }
+      }
+
+      // 如果粘贴的是图片，阻止默认行为（不插入文本）
+      if (hasImage) {
+        e.preventDefault();
+      }
+    },
+    [handleImageUpload, handleReferenceImageUpload, taskCategory]
   );
 
   // ── 发送逻辑 ──────────────────────────────────────────────────────────────

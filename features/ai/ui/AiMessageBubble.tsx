@@ -33,6 +33,12 @@ interface AiMessageBubbleProps {
     type: string;
     fileAssetId: string;
   }>;
+  /** 用户上传的参考图列表（Image 模式，用于在对话气泡中展示） */
+  userImages?: Array<{
+    id: string;
+    url: string;
+    name: string;
+  }>;
   onCandidateSelect?: (candidateId: string) => void;
   /** 加载指示器类型（用于 QUEUED/PROCESSING 状态） */
   loadingType?: "image" | "video";
@@ -63,6 +69,7 @@ export function AiMessageBubble({
   totalThinkingMs,
   executionStatus,
   attachments,
+  userImages,
   onCandidateSelect,
   loadingType = "image",
   progress,
@@ -76,6 +83,9 @@ export function AiMessageBubble({
 
   // Lightbox state for generated images
   const [lightboxImage, setLightboxImage] = useState<{ src: string; name: string } | null>(null);
+
+  // Lightbox state for user uploaded reference images
+  const [userImageLightbox, setUserImageLightbox] = useState<{ src: string; name: string } | null>(null);
 
   // Keep latest content/streaming flags in refs so the typewriter loop reads
   // fresh values without restarting on every SSE chunk. This eliminates
@@ -170,6 +180,32 @@ export function AiMessageBubble({
     return (
       <div className="flex justify-end">
         <div className="max-w-[75%]">
+          {/* 用户上传的参考图（Image 模式） */}
+          {userImages && userImages.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2 justify-end">
+              {userImages.map((img) => (
+                <button
+                  key={img.id}
+                  type="button"
+                  onClick={() => setUserImageLightbox({ src: img.url, name: img.name })}
+                  className="group relative max-w-sm overflow-hidden rounded-lg border border-white/20 shadow-sm transition-all hover:shadow-md hover:scale-[1.02]"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={img.url}
+                    alt={img.name}
+                    className="max-h-48 object-contain"
+                    loading="lazy"
+                  />
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                    <span className="opacity-0 group-hover:opacity-100 text-white text-sm bg-black/50 px-3 py-1 rounded-full transition-opacity">
+                      点击放大
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
           <div className="rounded-2xl bg-brand-600 px-4 py-2.5 text-white rounded-br-md">
             <p className="text-sm leading-relaxed whitespace-pre-wrap">{content}</p>
           </div>
@@ -285,6 +321,20 @@ export function AiMessageBubble({
             const a = document.createElement("a");
             a.href = lightboxImage.src;
             a.download = lightboxImage.name;
+            a.click();
+          }}
+        />
+      )}
+
+      {/* ImageLightbox for user uploaded reference images */}
+      {userImageLightbox && (
+        <ImageLightbox
+          image={userImageLightbox}
+          onClose={() => setUserImageLightbox(null)}
+          onDownload={() => {
+            const a = document.createElement("a");
+            a.href = userImageLightbox.src;
+            a.download = userImageLightbox.name;
             a.click();
           }}
         />

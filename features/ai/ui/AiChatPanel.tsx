@@ -82,6 +82,12 @@ interface Message {
     type: string;
     fileAssetId: string;
   }>;
+  /** 用户上传的参考图列表（Image 模式，用于在对话气泡中展示） */
+  userImages?: Array<{
+    id: string;
+    url: string;
+    name: string;
+  }>;
   /** 进度信息（生图/视频模式） */
   progress?: {
     step: string;
@@ -778,11 +784,20 @@ export function AiChatPanel({
     ) => {
       // ── Image generation mode (提前 return，不走 SSE 流) ────────────────────
       if (aiModeRef.current === "image") {
-        // Optimistically add user message
+        // Optimistically add user message with reference images
         const tempUserId = `user-${Date.now()}`;
         setMessages((prev) => [
           ...prev,
-          { id: tempUserId, role: "user", content: message },
+          {
+            id: tempUserId,
+            role: "user",
+            content: message,
+            userImages: inputFileIds?.map((img) => ({
+              id: img.id,
+              url: img.url,
+              name: img.name,
+            })),
+          },
         ]);
 
         try {
@@ -1554,6 +1569,7 @@ export function AiChatPanel({
                   totalThinkingMs={msg.totalThinkingMs}
                   executionStatus={msg.executionStatus}
                   attachments={msg.attachments}
+                  userImages={msg.userImages}
                   loadingType={msg.loadingType ?? (aiModeRef.current === "video" ? "video" : "image")}
                   progress={msg.progress}
                   onCandidateSelect={(candidateId) => handleSend(candidateId)}
