@@ -238,14 +238,6 @@ export async function getConversationsWithMessages(
       },
     },
   });
-  // #region DEBUG: log attachment directions
-  const userMessages = messages.filter((m) => m.role === "user");
-  for (const m of userMessages) {
-    console.log(
-      `[getConversationsWithMessages] msg=${m.id} attachments=${JSON.stringify(m.attachments)}`
-    );
-  }
-  // #endregion
 
   return {
     ...conversation,

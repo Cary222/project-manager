@@ -333,14 +333,6 @@ export function AiChatPanel({
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         const conv = json.data;
-        // #region DEBUG: log attachments from API response
-        console.log("[DEBUG loadMessages] messages count:", conv?.messages?.length);
-        conv?.messages?.forEach((m: { role?: string; attachments?: unknown; id?: string }) => {
-          if (m.role === "user") {
-            console.log("[DEBUG loadMessages] user message id=", m.id, "attachments:", JSON.stringify(m.attachments));
-          }
-        });
-        // #endregion
         if (conv?.messages && Array.isArray(conv.messages)) {
           setMessages(
             conv.messages.map(
@@ -355,6 +347,7 @@ export function AiChatPanel({
                   id: string;
                   type: string;
                   fileAssetId: string;
+                  direction?: string;
                 }>;
               }) => ({
                 id: m.id,
@@ -365,7 +358,6 @@ export function AiChatPanel({
                   const steps = (m.metadata as { thinkingSteps?: TaskRecord[] } | undefined)
                     ?.thinkingSteps;
                   if (!Array.isArray(steps)) return undefined;
-                  // Ensure timestamps are numbers (DB JSON may parse them as strings)
                   return steps.map((s) => ({
                     ...s,
                     startTime: typeof s.startTime === 'number' ? s.startTime : Number(s.startTime) || Date.now(),
@@ -378,6 +370,14 @@ export function AiChatPanel({
                   ?.totalThinkingMs,
                 executionStatus: m.executionStatus,
                 attachments: m.attachments,
+                // 从 INPUT attachments 构建 userImages，用于刷新后气泡显示参考图
+                userImages: m.attachments
+                  ?.filter((a) => a.direction === "INPUT")
+                  .map((a) => ({
+                    id: a.fileAssetId,
+                    url: `/api/ai/file-assets/${a.fileAssetId}`,
+                    name: `参考图.${a.type === "IMAGE" ? "jpg" : "png"}`,
+                  })),
                 progress: (m.metadata as { progress?: Message["progress"] } | undefined)?.progress,
               })
             )
