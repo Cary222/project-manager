@@ -6,9 +6,9 @@
  *  2. USER Agnes provider (personal) — fallback
  *  3. ENV vars (AGNES_API_KEY / AGNES_API_URL) — last resort
  */
-import { resolveCredentialWithFallback } from "./credentials/api-key-store";
-import { AGNES_API_BASE_URL, getProxyFetch } from "./proxy";
-import { normalizeBaseURL } from "./providers/registry";
+import { resolveCredentialWithFallback } from "../credentials/api-key-store";
+import { AGNES_API_BASE_URL, getProxyFetch } from "./agnes/proxy";
+import { normalizeBaseURL } from "./registry";
 
 export const AGNES_PROVIDER = "agnes";
 

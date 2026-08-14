@@ -11,7 +11,7 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createDeepSeek } from "@ai-sdk/deepseek";
-import { proxyFetch, getProxyFetch } from "../proxy";
+import { proxyFetch, getProxyFetch } from "./agnes/proxy";
 import { resolveCredential } from "../credentials/api-key-store";
 import { getUserProviderRecords, getSystemCredentials } from "../credentials/api-key-store";
 import type { ModelCatalogEntry, ApiFormat } from "./types";

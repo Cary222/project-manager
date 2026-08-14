@@ -22,7 +22,7 @@ cp .env.example .env
 | `AUTH_SECRET` / `NEXTAUTH_SECRET` | 随机密钥 |
 | `AUTH_TRUST_HOST=true` | 必须开启，支持局域网访问 |
 
-**不要设置** `AUTH_URL` / `NEXTAUTH_URL`，否则会强制跳转到 localhost。
+**不要设置** `AUTH_URL`（**`NEXTAUTH_URL=http://localhost:3003` 已设，保留即可**——避免 0.0.0.0 被用于 redirect URL；不要额外加 `AUTH_URL`，否则会强制跳转到 localhost）。
 
 ## 首次部署
 
@@ -38,10 +38,12 @@ npm run start
 ## 日常命令
 
 ```bash
-npm run dev      # 开发，0.0.0.0:3003，--webpack
+npm run dev      # 开发，0.0.0.0:3003（连远程 DB，Mac 本地无需 Postgres）
 npm run build    # 生产构建
-npm run start    # 生产服务，0.0.0.0:3003
+npm run start    # 生产服务，0.0.0.0:3003（systemd 托管）
 npm run db:seed  # 重置 Counter（不创建默认用户）
+npm run db:promote -- <邮箱>  # 提权某用户为 ROOT
+npm run worker   # 启动 PKM Index Worker（Mac 本地调试用；生产用 systemd）
 ```
 
 ## systemd 常驻（推荐）
@@ -92,44 +94,37 @@ git clone hxy@192.168.1.14:/home/hxy/work/personal/project-manager.git
 ## Embedding 服务（端口 5000）
 
 独立于主应用的向量化服务，使用 FastAPI + BGE-M3 模型。
+**生产环境由 systemd 托管（`embedding-api.service`）**，崩溃自动重启，无需手动管理。
 
-### 安装依赖
+### 安装依赖（一次性）
 
 ```bash
+# 在远程 hxy@192.168.1.14
 cd /home/hxy/work/personal/project-manager/embedding
 pip install -r requirements.txt
 ```
 
-### 启动
+### 启动 / 重启 / 状态（systemd 推荐，远程）
+
+```bash
+# 状态
+ssh hxy@192.168.1.14 'systemctl --user status embedding-api.service'
+
+# 重启
+ssh hxy@192.168.1.14 'systemctl --user restart embedding-api.service'
+
+# 日志
+ssh hxy@192.168.1.14 'journalctl --user -u embedding-api.service -f'
+```
+
+### 手动启动（仅本地 dev 或调试）
 
 ```bash
 cd /home/hxy/work/personal/project-manager/embedding
-nohup python3 -m uvicorn api:app --host 0.0.0.0 --port 5000 --reload-dir /home/hxy/work/personal/project-manager/embedding > /tmp/embedding.log 2>&1 &
+HF_ENDPOINT=https://hf-mirror.com python3 -m uvicorn api:app --host 0.0.0.0 --port 5000
 ```
 
-冷启动约 10-30 秒（加载模型）。
-
-### 重启
-
-```bash
-ps aux | grep "uvorn.*5000"   # 找到 PID
-kill <PID>
-# 再执行上面的启动命令
-```
-
-### 验证
-
-```bash
-curl http://localhost:5000/
-curl -X POST http://localhost:5000/embed -H "Content-Type: application/json" -d '{"text": "hello"}'
-```
-
-### 环境变量
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `DATABASE_URL` | `postgresql://community:community@localhost:5432/community` | 向量存储连接 |
-| `EMBEDDING_API_URL` | `http://localhost:5000` | 客户端调用的远端 API 地址 |
+冷启动约 10-30 秒（首次会下载 BGE-M3 模型到 `~/.cache/huggingface/hub`）。
 
 ### 端点清单
 

@@ -62,9 +62,9 @@ npm run search:reindex --clear
 ## 相关文件
 
 ```
-scripts/vector-search/search-admin.ts  # 统一管理 CLI
-shared/lib/search.ts                   # 搜索核心逻辑
-shared/lib/embedding.ts                # BGE-M3 调用 + fetchEmbeddingsBatch
-shared/lib/search-types.ts             # 类型定义
+scripts/document/search-admin.ts  # 统一管理 CLI
+features/knowledge/lib/search.ts                   # 搜索核心逻辑
+features/knowledge/lib/embedding.ts                # BGE-M3 调用 + fetchEmbeddingsBatch
+features/knowledge/lib/search-types.ts             # 类型定义
 prisma/schema.prisma                   # SearchDocument 模型
 ```

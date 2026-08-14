@@ -135,7 +135,7 @@ export function decodeTextBytes(bytes: Uint8Array): string {
 
 ### 3.4 RAG 类型映射从 KNOWLEDGE_DOC → DOCUMENT（16b6afe）
 
-```13:24:shared/lib/search-types.ts
+```13:24:features/knowledge/lib/search-types.ts
 export const SEARCH_DOCUMENT_SOURCE_TYPES = {
   TICKET: "TICKET",
   COMMIT: "COMMIT",
@@ -144,7 +144,7 @@ export const SEARCH_DOCUMENT_SOURCE_TYPES = {
 } as const;
 ```
 
-```1:15:shared/lib/search.ts
+```1:15:features/knowledge/lib/search.ts
 export function toResultType(sourceType: string): SearchResultType | null {
   if (sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.TICKET) return "ticket";
   if (sourceType === SEARCH_DOCUMENT_SOURCE_TYPES.COMMIT) return "commit";

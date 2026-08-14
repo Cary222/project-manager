@@ -1008,6 +1008,10 @@ model AiMessageAttachment {
 
 model AiFileAsset {
   id          String            @id @default(cuid())
+  /// 资产归属用户：INPUT（用户上传）和 OUTPUT（AI 生成）均适用。
+  /// 历史数据允许为 NULL（无法回填的旧记录保留）。
+  /// 新增记录必须由调用方显式写入。
+  ownerId     String?
   storageType AiFileStorageType @default(DATABASE)
   storageKey  String?
   checksum    String?
@@ -1019,6 +1023,7 @@ model AiFileAsset {
   attachments AiMessageAttachment[]
   outputs     JobOutput[]
 
+  @@index([ownerId])
   @@index([storageKey])
   @@index([checksum])
   @@map("AiFileAsset")

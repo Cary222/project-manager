@@ -291,7 +291,7 @@ ORDER BY "updatedAt" DESC LIMIT 5;
 
 `canAccessSearchResult` 权限过滤逻辑：
 
-```startLine:815:shared/lib/search.ts
+```startLine:815:features/knowledge/lib/search.ts
 function canAccessSearchResult(item: SearchResultItem, viewerUserId?: string | null) {
   if (item.type !== "note") return true;
   if (!item.metadata) return false;                              // ← 加了防御
@@ -375,7 +375,7 @@ ORDER BY "updatedAt" DESC;
 
 "光污染"这条记录 `totalChunks=1, chunkIndex=0`，**是 chunking 改造后新版写入**，不是旧记录遗留。
 
-**2. 代码防御（已合入 `shared/lib/search.ts`）**：
+**2. 代码防御（已合入 `features/knowledge/lib/search.ts`）**：
 
 在 `canAccessSearchResult` 开头加 `if (!item.metadata) return false;`，确保 metadata 为 null/undefined 时明确返回 false（而不是静默继续导致后续访问 `undefined.noteIsPublic` 报错或产生意外行为）。
 
@@ -532,9 +532,9 @@ npm run search:embed
 
 ### 相关文件
 
-- 搜索核心：`shared/lib/search.ts`
-- 诊断 CLI：`scripts/vector-search/search-admin.ts`
-- 向量调用：`shared/lib/embedding.ts`
+- 搜索核心：`features/knowledge/lib/search.ts`
+- 诊断 CLI：`scripts/document/search-admin.ts`
+- 向量调用：`features/knowledge/lib/embedding.ts`
 - 后台作业：`shared/lib/jobs.ts`
 - 异步索引计划：[PKM异步索引改造-详细计划.md](./PKM异步索引改造-详细计划.md)
 
@@ -596,7 +596,7 @@ npm run search:reindex -- <noteId>
 **`hasReusableEmbedding` 判断逻辑**：
 
 ```typescript
-// shared/lib/search.ts
+// features/knowledge/lib/search.ts
 function hasReusableEmbedding(
   metadata: CoercedMetadata,
   newHash: string,

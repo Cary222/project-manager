@@ -25,7 +25,7 @@ model SearchDocument {
 
 ### 核心函数
 
-**`splitIntoChunks(text, maxChars=1500, overlapChars=200)`** (`shared/lib/search.ts`)
+**`splitIntoChunks(text, maxChars=1500, overlapChars=200)`** (`features/knowledge/lib/search.ts`)
 
 ```
 边界守卫模式：超过 maxChars 才分块，否则返回 [text]
@@ -85,7 +85,7 @@ take: limit * 10（放大 10 倍）
 
 ### Embedding 批量接口
 
-**`fetchEmbeddingsBatch(texts: string[])`** (`shared/lib/embedding.ts`)
+**`fetchEmbeddingsBatch(texts: string[])`** (`features/knowledge/lib/embedding.ts`)
 
 ```
 POST /embed_batch { texts: string[] }
@@ -140,9 +140,9 @@ backfillSearchDocuments()
 
 ```
 prisma/schema.prisma                    +chunkIndex, @@unique 3字段
-shared/lib/embedding.ts                 +fetchEmbeddingsBatch()
-shared/lib/search-types.ts              +chunkIndex?, totalChunks?
-shared/lib/search.ts                    splitIntoChunks, buildSearchablePkmNoteChunks,
+features/knowledge/lib/embedding.ts                 +fetchEmbeddingsBatch()
+features/knowledge/lib/search-types.ts              +chunkIndex?, totalChunks?
+features/knowledge/lib/search.ts                    splitIntoChunks, buildSearchablePkmNoteChunks,
                                       syncPkmNoteSearchDocument 重写,
                                       upsertSearchDocument 参数,
                                       searchKeywordCandidates 聚合,

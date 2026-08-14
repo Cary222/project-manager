@@ -202,17 +202,33 @@ ss -ltnp | grep :3003
 
 ## 8. 维护与升级方向
 
+> **⏰ 本节内容已部分过时**：下文"PM2 升级"步骤实际已被 systemd 取代——项目现在用 `project-manager.service` / `project-manager-worker.service` / `project-manager-background-worker.service` / `embedding-api.service` 共 4 个 systemd unit（`Restart=always`，崩溃自动重启），不需要 PM2。
+> 完整 systemd 状态 / 启停命令见 [.cursor/skills/pm-ops/SKILL.md](../../.cursor/skills/pm-ops/SKILL.md)
+
 当前的 `scripts/deploy.sh` 属于单机脚本部署方式，虽然已经可以完成拉取代码、构建和启动服务的流程，但整体仍然依赖服务器环境，属于比较基础的部署方式。后续可以逐步升级，但不需要一开始就做复杂的 CI/CD 或蓝绿发布，优先推荐走更简单、更稳的路线。
 
-第一步可以先引入 PM2 来替代现在的 `nohup + 手动 kill` 进程方式，这样可以让 Node 服务变成守护进程，自动重启、自动记录日志，也避免端口占用和进程残留的问题，部署脚本也会变得更简单，只需要 `pm2 restart` 就可以完成更新。
+### ✅ 已完成：systemd 进程管理
 
-在 PM2 稳定之后，可以进一步把构建流程稍微规范一下，比如统一在服务器上执行 `npm ci → prisma generate → npm run build`，确保每次构建环境一致，避免出现依赖或 Prisma 类型不同步导致的构建失败问题。
+第一步已经走完：用 systemd unit 替代了原先的 `nohup + 手动 kill`。所有 4 个进程（Web / Index Worker / Background Worker / Embedding）都由 systemd 托管：
+
+- `Restart=always` + `RestartSec=5`：崩溃自动重启
+- `journalctl --user -u <name>`：日志查看
+- `systemctl --user enable --now`：开机自启（需 `Linger=yes`）
+- `deploy.sh` 后续也可改为调用 `systemctl restart`（见 `.cursor/plans/systemd统一进程管理_0528b38d.plan.md`）
+
+### 🚧 第二步：构建流程标准化
+
+在 systemd 稳定之后，可以进一步把构建流程稍微规范一下，比如统一在服务器上执行 `npm ci → prisma generate → npm run build`，确保每次构建环境一致，避免出现依赖或 Prisma 类型不同步导致的构建失败问题。
+
+### 🔮 第三步：CI 构建 + 服务器部署
 
 再往后如果项目变大，可以再考虑把"构建"和"运行"拆开，也就是在 CI（比如 GitHub Actions）里完成 build，把构建产物部署到服务器，服务器只负责启动，这样可以避免生产环境依赖网络和构建工具，让部署更稳定。
 
+### 🔮 第四步：Docker 容器化
+
 最后如果系统继续扩大，可以再升级到 Docker，把整个应用（Node + 依赖 + 构建环境）打成一个镜像，这样部署就变成拉镜像并运行容器，环境完全一致，不再依赖服务器本地配置，也更方便以后扩展多实例或者做负载均衡。
 
-整体演进路线就是：先把当前脚本稳定下来（修复进程管理问题）→ 再用 PM2 简化运维 → 再把构建流程标准化 → 最后再逐步过渡到 CI/CD 或 Docker 容器化部署，这样是最平滑、风险最低的一条升级路径。
+整体演进路线：**systemd（✅ 已完成）→ 构建流程标准化（🚧 进行中）→ CI 构建（🔮 待启动）→ Docker 容器化（🔮 待启动）**——这样是最平滑、风险最低的一条升级路径。
 
 ## 9. 推荐的运维习惯
 

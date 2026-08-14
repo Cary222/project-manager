@@ -3,7 +3,7 @@
 import { prisma } from "@/shared/db/client";
 import { Prisma } from "@prisma/client";
 import { resolveCredential, resolveCredentialWithFallback } from "./credentials/api-key-store";
-import { getProxyFetch, AGNES_API_BASE_URL } from "./proxy";
+import { getProxyFetch, AGNES_API_BASE_URL } from "./providers/agnes/proxy";
 
 const AGNES_MODEL = "agnes-2.0-flash";
 const AGNES_PROVIDER = "agnes";

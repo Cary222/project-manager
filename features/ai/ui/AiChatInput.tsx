@@ -4,14 +4,14 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type Keyboard
 import { IconMic, IconMicWave, IconPause, IconSend, IconX, IconImage, IconUpload } from "@/shared/ui/icons";
 import { useSpeechInput } from "./hooks/use-speech-input";
 import { useVoiceSession } from "./hooks/use-voice-session";
-import { uploadImage } from "@/features/knowledge/lib/upload";
 import { toast } from "sonner";
-import { compressImage, ImageCompressionError } from "@/features/ai/lib/image-compressor";
+import { compressImage, ImageCompressionError } from "@/features/ai/lib/images/image-compressor";
+import { uploadImageToFileAsset } from "@/features/ai/lib/images/upload-image-to-file-asset";
 
 interface AiChatInputProps {
   onSend: (
     message: string,
-    images?: { src: string; name: string }[],
+    images?: { id: string; url: string; name: string }[],
     inputFileIds?: { id: string; url: string; name: string }[]
   ) => void;
   onStop?: () => void;
@@ -24,6 +24,11 @@ interface AiChatInputProps {
   onReferenceImagesChange?: (images: { id: string; url: string; name: string }[]) => void;
   /** 外部传入的参考图（用于重连等场景） */
   initialReferenceImages?: { id: string; url: string; name: string }[];
+  /**
+   * Chat 模式专用：图片上传完成回调（携带 AiFileAsset.id，用于挂 INPUT 附件）
+   * 如果不传，Chat 模式下上传图片仅本地预览不传给后端（向后兼容）
+   */
+  onChatImagesChange?: (images: { id: string; url: string; name: string }[]) => void;
 }
 
 export function AiChatInput({
@@ -35,9 +40,10 @@ export function AiChatInput({
   taskCategory,
   onReferenceImagesChange,
   initialReferenceImages,
+  onChatImagesChange,
 }: AiChatInputProps) {
   const [message, setMessage] = useState("");
-  const [images, setImages] = useState<{ src: string; name: string }[]>([]);
+  const [images, setImages] = useState<{ id: string; url: string; name: string }[]>([]);
   const [uploadingImage, setUploadingImage] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -181,31 +187,34 @@ export function AiChatInput({
     });
   }, []);
 
+  // ── Chat 模式图片上传：走 AiFileAsset 通道（#10208 Chat 识图） ───────────────
   const handleImageUpload = useCallback(
     async (file: File) => {
       if (uploadingImage) return;
       setUploadingImage(true);
       try {
-        const compressed = await compressImageBlob(file);
-        const compressedFile =
-          compressed instanceof File
-            ? compressed
-            : new File([compressed], file.name.replace(/\.(png|webp|gif)$/i, ".jpg"), {
-                type: "image/jpeg",
-              });
-        const { url } = await uploadImage(compressedFile);
-        setImages((prev) => [...prev, { src: url, name: file.name }]);
+        // 上传到 AiFileAsset（ownerId = session.user.id），返回 id 用于挂 INPUT 附件
+        const result = await uploadImageToFileAsset(file);
+        const newImage = { id: result.id, url: result.url, name: file.name };
+        const updated = [...images, newImage];
+        setImages(updated);
+        onChatImagesChange?.(updated);
       } catch (err) {
         console.error("[AiChatInput] 图片上传失败:", err);
+        if (err instanceof ImageCompressionError) {
+          toast.error(err.message);
+        } else {
+          toast.error(`图片上传失败: ${err instanceof Error ? err.message : "未知错误"}`);
+        }
       } finally {
         setUploadingImage(false);
       }
     },
-    [compressImageBlob, uploadingImage]
+    [images, uploadingImage, onChatImagesChange]
   );
 
-  const removeImage = useCallback((index: number) => {
-    setImages((prev) => prev.filter((_, i) => i !== index));
+  const removeImage = useCallback((id: string) => {
+    setImages((prev) => prev.filter((img) => img.id !== id));
   }, []);
 
   // ── Image 模式参考图上传（I2I）────────────────────────────────────────────
@@ -463,17 +472,17 @@ export function AiChatInput({
         {/* 聊天图片上传预览（仅 Chat 模式） */}
         {taskCategory === "chat" && images.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2 rounded-xl border border-ink-200 bg-white p-2">
-            {images.map((img, i) => (
-              <div key={i} className="group relative">
+            {images.map((img) => (
+              <div key={img.id} className="group relative">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={img.src}
+                  src={img.url}
                   alt={img.name}
                   className="h-16 w-16 rounded-lg border border-ink-200 object-cover"
                 />
                 <button
                   type="button"
-                  onClick={() => removeImage(i)}
+                  onClick={() => removeImage(img.id)}
                   className="absolute -right-1 -top-1 hidden h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white transition-opacity hover:bg-danger group-hover:flex"
                   aria-label="删除图片"
                 >

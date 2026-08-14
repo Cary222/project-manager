@@ -7,7 +7,7 @@ import {
   getConversationSummaries,
 } from "@/features/ai/store/conversation-store";
 import { queryProfile } from "@/features/ai/core/queries/query-profile";
-import { withStreamAgnesDynamicModel } from "@/features/ai/llm/agnes-provider";
+import { withStreamAgnesDynamicModel } from "@/features/ai/llm/providers/agnes-provider";
 
 function buildGreetingSystemPrompt(profileText: string, recentTopics: string[]): string {
   const recentBlock = recentTopics.length

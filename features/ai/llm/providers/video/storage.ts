@@ -8,14 +8,16 @@ import type { AiFileAsset } from "@prisma/client";
  * 未来迁移对象存储时只改此函数内部，Handler 不变。
  */
 export async function saveVideoAsset(params: {
+  ownerId: string;
   providerVideoUrl: string;
   mimeType: string;
   size?: number;
 }): Promise<AiFileAsset> {
-  const { providerVideoUrl, mimeType, size } = params;
+  const { ownerId, providerVideoUrl, mimeType, size } = params;
 
   return prisma.aiFileAsset.create({
     data: {
+      ownerId,
       storageType: "REMOTE_URL",
       storageKey: providerVideoUrl,
       mimeType,

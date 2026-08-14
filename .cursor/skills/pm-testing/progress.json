@@ -1,5 +1,6 @@
 {
   "created_at": "2026-06-03",
+  "updated_at": "2026-08-14",
   "learning": {
     "stage0_intro": false,
     "stage1_manual": false,
@@ -7,5 +8,15 @@
     "stage3_playwright": false,
     "stage4_ci": false
   },
-  "completed_features": []
+  "completed_features": [],
+  "notes": [
+    "2026-08-14: pm-testing skill 自 2026-06-03 创建至今未启动任何一个 stage。已有'测试'仅为 scripts/acceptance-test.ts 手动脚本，不构成正式测试框架。",
+    "2026-08-14: package.json 已配置 vitest devDependency 与 test:watch 脚本，但 vitest.config.ts 与 e2e/ 目录均未创建。",
+    "2026-08-14: PROJECT-HUB.md 中标记 E2E + Vitest 已完成，指项目自带的 acceptance 脚本与零散 Playwright 用例，非 pm-testing skill 定义的标准四阶段学习路径。"
+  ],
+  "next_steps": [
+    "优先级 1（推荐）：启动 Stage 1+2，覆盖 features/ai/routing/* 与 features/ai/llm/providers/registry.ts",
+    "优先级 2：等 #10208 实施完成后补 Stage 3 E2E（覆盖 chat 多模态场景）",
+    "优先级 3：Stage 4 CI 延后"
+  ]
 }

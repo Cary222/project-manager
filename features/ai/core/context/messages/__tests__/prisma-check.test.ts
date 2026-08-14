@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { prisma } from "../shared/db/client";
+import { prisma } from "@/shared/db/client";
 
 describe("prisma sanity", () => {
   it("prisma instance is defined", () => {

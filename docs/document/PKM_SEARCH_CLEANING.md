@@ -50,7 +50,7 @@
 
 **注意**：这是个**纯函数**，无副作用。
 
-### 2.2 修改 `shared/lib/search.ts`
+### 2.2 修改 `features/knowledge/lib/search.ts`
 
 **3 处改动**：
 
@@ -81,7 +81,7 @@ const content = [
 
 ### 2.3 新增 4 个脚本
 
-都在 `scripts/vector-search/` 下，统一入口为 `search-admin.ts`：
+都在 `scripts/document/` 下，统一入口为 `search-admin.ts`：
 
 || 脚本 / 命令 | 作用 |
 ||------|------|
@@ -166,7 +166,7 @@ curl http://localhost:5000/    # 期望：{"status":"ok",...}
 ```bash
 ssh hxy@192.168.1.14
 cd /home/hxy/work/personal/project-manager
-cp shared/lib/search.ts /tmp/search.ts.with-clean
+cp features/knowledge/lib/search.ts /tmp/search.ts.with-clean
 echo "已备份到 /tmp/search.ts.with-clean（$(wc -l < /tmp/search.ts.with-clean) 行）"
 ```
 
@@ -195,7 +195,7 @@ cmq6g4ts5... 向量搜索故障排查指南            5286        no           
 [diagnose:baseline] 下一步
   1. 选一条 candidate.id 作为 '测试笔记 T'
   2. 跑 measure 取改前分数：
-     npx tsx scripts/vector-search/diagnose-pkm-search.ts measure <noteId> "虚拟列表"
+     npx tsx scripts/document/diagnose-pkm-search.ts measure <noteId> "虚拟列表"
   3. 跑 reindex 重建 SearchDocument
      npm run search:reindex --clear
   4. 用同样的搜索词再跑 measure，对比改后分数
@@ -246,8 +246,8 @@ rank  type    title                          score  keyword  semantic
 
 ```bash
 # 1. 临时回滚到 HEAD（脏版 search.ts）
-git checkout HEAD -- shared/lib/search.ts
-grep -c cleanMarkdownForEmbedding shared/lib/search.ts   # 期望：0
+git checkout HEAD -- features/knowledge/lib/search.ts
+grep -c cleanMarkdownForEmbedding features/knowledge/lib/search.ts   # 期望：0
 
 # 2. 跑 reindex → 写脏 embedding
 npm run search:reindex
@@ -259,11 +259,11 @@ npx tsx scripts/diagnose-pkm-search.ts measure <NOTE_ID> "schema"
 # 记录：(search_term, rank, score, kw, sem)  → 这是"脏基线"
 
 # 4. 恢复新 search.ts
-cp /tmp/search.ts.with-clean shared/lib/search.ts
-grep -c cleanMarkdownForEmbedding shared/lib/search.ts   # 期望：2
+cp /tmp/search.ts.with-clean features/knowledge/lib/search.ts
+grep -c cleanMarkdownForEmbedding features/knowledge/lib/search.ts   # 期望：2
 
 # 5. 跑 reindex → 写干净 embedding
-npx tsx scripts/vector-search/search-admin.ts reindex
+npx tsx scripts/document/search-admin.ts reindex
 # 观察 elapsedMs：干净版 100-200ms
 
 # 6. 跑 measure 拿"干净基线"
@@ -308,7 +308,7 @@ npx tsx scripts/diagnose-pkm-search.ts measure <NOTE_ID> "schema"
 ### 3.6 Step 6 — 检查内容质量
 
 ```bash
-npx tsx scripts/vector-search/search-admin.ts inspect <NOTE_ID>
+npx tsx scripts/document/search-admin.ts inspect <NOTE_ID>
 ```
 
 **期望看到**：
@@ -355,8 +355,8 @@ npm run search:embed                              # 补充缺失向量
 npm run search:clear                              # 删 PKM SearchDocument
 
 # === 诊断 ===
-npx tsx scripts/vector-search/diagnose-pkm-search.ts baseline
-npx tsx scripts/vector-search/diagnose-pkm-search.ts measure <id> "关键词"
+npx tsx scripts/document/diagnose-pkm-search.ts baseline
+npx tsx scripts/document/diagnose-pkm-search.ts measure <id> "关键词"
 
 # === 调试 ===
 npm run search:inspect <noteId>                   # 查 SearchDocument 元数据
@@ -416,7 +416,7 @@ curl -s -w "\nHTTP=%{http_code}\n" http://localhost:5000/
 **原因**：当前 search.ts 是旧版（没清洗），base64 喂给 BGE-M3
 **修**：换回带清洗的 search.ts：
 ```bash
-cp /tmp/search.ts.with-clean shared/lib/search.ts
+cp /tmp/search.ts.with-clean features/knowledge/lib/search.ts
 npm run search:reindex   # 应该 100-200ms
 ```
 
@@ -445,7 +445,7 @@ curl http://localhost:5000/  # 200 就 OK
 **调试**：
 ```bash
 # 直接调一次
-npx tsx scripts/vector-search/search-admin.ts search "测试"
+npx tsx scripts/document/search-admin.ts search "测试"
 # 看是 vec 拿不到，还是 SQL 报错
 ```
 
@@ -466,9 +466,9 @@ DATABASE_URL="postgresql://community:community@localhost:5432/community?options=
 | 路径 | 状态 | 备注 |
 |------|------|------|
 | `shared/lib/markdown.ts` | 新增 | 44 行 |
-| `shared/lib/search.ts` | 修改 | +清洗逻辑 |
-| `scripts/vector-search/search-admin.ts` | 新增 | 统一管理 CLI，整合旧 9 个脚本 |
-| `scripts/vector-search/diagnose-pkm-search.ts` | 保留 | 搜索质量诊断 |
+| `features/knowledge/lib/search.ts` | 修改 | +清洗逻辑 |
+| `scripts/document/search-admin.ts` | 新增 | 统一管理 CLI，整合旧 9 个脚本 |
+| `scripts/document/diagnose-pkm-search.ts` | 保留 | 搜索质量诊断 |
 | `docs/PKM_SEARCH_CLEANING.md` | **本文件** | 全流程手册 |
 
 ---
@@ -483,4 +483,4 @@ DATABASE_URL="postgresql://community:community@localhost:5432/community?options=
 
 - 详见 [docs/ATTACHMENT_TEXT_EXTRACTION.md](./ATTACHMENT_TEXT_EXTRACTION.md)
 - 新增 `cleanExtractedTextForEmbedding()`（`shared/lib/markdown.ts:45-95`）—— 清洗 PDF/PPTX 提取出的原始文本（去 base64 残留 / 控制字符 / 冗余空白）
-- 清洗在 `buildSearchablePkmNoteDocument` 注入 content 前执行（`shared/lib/search.ts:310`）
+- 清洗在 `buildSearchablePkmNoteDocument` 注入 content 前执行（`features/knowledge/lib/search.ts:310`）

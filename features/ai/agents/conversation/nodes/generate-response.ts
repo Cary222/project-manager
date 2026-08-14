@@ -7,6 +7,8 @@ import { createModel } from "@/features/ai/llm/providers/registry";
 import { ensureSystemProvider } from "@/features/ai/llm/providers/init";
 import { selectModel } from "@/features/ai/llm/model-routing";
 import { isUserActivityQuery } from "./detect-intent";
+import { type MultimodalPart } from "@/features/ai/core/context/messages/multimodal-builder";
+import type { UserContent } from "ai";
 
 /**
  * Call generateText with a dynamically selected model based on modelContext.
@@ -229,6 +231,17 @@ function formatProfile(profile: unknown): string | null {
 
 /**
  * Appends search context to the messages sent to the LLM.
+ *
+ * 重要约束：
+ * - 历史 HumanMessage 如果是 multimodal content（[{text}, {image_url}]），
+ *   直接 push 保留结构（不能让 image_url 被 JSON.stringify 成字符串）。
+ * - 当前轮的 HumanMessage（最后一条）若有多模态，**只把搜索上下文追加到 text part**，
+ *   不重建整个 message、不 push 新消息（避免破坏 image_url 结构 + 避免重复 user message）。
+ *
+ * 设计原则（参考 plan Step 4 + 用户反馈）：
+ * - generate-response 不负责"找图片"，那是 route.ts 的活
+ * - 它只负责：把 state.messages + 工具结果 → ModelMessage[]
+ * - multimodal content 必须保留 { type: "image_url", image_url: { url } } 结构
  */
 function buildMessages(
   history: BaseMessage[],
@@ -238,17 +251,7 @@ function buildMessages(
 ): ModelMessage[] {
   const msgs: ModelMessage[] = [];
 
-  for (const m of history) {
-    if (m instanceof HumanMessage) {
-      const c = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-      msgs.push({ role: "user", content: c } satisfies UserModelMessage);
-    } else {
-      const c = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-      msgs.push({ role: "assistant", content: c } satisfies AssistantModelMessage);
-    }
-  }
-
-  // Build context from tool results
+  // Build context from tool results (search/tool output)
   const contextParts: string[] = [];
   if (searchResults && searchResults.length > 0) {
     contextParts.push("=== 检索结果 ===\n" + searchResults.join("\n\n"));
@@ -260,13 +263,40 @@ function buildMessages(
     );
     contextParts.push("=== 工具结果 ===\n" + toolLines.join("\n\n"));
   }
+  const contextSuffix = contextParts.length > 0 ? "\n\n" + contextParts.join("\n\n") : "";
 
-  if (contextParts.length > 0) {
-    const enrichedContent =
-      userContent + "\n\n" + contextParts.join("\n\n");
-    msgs.push({ role: "user", content: enrichedContent } satisfies UserModelMessage);
-  } else {
-    msgs.push({ role: "user", content: userContent } satisfies UserModelMessage);
+  for (const m of history) {
+    if (m instanceof HumanMessage) {
+      // Multimodal-aware: 如果 content 是 array（[{text}, {image_url}]），
+      // 必须把 array 直接传给 ModelMessage user content，不能 JSON.stringify
+      // 注意：AI SDK 的 UserContent 要求 ImagePart 结构为 { type: "image", image: string }
+      // （不是 OpenAI Chat Completions 的 image_url），由 Provider adapter 负责转换。
+      if (Array.isArray(m.content)) {
+        const parts = m.content as MultimodalPart[];
+        const userContent: UserContent = parts.map((p) => {
+          if (p.type === "text") {
+            return { type: "text", text: p.text + contextSuffix };
+          }
+          // image_url → image（AI SDK UserContent 格式）
+          return { type: "image", image: p.image_url.url };
+        });
+        msgs.push({ role: "user", content: userContent } satisfies UserModelMessage);
+      } else {
+        // 字符串 content：追加 contextSuffix
+        const c = typeof m.content === "string" ? m.content : String(m.content);
+        msgs.push({ role: "user", content: c + contextSuffix } satisfies UserModelMessage);
+      }
+    } else {
+      const c = typeof m.content === "string" ? m.content : String(m.content);
+      msgs.push({ role: "assistant", content: c } satisfies AssistantModelMessage);
+    }
+  }
+
+  // 当前轮的 user message（history 的最后一条）已经在循环里处理了
+  // 不再 push 重复的 userContent（route.ts 已经把完整 multimodal HumanMessage 放进 state.messages）
+  // 如果 history 为空（首轮对话），仍需要 push 当前文本
+  if (history.length === 0) {
+    msgs.push({ role: "user", content: userContent + contextSuffix } satisfies UserModelMessage);
   }
 
   return msgs;
@@ -325,11 +355,15 @@ export async function generateResponseNode(
   const profile = state.profile ?? {};
 
   const lastMessage = state.messages[state.messages.length - 1];
+  // Multimodal-aware: 只取 text part（搜索意图检测只看文字）
   const userContent =
     typeof lastMessage?.content === "string"
       ? lastMessage.content
-      : lastMessage
-        ? JSON.stringify(lastMessage.content)
+      : Array.isArray(lastMessage?.content)
+        ? (lastMessage.content as MultimodalPart[])
+            .filter((p) => p.type === "text")
+            .map((p) => (p as { type: "text"; text: string }).text)
+            .join("\n")
         : "";
 
   console.log(`[generateResponseNode] searchResults=${state.searchResults?.length} toolResults=${state.toolResults ? Object.keys(state.toolResults).join(',') : 'none'} mode=${state.mode}`);
@@ -391,8 +425,10 @@ export async function generateResponseNode(
   }
 
   const systemPrompt = buildSystemPrompt(userName, state.mode, profile, lastMentionedUser);
+  // 把全部 state.messages（包括最后一条 user HumanMessage，多模态）传给 buildMessages。
+  // buildMessages 已支持 multimodal content，并按"history 最后一轮作为 current user message"处理。
   const messages = buildMessages(
-    state.messages.slice(0, -1),
+    state.messages,
     userContent,
     state.searchResults,
     state.toolResults

@@ -44,8 +44,8 @@
 
 | 文件 | 类型 | 作用 |
 |------|------|------|
-| `shared/lib/search.ts` | 修改 | 核心检索逻辑：splitTerms 2-gram、buildSnippet 末位锚点、mergeCandidates 不去重、PKM 整段 snippet、rankDocument 中文 boost |
-| `shared/lib/search-types.ts` | 修改 | 添加 `noteAttachmentCount` / `noteIndexedAttachmentCount` 字段透传到元数据 |
+| `features/knowledge/lib/search.ts` | 修改 | 核心检索逻辑：splitTerms 2-gram、buildSnippet 末位锚点、mergeCandidates 不去重、PKM 整段 snippet、rankDocument 中文 boost |
+| `features/knowledge/lib/search-types.ts` | 修改 | 添加 `noteAttachmentCount` / `noteIndexedAttachmentCount` 字段透传到元数据 |
 | `features/ai/lib/detector.ts` | 修改 | 扩展 `SEARCH_KEYWORDS` 增加"需求/设计/视场角/FOV/灵敏度..."等 spec 类关键词 |
 | `features/ai/lib/rag.ts` | 修改 | prompt 里告诉 LLM 附件索引进度，避免 AI 说"我无法访问附件" |
 | `features/ai/ui/AiMessageBubble.tsx` | 修改 | 前端按 URL 去重 AI 对话"参考来源"中的重复 chunk |
@@ -55,9 +55,9 @@
 
 ## 3. 核心实现
 
-### 3.1 `splitTerms` 中文 2-gram 分词（`shared/lib/search.ts`）
+### 3.1 `splitTerms` 中文 2-gram 分词（`features/knowledge/lib/search.ts`）
 
-```96:115:shared/lib/search.ts
+```96:115:features/knowledge/lib/search.ts
 function splitTerms(query: string): string[] {
   const normalized = normalizeQuery(query);
   const tokens = normalized.split(" ").map((t) => t.trim()).filter(Boolean);
@@ -84,9 +84,9 @@ function splitTerms(query: string): string[] {
 
 ---
 
-### 3.2 `buildSnippet` 锚定末位命中（`shared/lib/search.ts`）
+### 3.2 `buildSnippet` 锚定末位命中（`features/knowledge/lib/search.ts`）
 
-```160:179:shared/lib/search.ts
+```160:179:features/knowledge/lib/search.ts
   // Use the *last* hit as the anchor. With queries like "光污染 视场角",
   // "光污染" matches near the top of the chunk but "视场角" matches in
   // the middle — and the middle one is where the user's answer lives.
@@ -103,9 +103,9 @@ function splitTerms(query: string): string[] {
 
 ---
 
-### 3.3 `mergeCandidates` 不按 sourceId 去重（`shared/lib/search.ts`）
+### 3.3 `mergeCandidates` 不按 sourceId 去重（`features/knowledge/lib/search.ts`）
 
-```1001:1032:shared/lib/search.ts
+```1001:1032:features/knowledge/lib/search.ts
 function mergeCandidates(options: {
   query: string;
   terms: string[];
@@ -133,9 +133,9 @@ function mergeCandidates(options: {
 
 ---
 
-### 3.4 PKM note 整段作为 snippet（`shared/lib/search.ts`）
+### 3.4 PKM note 整段作为 snippet（`features/knowledge/lib/search.ts`）
 
-```968:977:shared/lib/search.ts
+```968:977:features/knowledge/lib/search.ts
   // For PKM note chunks, use the full content as the snippet instead of cropping.
   // A chunk boundary is set at 1500 chars — the whole thing is a coherent section
   // of the document. Cropping it (even to 800 chars) risks hiding the answer that

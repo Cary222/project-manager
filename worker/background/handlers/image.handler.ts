@@ -1,11 +1,11 @@
 import { prisma } from "@/shared/db/client";
 import type { BackgroundJob } from "@prisma/client";
 import { updateBackgroundJobStatus } from "../jobs";
-import { emitMessageDelta } from "@/features/ai/lib/domain-events";
+import { emitMessageDelta } from "@/features/ai/lib/sse/domain-events";
 import { generateSingleImage } from "@/features/ai/llm/image-generator";
 import { sha256Hex } from "@/shared/lib/hash";
 import { resolveCredentialWithFallback } from "@/features/ai/llm/credentials/api-key-store";
-import { resolveProviderImageSource } from "@/features/ai/lib/file-source";
+import { resolveProviderImageSource } from "@/features/ai/lib/storage/file-source";
 import { resolveGenerationMode } from "@/features/ai/routing/generation-mode";
 
 interface ImagePayload {
@@ -147,6 +147,7 @@ export async function handleImageGenerate(
   // 创建 AiFileAsset
   const asset = await prisma.aiFileAsset.create({
     data: {
+      ownerId: userId,
       storageType: "DATABASE",
       storageKey: `db:job_${job.id}_seq_0`,
       checksum,

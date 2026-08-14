@@ -787,9 +787,15 @@ export function AiChatPanel({
   const handleSend = useCallback(
     async (
       message: string,
-      images?: { src: string; name: string }[],
+      images?: { id: string; url: string; name: string }[],
       inputFileIds?: { id: string; url: string; name: string }[]
     ) => {
+      // Chat 模式 images 字段现在带 id（AiFileAsset.id），用于挂 INPUT 附件。
+      // Image/Video 模式的 inputFileIds 路径不变。
+      const chatInputFileIds =
+        aiModeRef.current === "chat" && images && images.length > 0
+          ? images.map((img) => ({ id: img.id, url: img.url, name: img.name }))
+          : undefined;
       // ── Image generation mode (提前 return，不走 SSE 流) ────────────────────
       if (aiModeRef.current === "image") {
         // Optimistically add user message with reference images
@@ -966,9 +972,25 @@ export function AiChatPanel({
       // Optimistically add user message immediately so it shows up while the
       // AI stream is in flight, regardless of whether this is a new or
       // existing conversation. The server will later persist it on its own.
+      // W5 fix: Chat 模式下也带上 userImages（与 Image/Video 模式一致），
+      // 否则用户上传图片后，发送后图片从输入框消失，气泡只显示文字（要刷新页面
+      // 才从 attachments 重建）。Chat 模式用 images[]（chatInputFileIds 的来源），
+      // Image/Video 模式已在前面提前 return，不会走到这里。
+      const optimisticUserImages = images?.map((img) => ({
+        id: img.id,
+        url: img.url,
+        name: img.name,
+      }));
       setMessages((prev) => [
         ...prev,
-        { id: tempUserId, role: "user", content: message },
+        {
+          id: tempUserId,
+          role: "user",
+          content: message,
+          ...(optimisticUserImages && optimisticUserImages.length > 0
+            ? { userImages: optimisticUserImages }
+            : {}),
+        },
       ]);
 
       setIsLoading(true);
@@ -1009,10 +1031,31 @@ export function AiChatPanel({
 
         if (conversationId) {
           url = `/api/ai/conversations/${conversationId}/messages`;
-          body = { message, conversationHistory, mode, forceSearch: useSearch, useWebSearch, modelName };
+          body = {
+            message,
+            conversationHistory,
+            mode,
+            forceSearch: useSearch,
+            useWebSearch,
+            modelName,
+            // Chat 模式图片挂 AiMessageAttachment(INPUT)；Image/Video 模式不重复
+            ...(chatInputFileIds && chatInputFileIds.length > 0
+              ? { inputImageIds: chatInputFileIds.map((img) => img.id) }
+              : {}),
+          };
         } else {
           url = "/api/ai/conversations";
-          body = { firstMessage: message, conversationHistory, mode, forceSearch: useSearch, useWebSearch, modelName };
+          body = {
+            firstMessage: message,
+            conversationHistory,
+            mode,
+            forceSearch: useSearch,
+            useWebSearch,
+            modelName,
+            ...(chatInputFileIds && chatInputFileIds.length > 0
+              ? { inputImageIds: chatInputFileIds.map((img) => img.id) }
+              : {}),
+          };
         }
 
         // 获取客户端城市名（用于天气等实时数据搜索）

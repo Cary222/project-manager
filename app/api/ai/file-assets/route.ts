@@ -51,15 +51,16 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "FILE_TOO_LARGE" }, { status: 413 });
       }
 
-      const record = await prisma.aiFileAsset.create({
-        data: {
-          storageType: "BASE64",
-          bytes,
-          mimeType,
-          size: bytes.length,
-        },
-        select: { id: true, mimeType: true, size: true },
-      });
+    const record = await prisma.aiFileAsset.create({
+      data: {
+        ownerId: session.user.id,
+        storageType: "BASE64",
+        bytes,
+        mimeType,
+        size: bytes.length,
+      },
+      select: { id: true, mimeType: true, size: true },
+    });
 
       return NextResponse.json({
         id: record.id,
@@ -131,6 +132,7 @@ export async function POST(request: NextRequest) {
 
       const record = await prisma.aiFileAsset.create({
         data: {
+          ownerId: session.user.id,
           storageType: "REMOTE_URL",
           storageKey: storageKey,
           mimeType: file.type,
@@ -155,6 +157,7 @@ export async function POST(request: NextRequest) {
 
     const record = await prisma.aiFileAsset.create({
       data: {
+        ownerId: session.user.id,
         storageType: "DATABASE",
         mimeType: file.type,
         size: Number(file.size),

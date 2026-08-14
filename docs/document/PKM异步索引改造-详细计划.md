@@ -90,11 +90,11 @@ Worker 进程（独立）
 | 文件 | 作用 | 改动 |
 |---|---|---|
 | `prisma/schema.prisma` | 定义 `SearchDocument` 和未来的 `IndexJob` | 新增 `IndexJob` model |
-| `shared/lib/search.ts` | 索引写入核心逻辑 | 拆分 `syncPkmNoteSearchDocument`，新增 `enqueueIndexJob` |
+| `features/knowledge/lib/search.ts` | 索引写入核心逻辑 | 拆分 `syncPkmNoteSearchDocument`，新增 `enqueueIndexJob` |
 | `app/api/pkm/notes/route.ts` | 笔记创建 API | 调用 `enqueueIndexJob` |
 | `app/api/pkm/notes/[id]/route.ts` | 笔记更新/删除 API | 调用 `enqueueIndexJob` / 清理 job |
 | `embedding/api.py` | 文档解析 + 向量生成 | 无需改动 |
-| `scripts/vector-search/search-admin.ts` | CLI 工具 | 新增 `worker` 子命令 / job 状态查看 |
+| `scripts/document/search-admin.ts` | CLI 工具 | 新增 `worker` 子命令 / job 状态查看 |
 | `worker/index.ts` | Worker 主程序 | **新建**，独立进程入口（与 `embedding/` 平级，常驻服务） |
 | `worker/README.md` | Worker 部署说明 | **新建** |
 | `package.json` | npm scripts | 新增 `worker` script |
@@ -163,9 +163,9 @@ npx prisma generate
 
 ### 3.1 新增 `enqueueIndexJob` 函数
 
-在 `shared/lib/search.ts` 中新增函数（放在 `syncPkmNoteSearchDocument` 之后）：
+在 `features/knowledge/lib/search.ts` 中新增函数（放在 `syncPkmNoteSearchDocument` 之后）：
 
-```typescript:shared/lib/search.ts
+```typescript:features/knowledge/lib/search.ts
 export async function enqueueIndexJob(noteId: string): Promise<void> {
   // 1. 取消该 note 所有 pending 状态的旧 job（去重）
   await prisma.indexJob.deleteMany({
@@ -194,7 +194,7 @@ export async function enqueueIndexJob(noteId: string): Promise<void> {
 
 **路径 A — Worker 用（完整逻辑，不入队）**：
 
-```typescript:shared/lib/search.ts
+```typescript:features/knowledge/lib/search.ts
 /**
  * Worker 调用的完整同步索引逻辑。
  * 注意：这个函数不再入队，由调用方保证已处理入队逻辑。
@@ -230,7 +230,7 @@ export async function syncPkmNoteSearchDocumentFull(noteId: string) {
 
 **路径 B — API 路由用（同步写 content + 入队，不生成向量）**：
 
-```typescript:shared/lib/search.ts
+```typescript:features/knowledge/lib/search.ts
 /**
  * 笔记保存时调用的同步索引逻辑。
  * 只写 content，不生成 embedding（异步由 worker 完成）。
@@ -270,9 +270,9 @@ export async function syncPkmNoteSearchDocument(noteId: string) {
 
 ### 3.3 新增 Worker 专用 extract 函数（带 source 收集）
 
-Worker 需要知道每个附件的提取结果（用于 `errorSources` 字段），所以在 `shared/lib/search.ts` 新增：
+Worker 需要知道每个附件的提取结果（用于 `errorSources` 字段），所以在 `features/knowledge/lib/search.ts` 新增：
 
-```typescript:shared/lib/search.ts
+```typescript:features/knowledge/lib/search.ts
 export async function extractAttachmentTextsWithSources(
   attachments: PkmAttachment[],
 ): Promise<{
@@ -609,7 +609,7 @@ export async function DELETE(_request: Request, { params }: Params) {
 
 ### 6.2 CLI 工具新增 job 子命令
 
-在 `scripts/vector-search/search-admin.ts` 的 main 函数中新增：
+在 `scripts/document/search-admin.ts` 的 main 函数中新增：
 
 ```bash
 # 查看队列状态
@@ -631,9 +631,9 @@ npm run search:job -- clear-pending
 npm run search:job -- purge-completed --older-than-days 7
 ```
 
-新增文件 `scripts/vector-search/job-admin.ts`：
+新增文件 `scripts/document/job-admin.ts`：
 
-```typescript:scripts/vector-search/job-admin.ts
+```typescript:scripts/document/job-admin.ts
 // 实现 subcommands: status / inspect / retry / retry-note / clear-pending / purge-completed
 ```
 
@@ -776,10 +776,10 @@ npm test -- shared/lib/search.test.ts -- --test-name-pattern="enqueueIndexJob de
 | 文件 | 操作 | 说明 |
 |---|---|---|
 | `prisma/schema.prisma` | 修改 | 新增 `IndexJob` model 和 `IndexJobStatus` enum |
-| `shared/lib/search.ts` | 修改 | 改造 `syncPkmNoteSearchDocument`；新增 `enqueueIndexJob`；新增 `syncPkmNoteSearchDocumentFull`；新增 `extractAttachmentTextsWithSources` |
+| `features/knowledge/lib/search.ts` | 修改 | 改造 `syncPkmNoteSearchDocument`；新增 `enqueueIndexJob`；新增 `syncPkmNoteSearchDocumentFull`；新增 `extractAttachmentTextsWithSources` |
 | `app/api/pkm/notes/[id]/route.ts` | 修改 | DELETE handler 新增 `deleteMany` 清理 SearchDocument 和 IndexJob |
 | `worker/index.ts` | **新建** | Worker 主程序，独立进程（与 `embedding/` 平级） |
-| `scripts/vector-search/job-admin.ts` | **新建** | job 管理 CLI（status/inspect/retry/purge） |
+| `scripts/document/job-admin.ts` | **新建** | job 管理 CLI（status/inspect/retry/purge） |
 | `scripts/deploy/worker.service` | **新建** | systemd service 文件 |
 | `package.json` | 修改 | 新增 `worker` / `worker:prod` script |
 | `docs/vector-search/PKM异步索引改造-进度追踪.md` | **新建** | 进度追踪文档（本文档依赖） |
@@ -798,7 +798,7 @@ CLI 的 `search:backfill` 和 `search:reindex` 命令**无需改动**（它们�
 
 **解决方案**：给 `syncPkmNoteSearchDocument` 加参数，控制是否走异步路径：
 
-```typescript:shared/lib/search.ts
+```typescript:features/knowledge/lib/search.ts
 export async function syncPkmNoteSearchDocument(
   noteId: string,
   options: { async?: boolean } = {},  // 新参数

@@ -1,11 +1,11 @@
 import { prisma } from "@/shared/db/client";
 import type { BackgroundJob } from "@prisma/client";
 import { updateBackgroundJobStatus } from "../jobs";
-import { emitMessageDelta } from "@/features/ai/lib/domain-events";
+import { emitMessageDelta } from "@/features/ai/lib/sse/domain-events";
 import { generateVideos } from "@/features/ai/llm/video-generator";
-import { saveVideoAsset } from "@/features/ai/llm/video-providers/storage";
+import { saveVideoAsset } from "@/features/ai/llm/providers/video/storage";
 import { resolveCredentialWithFallback } from "@/features/ai/llm/credentials/api-key-store";
-import { resolveProviderImageSource } from "@/features/ai/lib/file-source";
+import { resolveProviderImageSource } from "@/features/ai/lib/storage/file-source";
 import { resolveGenerationMode } from "@/features/ai/routing/generation-mode";
 
 interface VideoPayload {
@@ -167,6 +167,7 @@ export async function handleVideoGenerate(
     );
 
     const asset = await saveVideoAsset({
+      ownerId: userId,
       providerVideoUrl: video.url,
       mimeType: video.mimeType,
       size: video.size,

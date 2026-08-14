@@ -305,7 +305,7 @@ graph.stream()
 **当前缺**: Timeline v4 完全没有 vitest 测试。建议立即补：
 
 ```typescript
-// features/ai/lib/__tests__/timeline-store.test.ts
+// features/ai/lib/timeline/__tests__/timeline-store.test.ts
 import { TimelineStore } from "../timeline-store";
 
 describe("TimelineStore", () => {

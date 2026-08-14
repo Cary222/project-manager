@@ -2,28 +2,29 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { streamText, stepCountIs } from "ai";
 import { requireSession } from "@/shared/lib/permissions";
+import { prisma } from "@/shared/db/client";
 import {
   appendMessage,
   getConversation,
   getOrCreateProfile,
 } from "@/features/ai/store/conversation-store";
-import { TimelineStore } from "@/features/ai/lib/timeline-store";
-import { onNodeStart, onNodeEnd } from "@/features/ai/lib/timeline-adapter";
+import { TimelineStore } from "@/features/ai/lib/timeline/timeline-store";
+import { onNodeStart, onNodeEnd } from "@/features/ai/lib/timeline/timeline-adapter";
 import { getUserProfileAction } from "@/features/profile/lib/profile-actions";
 import { retrieveContext, buildRagPrompt, extractSourceReferences } from "@/features/ai/search/rag";
 import type { SourceReference as RagSourceReference } from "@/features/ai/search/rag";
 import { speculationCache, shouldSpeculate } from "@/features/ai/search/speculation-cache";
 import { enqueueSummarizeConversation } from "@/features/ai/jobs/background-jobs";
-import { withStreamAgnesDynamicModel } from "@/features/ai/llm/agnes-provider";
+import { withStreamAgnesDynamicModel } from "@/features/ai/llm/providers/agnes-provider";
 import { toolsetForMode, maxStepsForMode } from "@/features/ai/tools";
 import { webSearch } from "@/features/ai/tools/web-search";
 import { searchKnowledge, setSearchKnowledgeViewer, setSearchKnowledgeConversationId } from "@/features/ai/tools/search-knowledge";
 import { searchStructured, setSearchStructuredViewer } from "@/features/ai/tools/search-structured";
 import { shouldUseWebSearch, shouldUseRag } from "@/features/ai/search/detector";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
-import { loadRuntimeState, saveRuntimeState } from "@/features/ai/core/context/conversation-state-store";
-import { buildMessages } from "@/features/ai/core/context/messages-builder";
-import { createRuntimeStatePatcher } from "@/features/ai/core/context/runtime-state-persist";
+import { loadRuntimeState, saveRuntimeState } from "@/features/ai/core/runtime/conversation-state-store";
+import { buildMessages } from "@/features/ai/core/context/messages/messages-builder";
+import { createRuntimeStatePatcher } from "@/features/ai/core/runtime/runtime-state-persist";
 import { buildChatContext } from "@/features/ai/core/context/context-builder";
 import {
   getConversationContext,
@@ -32,8 +33,8 @@ import {
   clearPendingHumanAction,
   bridgeRuntimeToLegacy,
   getPendingHumanAction,
-} from "@/features/ai/core/context/runtime-state-bridge";
-import type { PendingHumanActionState } from "@/features/ai/core/context/runtime-state-bridge";
+} from "@/features/ai/core/runtime/runtime-state-bridge";
+import type { PendingHumanActionState } from "@/features/ai/core/runtime/runtime-state-bridge";
 
 // ─── Human-in-Loop Map fallback moved to runtime-state-bridge.ts (短期兼容, v4.1 删除) ───
 // V2 → V3 迁移类型（用于迁移函数签名）
@@ -148,7 +149,43 @@ const messageSchema = z.object({
   clientCity: z.string().optional(),
   /** Manual model override: "providerId:modelName" format (e.g. "deepseek:deepseek-chat") */
   modelName: z.string().optional(),
+  /**
+   * Chat 模式识图输入：用户上传图片的 AiFileAsset.id 数组
+   * （前置步骤：客户端已通过 /api/ai/file-assets 上传并拿到 ownerId）
+   * 后端写入 AiMessageAttachment(direction=INPUT, type=IMAGE)
+   *
+   * W6 fix: 上限 8 张。Plan 里"最多 2 张"过严，留扩展余地；
+   * 上限 8 平衡"防止前端绕过 UI 限制"+"LLM context 不爆炸"。
+   */
+  inputImageIds: z.array(z.string()).max(8).optional(),
 });
+
+/**
+ * 校验 inputImageIds 全部归当前用户所有（ownerId = userId）。
+ * 校验通过返回完整 AiFileAsset 列表（带 storageKey/bytes/mimeType 供后续 resolve）。
+ * 校验失败抛错（含 missingIds，调用方返回 403）。
+ */
+async function validateInputImageOwnership(
+  inputImageIds: string[],
+  userId: string,
+): Promise<Array<{ id: string; storageType: string; mimeType: string | null }>> {
+  const assets = await prisma.aiFileAsset.findMany({
+    where: { id: { in: inputImageIds } },
+    select: { id: true, storageType: true, mimeType: true, ownerId: true },
+  });
+  const owned = assets.filter((a) => a.ownerId === userId);
+  if (owned.length !== inputImageIds.length) {
+    const ownedIds = new Set(owned.map((a) => a.id));
+    const missingIds = inputImageIds.filter((id) => !ownedIds.has(id));
+    throw new Error(`UNAUTHORIZED_INPUT_IMAGE: ${missingIds.join(",")}`);
+  }
+  // 必须是图片
+  const nonImage = owned.filter((a) => !a.mimeType?.startsWith("image/"));
+  if (nonImage.length > 0) {
+    throw new Error(`NON_IMAGE_INPUT: ${nonImage.map((a) => a.id).join(",")}`);
+  }
+  return owned;
+}
 
 function buildSystemPrompt(
   userName: string,
@@ -259,26 +296,125 @@ export async function POST(
       );
     }
 
-    // ── LangGraph StateGraph branch ──────────────────────────────────────────
-    if (process.env.USE_LANGGRAPH === "true") {
-      return handleLangGraphRequest({
-        request,
-        conversationId,
-        message,
-        conversationHistory,
-        mode,
-        forceSearch,
-        session,
-        conversation,
-        clientCity: geoCity,
-        modelName,
-      });
+  // ── LangGraph StateGraph branch ──────────────────────────────────────────
+  if (process.env.USE_LANGGRAPH === "true") {
+// ── inputImageIds 校验（前置，必须在事务前完成） ──
+  let validatedInputImages: Awaited<ReturnType<typeof validateInputImageOwnership>> = [];
+  const inputImageIds = body.inputImageIds;
+  if (inputImageIds && inputImageIds.length > 0) {
+    try {
+      validatedInputImages = await validateInputImageOwnership(inputImageIds, session.user.id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // W8 fix: 校验失败时输出 warn 日志，便于排查"前端绕过后端限频"等异常
+      // 路径。当前 403/400 仍然返回给前端，不影响安全语义；日志仅用于诊断。
+      if (msg.startsWith("UNAUTHORIZED_INPUT_IMAGE")) {
+        const missingIds = msg.replace(/^UNAUTHORIZED_INPUT_IMAGE:\s*/, "").split(",").filter(Boolean);
+        console.warn(
+          `[route] inputImageIds ownership validation failed: userId=${session.user.id} requested=${inputImageIds.length} missingIds=${JSON.stringify(missingIds)}`
+        );
+        return NextResponse.json(
+          { data: null, error: "图片资源不属于当前用户" },
+          { status: 403 }
+        );
+      }
+      if (msg.startsWith("NON_IMAGE_INPUT")) {
+        const nonImageIds = msg.replace(/^NON_IMAGE_INPUT:\s*/, "").split(",").filter(Boolean);
+        console.warn(
+          `[route] inputImageIds contains non-image assets: userId=${session.user.id} nonImageIds=${JSON.stringify(nonImageIds)}`
+        );
+        return NextResponse.json(
+          { data: null, error: "输入必须为图片文件" },
+          { status: 400 }
+        );
+      }
+      throw err;
     }
-    // ── End LangGraph branch ─────────────────────────────────────────────────
+  }
 
-    const [userProfile, appendUserMsg] = await Promise.all([
+    return handleLangGraphRequest({
+      request,
+      conversationId,
+      message,
+      conversationHistory,
+      mode,
+      forceSearch,
+      session,
+      conversation,
+      clientCity: geoCity,
+      modelName,
+      validatedInputImages,
+    });
+  }
+  // ── End LangGraph branch ─────────────────────────────────────────────────
+
+    // C2 fix: legacy 路径（USE_LANGGRAPH=false）也要支持 inputImageIds。
+    // 即使 USE_LANGGRAPH=true 是默认，legacy 路径做完整是 cheap defense：
+    // 否则环境配错就静默丢图（消息写了，附件没挂，LLM 收到纯文本）。
+    let legacyValidatedInputImages: Array<{ id: string; storageType: string; mimeType: string | null }> = [];
+    const legacyInputImageIds = body.inputImageIds;
+    if (legacyInputImageIds && legacyInputImageIds.length > 0) {
+      try {
+        legacyValidatedInputImages = await validateInputImageOwnership(
+          legacyInputImageIds,
+          session.user.id,
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.startsWith("UNAUTHORIZED_INPUT_IMAGE")) {
+          const missingIds = msg.replace(/^UNAUTHORIZED_INPUT_IMAGE:\s*/, "").split(",").filter(Boolean);
+          console.warn(
+            `[route:legacy] inputImageIds ownership validation failed: userId=${session.user.id} requested=${legacyInputImageIds.length} missingIds=${JSON.stringify(missingIds)}`
+          );
+          return NextResponse.json(
+            { data: null, error: "图片资源不属于当前用户" },
+            { status: 403 }
+          );
+        }
+        if (msg.startsWith("NON_IMAGE_INPUT")) {
+          console.warn(
+            `[route:legacy] inputImageIds contains non-image assets: userId=${session.user.id}`
+          );
+          return NextResponse.json(
+            { data: null, error: "输入必须为图片文件" },
+            { status: 400 }
+          );
+        }
+        throw err;
+      }
+    }
+
+    // C2 fix: legacy 路径事务写入 user message + INPUT attachments。
+    // 不用 appendMessage（不支持 attachments），改用 prisma.$transaction 等价行为。
+    const createdLegacyMessage = await prisma.$transaction(async (tx) => {
+      const msg = await tx.aiChatMessage.create({
+        data: { conversationId, role: "user", content: message },
+        select: { id: true },
+      });
+      if (legacyValidatedInputImages.length > 0) {
+        await tx.aiMessageAttachment.createMany({
+          data: legacyValidatedInputImages.map((img) => ({
+            messageId: msg.id,
+            fileAssetId: img.id,
+            type: "IMAGE",
+            direction: "INPUT",
+          })),
+        });
+      }
+      await tx.aiConversation.update({
+        where: { id: conversationId },
+        data: {
+          lastMessageAt: new Date(),
+          messageCount: { increment: 1 },
+        },
+      });
+      return msg;
+    });
+
+    // 兼容老变量命名（appendUserMsg），行为上等价
+    const appendUserMsg = createdLegacyMessage;
+    const [userProfile] = await Promise.all([
       getOrCreateProfile(session.user.id),
-      appendMessage(conversationId, "user", message),
     ]);
     const profileData = userProfile?.profile ?? {};
 
@@ -532,6 +668,13 @@ interface LangGraphRequestOptions {
   conversation: { id: string; title: string };
   clientCity: string | null;
   modelName?: string;
+  /**
+   * 已通过 ownership 校验的输入图片。
+   * Chat 模式识图场景：在 state.messages 中构造 HumanMessage 时
+   * 把这些 id 对应的 data URI 注入到 image_url part（多模态 content）。
+   * 同时在 appendMessage 后立刻写 AiMessageAttachment(direction=INPUT)。
+   */
+  validatedInputImages?: Array<{ id: string; storageType: string; mimeType: string | null }>;
 }
 
 async function handleLangGraphRequest(
@@ -548,6 +691,7 @@ async function handleLangGraphRequest(
     conversation,
     clientCity,
     modelName,
+    validatedInputImages = [],
   } = opts;
 
   console.log(`[AI-LangGraph] start conv=${conversationId} message="${message.slice(0, 80)}" mode=${mode}`);
@@ -568,13 +712,61 @@ async function handleLangGraphRequest(
   const { runtimeState, pendingState, userProfile } = ctx;
   const conversationContext = getConversationContext(conversationId);
 
-  // Build message history using messages-builder (token-budgeted, id-deduplicated)
+  // ── 解析当前轮次输入图片（ownerId 已在前置路由校验）────────────────────
+  let currentInputImageUrls: string[] = [];
+  let currentImageResolveError: string | null = null;
+  if (validatedInputImages.length > 0) {
+    try {
+        const { resolveCurrentInputImages } = await import("@/features/ai/core/images/resolve-current-input-images");
+      currentInputImageUrls = await resolveCurrentInputImages(validatedInputImages);
+      console.log(`[AI-LangGraph] current input images resolved: ${currentInputImageUrls.length}`);
+    } catch (err) {
+      currentImageResolveError = err instanceof Error ? err.message : String(err);
+      console.error(`[AI-LangGraph] failed to resolve current input images:`, err);
+    }
+  }
+
+  // ── 批量解析历史轮次 INPUT 图片（N+1 优化）────────────────────────────────
+  let historyImageUrls = new Map<string, string[]>();
+  if (conversationHistory && conversationHistory.length > 0) {
+    const userHistoryIds = conversationHistory
+      .filter((m) => m.role === "user")
+      .map((m) => m.id);
+    if (userHistoryIds.length > 0) {
+      try {
+        const { resolveHistoryInputImages } = await import("@/features/ai/core/images/resolve-history-input-images");
+        const historyResult = await resolveHistoryInputImages(userHistoryIds);
+        historyImageUrls = historyResult.urlsByMessageId;
+        if (historyResult.failures.length > 0) {
+          console.warn(
+            `[AI-LangGraph] history image resolution failures: ${historyResult.failures.length} (continuing without them)`
+          );
+        }
+      } catch (err) {
+        console.error(`[AI-LangGraph] failed to resolve history input images:`, err);
+      }
+    }
+  }
+
+  // Build message history using messages-builder (token-budgeted, id-deduplicated, multimodal-aware)
   // pendingLastAssistantMessage is injected before currentMessage when client omits it
+  // historyImageUrls 让历史 user message 也以多模态形式构造（不丢上下文）
   const langgraphMessages = buildMessages({
     history: conversationHistory ?? [],
-    currentMessage: message,
+    currentInput: {
+      text: message,
+      ...(currentInputImageUrls.length > 0 ? { imageUrls: currentInputImageUrls } : {}),
+    },
     pendingLastAssistantMessage: pendingState?.lastAssistantMessage,
+    ...(historyImageUrls.size > 0 ? { historyImageUrls } : {}),
   });
+
+  // 图片解析失败但消息可继续发送（仅文字模式退化）
+  if (currentImageResolveError) {
+    console.warn(
+      `[AI-LangGraph] 当前轮次图片解析失败，降级为纯文本模式: ${currentImageResolveError}`
+    );
+  }
 
   // Inject viewer context into tool closures
   injectSearchKnowledgeContext(session.user.id, conversationId);
@@ -628,7 +820,40 @@ async function handleLangGraphRequest(
       let resolvedEntitiesResolved = false;
 
       try {
-        await appendMessage(conversationId, "user", message);
+        // ── 写入 user message + INPUT 附件（事务原子性）───────────────────
+        // 先创建 message 拿 id，再用同一事务写 INPUT attachments
+        const createdUserMessage = await prisma.$transaction(async (tx) => {
+          const msg = await tx.aiChatMessage.create({
+            data: {
+              conversationId,
+              role: "user",
+              content: message,
+            },
+            select: { id: true },
+          });
+          if (validatedInputImages.length > 0) {
+            await tx.aiMessageAttachment.createMany({
+              data: validatedInputImages.map((img) => ({
+                messageId: msg.id,
+                fileAssetId: img.id,
+                type: "IMAGE",
+                direction: "INPUT",
+              })),
+            });
+          }
+          // 更新 conversation lastMessageAt + messageCount（与 appendMessage 等价）
+          await tx.aiConversation.update({
+            where: { id: conversationId },
+            data: {
+              lastMessageAt: new Date(),
+              messageCount: { increment: 1 },
+            },
+          });
+          return msg;
+        });
+        console.log(
+          `[AI-LangGraph] appended user message=${createdUserMessage.id} with ${validatedInputImages.length} INPUT attachment(s)`
+        );
 
         // Send conversation metadata (matches existing SSE format)
         enqueueData({

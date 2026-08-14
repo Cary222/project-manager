@@ -33,9 +33,9 @@ PKM 笔记的附件存在 `pm.PkmNote.attachments`（`Json` 字段）里，但**
 |---|------|------|------|
 | 1 | `embedding/api.py` | 修改 | 新增 `/extract-text` 端点 + 4 个 mime 解析器（text/pdf/pptx/docx，含表格） |
 | 2 | `embedding/requirements.txt` | 修改 | 加 `pdfplumber>=0.10.0`、`python-pptx>=0.6.21`、`python-docx>=1.0.0` |
-| 3 | `shared/lib/embedding.ts` | 修改 | 导出 `getEmbeddingApiUrl()` 给 search 复用 |
+| 3 | `features/knowledge/lib/embedding.ts` | 修改 | 导出 `getEmbeddingApiUrl()` 给 search 复用 |
 | 4 | `shared/lib/markdown.ts` | 修改 | 新增 `cleanExtractedTextForEmbedding()`，清洗附件提取文本再喂 BGE-M3 |
-| 5 | `shared/lib/search.ts` | 修改 | 新增 `extractAttachmentText(s)` 客户端 + `buildSearchablePkmNoteDocument` 改 async + 接入清洗 |
+| 5 | `features/knowledge/lib/search.ts` | 修改 | 新增 `extractAttachmentText(s)` 客户端 + `buildSearchablePkmNoteDocument` 改 async + 接入清洗 |
 | 6 | `scripts/test-clean-extracted-text.ts` | 新增 | 调试脚本：从 DB 捞含附件笔记，打印清洗前后 before/after 对比 |
 
 无 schema 变更（`attachments` 字段早就是 `Json`）。
@@ -150,11 +150,11 @@ async def extract_text(body: ExtractRequest):
 - `wait_for` 给整个提取套 15s 超时，**始终返回 200 + source 字段**，客户端按 `source` 判断
 - 返回体恒有 `text` / `source` / `name` 三个字段，**客户端永远不用 try/catch**
 
-### 3.2 Next.js 客户端（`shared/lib/search.ts`）
+### 3.2 Next.js 客户端（`features/knowledge/lib/search.ts`）
 
 #### 3.2.1 单附件提取
 
-```354:404:shared/lib/search.ts
+```354:404:features/knowledge/lib/search.ts
 export async function extractAttachmentText(
   attachment: PkmAttachment,
 ): Promise<AttachmentExtraction> {
@@ -215,7 +215,7 @@ export async function extractAttachmentText(
 
 #### 3.2.2 批量 + 注入 content
 
-```406:430:shared/lib/search.ts
+```406:430:features/knowledge/lib/search.ts
 export async function extractAttachmentTexts(
   attachments: PkmAttachment[],
 ): Promise<Map<string, string>> {
@@ -245,7 +245,7 @@ export async function extractAttachmentTexts(
 
 注入点（`buildSearchablePkmNoteDocument`）：
 
-```298:342:shared/lib/search.ts
+```298:342:features/knowledge/lib/search.ts
 export async function buildSearchablePkmNoteDocument(
   note: SearchDocumentPkmNoteRecord,
   attachmentTexts: Map<string, string> = new Map(),
@@ -282,7 +282,7 @@ export async function buildSearchablePkmNoteDocument(
 
 #### 3.2.3 单条同步 + 全量回填 接入
 
-```534:562:shared/lib/search.ts
+```534:562:features/knowledge/lib/search.ts
 export async function syncPkmNoteSearchDocument(noteId: string) {
   const note = await prisma.pkmNote.findUnique({
     where: { id: noteId },
@@ -314,7 +314,7 @@ export async function syncPkmNoteSearchDocument(noteId: string) {
 }
 ```
 
-```595:605:shared/lib/search.ts
+```595:605:features/knowledge/lib/search.ts
 await Promise.all([
     ...tickets.map((ticket) => upsertSearchDocument(buildSearchableTicketDocument(ticket))),
     ...commits.map((commit) => upsertSearchDocument(buildSearchableCommitDocument(commit))),
@@ -376,9 +376,9 @@ export function cleanExtractedTextForEmbedding(raw: string): string {
 | FastAPI 端口 | `0.0.0.0:5000` | 同向量服务复用 |
 | `EMBEDDING_API_URL` | `http://localhost:5000` | 主应用 `.env.production` / `.env` 都需要 |
 | Python 包 | `pdfplumber>=0.10.0`、`python-pptx>=0.6.21`、`python-docx>=1.0.0` | 新加，已写进 `embedding/requirements.txt` |
-| 前端超时 | `EXTRACT_TEXT_TIMEOUT_MS = 15_000` | `shared/lib/search.ts:34` |
+| 前端超时 | `EXTRACT_TEXT_TIMEOUT_MS = 15_000` | `features/knowledge/lib/search.ts:34` |
 | 前端大小上限 | `PKM_ATTACHMENT_MAX_SIZE` | `shared/lib/pkm.ts`，默认 10MB |
-| 文本截断 | `MAX_EXTRACTED_CHARS = 2000` | `shared/lib/search.ts:35`，PDF/PPTX 提取后超长会被截 |
+| 文本截断 | `MAX_EXTRACTED_CHARS = 2000` | `features/knowledge/lib/search.ts:35`，PDF/PPTX 提取后超长会被截 |
 | 服务端超时 | `EXTRACT_TEXT_TIMEOUT_SECONDS = 15` | `embedding/api.py:23` |
 | 服务端大小上限 | `MAX_EXTRACT_FILE_SIZE = 10 * 1024 * 1024` | `embedding/api.py:25` |
 
@@ -424,7 +424,7 @@ cd /Users/vastgui/Desktop/project-manager
 ssh hxy@192.168.1.14 "cd /home/hxy/work/personal/project-manager && git pull origin main"
 
 # 2. 在本地编辑完后，commit + push（推送即部署）
-git add embedding/api.py embedding/requirements.txt shared/lib/embedding.ts shared/lib/search.ts
+git add embedding/api.py embedding/requirements.txt features/knowledge/lib/embedding.ts features/knowledge/lib/search.ts
 git commit -m "embedding: 新增 /extract-text 端点，PKM 附件正文进入向量搜索"
 git push origin main
 ```
@@ -507,7 +507,7 @@ curl -s -X POST http://localhost:5000/extract-text \
 ssh hxy@192.168.1.14
 cd /home/hxy/work/personal/project-manager
 set -a && source .env.production && set +a
-npx tsx scripts/vector-search/search-admin.ts reindex
+npx tsx scripts/document/search-admin.ts reindex
 ```
 
 **期望输出**（节选）：
@@ -670,11 +670,11 @@ cases.forEach((text, i) => {
 - 路由分发：`embedding/api.py:104-135`
 - 端点本体：`embedding/api.py:166-193`
 - 清洗函数：`shared/lib/markdown.ts:45-95`
-- 客户端单条：`shared/lib/search.ts:354-404`
-- 客户端批量：`shared/lib/search.ts:406-430`
-- 注入 content（含清洗）：`shared/lib/search.ts:298-342`
-- 同步入口：`shared/lib/search.ts:534-562`
-- 全量回填：`shared/lib/search.ts:564-606`
+- 客户端单条：`features/knowledge/lib/search.ts:354-404`
+- 客户端批量：`features/knowledge/lib/search.ts:406-430`
+- 注入 content（含清洗）：`features/knowledge/lib/search.ts:298-342`
+- 同步入口：`features/knowledge/lib/search.ts:534-562`
+- 全量回填：`features/knowledge/lib/search.ts:564-606`
 
 ### 9.3 相关文档
 

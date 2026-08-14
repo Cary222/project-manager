@@ -15,10 +15,10 @@
  *   // ctx.conversationHistory → passed to buildMessages()
  */
 
-import { loadRuntimeState, clearPendingHumanAction } from "./conversation-state-store";
-import { getPendingHumanAction } from "./runtime-state-bridge";
+import { loadRuntimeState, clearPendingHumanAction } from "../runtime/conversation-state-store";
+import { getPendingHumanAction } from "../runtime/runtime-state-bridge";
 import { getUserProfileAction } from "@/features/profile/lib/profile-actions";
-import type { PendingHumanActionState } from "./runtime-state-bridge";
+import type { PendingHumanActionState } from "../runtime/runtime-state-bridge";
 
 export interface ChatContext {
   /** HIL + semantic runtime state from DB (raw shape) */
