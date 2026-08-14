@@ -178,40 +178,56 @@ export function AiMessageBubble({
   // User message: right-aligned bubble (max-w-[75%])
   if (isUserMessage) {
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[75%]">
-          {/* 用户上传的参考图（Image 模式） */}
-          {userImages && userImages.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-2 justify-end">
-              {userImages.map((img) => (
-                <button
-                  key={img.id}
-                  type="button"
-                  onClick={() => setUserImageLightbox({ src: img.url, name: img.name })}
-                  className="group relative max-w-sm overflow-hidden rounded-lg border border-white/20 shadow-sm transition-all hover:shadow-md hover:scale-[1.02]"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={img.url}
-                    alt={img.name}
-                    className="max-h-48 object-contain"
-                    loading="lazy"
-                  />
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                    <span className="opacity-0 group-hover:opacity-100 text-white text-sm bg-black/50 px-3 py-1 rounded-full transition-opacity">
-                      点击放大
-                    </span>
-                  </div>
-                </button>
-              ))}
+      <>
+        <div className="flex justify-end">
+          <div className="max-w-[75%]">
+            {/* 用户上传的参考图（Image 模式） */}
+            {userImages && userImages.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2 justify-end">
+                {userImages.map((img) => (
+                  <button
+                    key={img.id}
+                    type="button"
+                    onClick={() => setUserImageLightbox({ src: img.url, name: img.name })}
+                    className="group relative max-w-sm overflow-hidden rounded-lg border border-white/20 shadow-sm transition-all hover:shadow-md hover:scale-[1.02]"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={img.url}
+                      alt={img.name}
+                      className="max-h-48 object-contain"
+                      loading="lazy"
+                    />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                      <span className="opacity-0 group-hover:opacity-100 text-white text-sm bg-black/50 px-3 py-1 rounded-full transition-opacity">
+                        点击放大
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="rounded-2xl bg-brand-600 px-4 py-2.5 text-white rounded-br-md">
+              <p className="text-sm leading-relaxed whitespace-pre-wrap">{content}</p>
             </div>
-          )}
-          <div className="rounded-2xl bg-brand-600 px-4 py-2.5 text-white rounded-br-md">
-            <p className="text-sm leading-relaxed whitespace-pre-wrap">{content}</p>
+            <span className="mt-1 block text-[10px] text-ink-400">你</span>
           </div>
-          <span className="mt-1 block text-[10px] text-ink-400">你</span>
         </div>
-      </div>
+
+        {/* ImageLightbox for user uploaded reference images */}
+        {userImageLightbox && (
+          <ImageLightbox
+            image={userImageLightbox}
+            onClose={() => setUserImageLightbox(null)}
+            onDownload={() => {
+              const a = document.createElement("a");
+              a.href = userImageLightbox.src;
+              a.download = userImageLightbox.name;
+              a.click();
+            }}
+          />
+        )}
+      </>
     );
   }
 
