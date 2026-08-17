@@ -87,6 +87,12 @@ export function resolveIntent(input: string): ResolvedAiIntent {
     return { category: "chat", toolMode: "search" };
   }
 
+  // 联网搜索模式（包含网页爬取意图 — AI 会自主选择 webSearch 或 webScrape）
+  if (/(?:爬取|抓取|采集|获取|读取).*(?:页面|网页|文章|内容|文档|网址|链接)/i.test(trimmed) ||
+      /https?:\/\/[^\s]+/i.test(trimmed) && /(?:全文|完整|整个|爬取|抓取|获取|读取)/i.test(trimmed)) {
+    return { category: "chat", toolMode: "web" };
+  }
+
   // 联网搜索模式
   if (/(?:天气|联网|搜索|实时)/i.test(trimmed)) {
     return { category: "chat", toolMode: "web" };

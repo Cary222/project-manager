@@ -193,8 +193,16 @@ export function AiChatInput({
       if (uploadingImage) return;
       setUploadingImage(true);
       try {
+        // 先压缩图片再上传（限制 1600px 边长，避免 token 超限）
+        const compressed = await compressImageBlob(file, 1600, 0.82);
+        const compressedFile = new File([compressed], file.name, { type: "image/jpeg" });
+        console.log("[AiChatInput] 图片已压缩:", {
+          original: `${(file.size / 1024).toFixed(1)}KB`,
+          compressed: `${(compressed.size / 1024).toFixed(1)}KB`,
+        });
+        
         // 上传到 AiFileAsset（ownerId = session.user.id），返回 id 用于挂 INPUT 附件
-        const result = await uploadImageToFileAsset(file);
+        const result = await uploadImageToFileAsset(compressedFile);
         const newImage = { id: result.id, url: result.url, name: file.name };
         const updated = [...images, newImage];
         setImages(updated);
@@ -210,12 +218,17 @@ export function AiChatInput({
         setUploadingImage(false);
       }
     },
-    [images, uploadingImage, onChatImagesChange]
+    [images, uploadingImage, onChatImagesChange, compressImageBlob]
   );
 
   const removeImage = useCallback((id: string) => {
-    setImages((prev) => prev.filter((img) => img.id !== id));
-  }, []);
+    setImages((prev) => {
+      const next = prev.filter((img) => img.id !== id);
+      // 同步通知 panel（onChatImagesChange 负责维护 chatImages）
+      onChatImagesChange?.(next);
+      return next;
+    });
+  }, [onChatImagesChange]);
 
   // ── Image 模式参考图上传（I2I）────────────────────────────────────────────
   const handleReferenceImageUpload = useCallback(
@@ -331,7 +344,13 @@ export function AiChatInput({
           : undefined;
       onSend(trimmed, images.length > 0 ? images : undefined, inputFileIds);
       setMessage("");
-      setImages([]);
+      const clearedImages: typeof images = [];
+      setImages(clearedImages);
+      // 通知 panel 清空 chatImages（单一 source of truth：panel 的 chatImages
+      // 与 AiChatInput 的 images 同步，避免 race condition）
+      if (taskCategory === "chat") {
+        onChatImagesChange?.(clearedImages);
+      }
       // 清空参考图（I2I / I2V 模式）
       if (taskCategory === "image" || taskCategory === "video") {
         setReferenceImages([]);
@@ -342,7 +361,7 @@ export function AiChatInput({
         textareaRef.current.style.height = "auto";
       }
     },
-    [message, images, disabled, onSend, taskCategory, referenceImages, onReferenceImagesChange]
+    [message, images, disabled, onSend, taskCategory, referenceImages, onReferenceImagesChange, onChatImagesChange]
   );
 
   const handleKeyDown = useCallback(

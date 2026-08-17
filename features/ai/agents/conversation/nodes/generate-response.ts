@@ -1,8 +1,8 @@
 import type { BaseMessage } from "@langchain/core/messages";
-import { HumanMessage, AIMessage } from "@langchain/core/messages";
+import { HumanMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
 import type { AgentState } from "../agent";
 import { generateText } from "ai";
-import type { ModelMessage, UserModelMessage, AssistantModelMessage } from "ai";
+import type { ModelMessage, UserModelMessage, AssistantModelMessage, TextPart, FilePart } from "ai";
 import { createModel } from "@/features/ai/llm/providers/registry";
 import { ensureSystemProvider } from "@/features/ai/llm/providers/init";
 import { selectModel } from "@/features/ai/llm/model-routing";
@@ -35,7 +35,11 @@ async function callWithDynamicModel(
 
     const model = await createModel({ userId, modelRef });
     console.log(`[generateResponseNode] using model instance for "${modelRef}", calling generateText...`);
+    
     const result = await generateText({ model, system: systemPrompt, messages });
+    
+    console.log(`[DEBUG:H2:callWithDynamicModel] generateText called with messages.length=${messages.length} message[0].role=${messages[0]?.role} message[last].role=${messages[messages.length-1]?.role}`);
+    console.log(`[DEBUG:H2:callWithDynamicModel] message[last].content types:`, (() => { const c = messages[messages.length-1]?.content; return Array.isArray(c) ? c.map((p: any) => ({ type: p.type })) : "string"; })());
     console.log(`[generateResponseNode] generateText success, textLen=${result.text.length}`);
     return result.text;
   } catch (error) {
@@ -268,27 +272,85 @@ function buildMessages(
   for (const m of history) {
     if (m instanceof HumanMessage) {
       // Multimodal-aware: 如果 content 是 array（[{text}, {image_url}]），
-      // 必须把 array 直接传给 ModelMessage user content，不能 JSON.stringify
-      // 注意：AI SDK 的 UserContent 要求 ImagePart 结构为 { type: "image", image: string }
-      // （不是 OpenAI Chat Completions 的 image_url），由 Provider adapter 负责转换。
+      // 转换为 AI SDK FilePart { type: "file", mediaType: "image/...", data: ... }
       if (Array.isArray(m.content)) {
         const parts = m.content as MultimodalPart[];
-        const userContent: UserContent = parts.map((p) => {
+        const textParts: string[] = [];
+        const imageParts: string[] = [];
+        
+        for (const p of parts) {
           if (p.type === "text") {
-            return { type: "text", text: p.text + contextSuffix };
+            textParts.push(p.text);
+          } else if (p.type === "image_url" && typeof p.image_url === "object" && p.image_url.url) {
+            imageParts.push(p.image_url.url);
           }
-          // image_url → image（AI SDK UserContent 格式）
-          return { type: "image", image: p.image_url.url };
-        });
-        msgs.push({ role: "user", content: userContent } satisfies UserModelMessage);
+          // 忽略其他未知类型的 part
+        }
+        
+        // 从文本中提取图片 URL（用户手动输入的 https://...jpg 等）
+        const imageUrlPattern = /(https?:\/\/[^\s]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s]*)?)/gi;
+        const textContent = textParts.join("\n");
+        const extractedUrls = textContent.match(imageUrlPattern) || [];
+        if (extractedUrls.length > 0) {
+          console.log(`[buildMessages] extracted ${extractedUrls.length} image URLs from text`);
+          imageParts.push(...extractedUrls);
+          // 从文本中移除这些 URL
+          textParts[0] = textContent.replace(imageUrlPattern, "").trim();
+        }
+        
+        // AI SDK FilePart for images: { type: "file", mediaType: "image/...", data: URL }
+        // `data` accepts a bare URL — works for both HTTP URLs and data: URIs.
+        const content: Array<{ type: "text"; text: string } | { type: "file"; mediaType: string; data: URL }> = [
+          ...(textParts.length > 0 ? [{ type: "text" as const, text: textParts.join("\n") + contextSuffix }] : []),
+          ...imageParts.map(url => {
+            const m = /^data:([^;]+);base64,/.exec(url);
+            const mediaType = m ? m[1] : "image/jpeg";
+            return {
+              type: "file" as const,
+              mediaType,
+              data: new URL(url),
+            };
+          }),
+        ];
+        
+        msgs.push({ role: "user", content } satisfies UserModelMessage);
       } else {
-        // 字符串 content：追加 contextSuffix
+        // 字符串 content：提取图片 URL 并追加 contextSuffix
         const c = typeof m.content === "string" ? m.content : String(m.content);
-        msgs.push({ role: "user", content: c + contextSuffix } satisfies UserModelMessage);
+        const imageUrlPattern = /(https?:\/\/[^\s]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s]*)?)/gi;
+        const extractedUrls = c.match(imageUrlPattern) || [];
+        
+        if (extractedUrls.length > 0) {
+          // 找到图片 URL — 转为 multimodal
+          console.log(`[buildMessages] extracted ${extractedUrls.length} image URLs from plain text`);
+          const cleanText = c.replace(imageUrlPattern, "").trim();
+          
+          const content: Array<{ type: "text"; text: string } | { type: "file"; mediaType: string; data: URL }> = [
+            { type: "text" as const, text: cleanText + contextSuffix },
+            ...extractedUrls.map(url => ({
+              type: "file" as const,
+              mediaType: "image/jpeg",
+              data: new URL(url),
+            })),
+          ];
+          
+          msgs.push({ role: "user", content } satisfies UserModelMessage);
+        } else {
+          // 没有图片 — 纯文本
+          msgs.push({ role: "user", content: c + contextSuffix } satisfies UserModelMessage);
+        }
       }
-    } else {
-      const c = typeof m.content === "string" ? m.content : String(m.content);
+    } else if (m instanceof AIMessage) {
+      // AIMessage：转 AssistantModelMessage
+      const c = typeof m.content === "string"
+        ? m.content
+        : Array.isArray(m.content)
+          ? m.content.map((p: any) => typeof p === "string" ? p : p?.text ?? "").join("")
+          : String(m.content ?? "");
       msgs.push({ role: "assistant", content: c } satisfies AssistantModelMessage);
+    } else {
+      // ToolMessage 等其他消息类型跳过
+      // OpenAI Chat Completions 不支持 tool role 直接出现在 user/assistant 消息中
     }
   }
 
@@ -298,6 +360,25 @@ function buildMessages(
   if (history.length === 0) {
     msgs.push({ role: "user", content: userContent + contextSuffix } satisfies UserModelMessage);
   }
+
+  // #region debug log messages
+  const fs = require('fs');
+  fs.appendFileSync('/Users/vastgui/Desktop/project-manager/.cursor/debug-ebf0e5.log', JSON.stringify({
+    sessionId: 'ebf0e5',
+    location: 'buildMessages:return',
+    message: '[H-F] buildMessages output',
+    data: {
+      messagesCount: msgs.length,
+      messages: msgs.map((m, i) => ({
+        index: i,
+        role: m.role,
+        contentType: Array.isArray(m.content) ? m.content.map((p: any) => ({ type: p.type, keys: Object.keys(p) })) : typeof m.content
+      }))
+    },
+    timestamp: Date.now(),
+    hypothesisId: 'F'
+  }) + '\n');
+  // #endregion
 
   return msgs;
 }
@@ -435,12 +516,28 @@ export async function generateResponseNode(
   );
 
   // Log what context the LLM will see (first user message after history)
-  const ctxMsg = messages[messages.length - 1];
-  if (ctxMsg && ctxMsg.role === "user") {
-    console.log(`[generateResponseNode] ctxMsg content preview="${String(ctxMsg.content).slice(0, 200)}"`);
-  }
+  // #H2 confirm: 确认最终传给 generateText 的 messages content 格式
+    const ctxMsg = messages[messages.length - 1];
+    if (ctxMsg && ctxMsg.role === "user") {
+      const contentPreview = Array.isArray(ctxMsg.content)
+        ? ctxMsg.content.map((p) => `{type:${p.type}}`).join(",")
+        : String(ctxMsg.content).slice(0, 200);
+      console.log(`[DEBUG:H2:generateText] ctxMsg content preview="${contentPreview}"`);
+      console.log(`[DEBUG:H2:generateText] ctxMsg full:`, JSON.stringify(ctxMsg, null, 2).slice(0, 500));
+    }
+    // #H2 instrument: 打印所有 messages 的 content type 摘要（精确定位 unknown 来源）
+    console.log(
+      `[DEBUG:H2:generateText] all messages contentTypes:`,
+      messages.map((m, i) => ({
+        i,
+        role: m.role,
+        contentType: Array.isArray(m.content)
+          ? m.content.map((p) => `{type:${(p as any).type}}`).join("|")
+          : "string",
+      }))
+    );
 
-  try {
+    try {
     const resultText = await callWithDynamicModel(
       state.modelContext,
       systemPrompt,

@@ -217,6 +217,37 @@ const WEB_KEYWORDS: { pattern: RegExp; category: string }[] = [
   },
 ];
 
+// 网页爬取意图 — 具体 URL + 想要获取完整内容
+const WEB_SCRAPE_PATTERNS: { pattern: RegExp; category: string }[] = [
+  // 明确要求爬取/抓取/获取全文
+  { pattern: /(?:爬取|抓取|抓站|采集|获取).*(?:页面|网页|文章|内容|文档)/i, category: "scrape" },
+  // 全文/完整内容请求（配合 URL）
+  { pattern: /(?:全文|完整内容|完整文章|整页|整个页面)/i, category: "scrape" },
+  // 具体 URL + 动作词
+  { pattern: /https?:\/\/[^\s]+/i, category: "scrape" }, // 需要后续逻辑判断
+  // 文档/技术文档/面试题请求
+  { pattern: /(?:技术文档|面试题|面经|文档|文章|内容)[:：]\s*https?:\/\//i, category: "scrape" },
+  // 爬取这个/那个网页
+  { pattern: /(?:爬取?|抓取?|获取|看看|读一下)(?:这个|那个|该|下面)?(?:网页?|页面|文章|链接)/i, category: "scrape" },
+  // 帮我读取这个网址
+  { pattern: /(?:帮我|请)?(?:读取|获取|爬取|抓取).*(?:网址|链接|url|地址)/i, category: "scrape" },
+];
+
+// 检测是否有具体 URL 存在
+function containsUrl(message: string): boolean {
+  return /https?:\/\/[^\s]+/i.test(message);
+}
+
+// 检测是否有爬取意图（需要 URL 存在才触发）
+function hasScrapeIntent(message: string): boolean {
+  const hasUrl = containsUrl(message);
+  const hasScrapeKeyword = WEB_SCRAPE_PATTERNS.some(
+    ({ pattern, category }) => category === "scrape" && pattern.test(message)
+  );
+  // 有 URL 就有潜在爬取可能，或者有明确的爬取关键词
+  return hasUrl || hasScrapeKeyword;
+}
+
 // 纯闲聊信号 — 明确不需要查询项目数据
 const PURE_CHAT_PATTERNS: RegExp[] = [
   // 简单问候/告别
@@ -252,7 +283,10 @@ export function detectMode(message: string): AgentMode {
     /(?:帮我|请)?(?:生成|制作)(?:一个?|段?)?/i.test(trimmed) && /(?:视频?|短片|动画|影片)/i.test(trimmed);
   if (hasVideoIntent) return "video";
 
-  // 3. 天气/联网搜索 → web
+  // 3. 网页爬取意图（有 URL + 爬取意图）→ web（AI 会自主选择 webSearch 或 webScrape）
+  if (hasScrapeIntent(trimmed)) return "web";
+
+  // 4. 天气/联网搜索 → web
   const hasWeatherIntent = WEB_KEYWORDS.some(
     ({ pattern, category }) => category === "weather" && pattern.test(trimmed)
   );
@@ -263,16 +297,16 @@ export function detectMode(message: string): AgentMode {
   );
   if (hasWebIntent) return "web";
 
-  // 4. 纯闲聊 → chat
+  // 5. 纯闲聊 → chat
   if (isPureChat(trimmed)) return "chat";
 
-  // 5. 人员近况必须走结构化（优先级高于默认 search）
+  // 6. 人员近况必须走结构化（优先级高于默认 search）
   if (isUserActivityQuery(trimmed)) return "search";
 
-  // 6. 其他查询 → search（结构化查询）
+  // 7. 其他查询 → search（结构化查询）
   if (containsSearchKeywords(trimmed)) return "search";
 
-  // 7. 兜底默认 search（项目管理平台，大部分查询都涉及数据）
+  // 8. 兜底默认 search（项目管理平台，大部分查询都涉及数据）
   return "search";
 }
 

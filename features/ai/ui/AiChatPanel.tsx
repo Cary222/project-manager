@@ -196,6 +196,12 @@ export function AiChatPanel({
 
   // Image 模式参考图 state（用于 I2I）
   const [inputFileIds, setInputFileIds] = useState<{ id: string; url: string; name: string }[]>([]);
+  // Chat 模式识图 state（用于 Chat 模式下上传图片 → 后端 INPUT 附件）
+  const [chatImages, setChatImages] = useState<{ id: string; url: string; name: string }[]>([]);
+  // #H3 instrument: 确认 setChatImages 是否被调用（race condition 诊断）
+  const setChatImagesDebug = useCallback((images: { id: string; url: string; name: string }[]) => {
+    setChatImages(images);
+  }, []);
 
   // Workflow match state: passed to parent for optimistic mode switch
   const [workflowMatch, setWorkflowMatch] = useState<{
@@ -790,12 +796,21 @@ export function AiChatPanel({
       images?: { id: string; url: string; name: string }[],
       inputFileIds?: { id: string; url: string; name: string }[]
     ) => {
-      // Chat 模式 images 字段现在带 id（AiFileAsset.id），用于挂 INPUT 附件。
+      // Chat 模式识图：图片通过 onChatImagesChange → chatImages state → 传给后端。
       // Image/Video 模式的 inputFileIds 路径不变。
       const chatInputFileIds =
-        aiModeRef.current === "chat" && images && images.length > 0
-          ? images.map((img) => ({ id: img.id, url: img.url, name: img.name }))
+        aiModeRef.current === "chat"
+          ? ((images && images.length > 0)
+              ? images
+              : chatImages.length > 0
+                ? chatImages
+                : undefined)
           : undefined;
+      // #region agent log
+      fetch('http://127.0.0.1:7670/ingest/9605da00-d652-4ae2-960d-898d8224e6df',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ebf0e5'},body:JSON.stringify({sessionId:'ebf0e5',location:'AiChatPanel.tsx:801',message:'[H-B] chatInputFileIds',data:{mode:aiModeRef.current,imagesParam:images?.length||0,chatImagesState:chatImages.length,chatInputFileIds:chatInputFileIds?.map(x=>x.id)},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      // 不在此处清空 chatImages：handleSubmit 中 AiChatInput 会通过
+      // onChatImagesChange?.([]) 同步清空（单一 source of truth 原则）。
       // ── Image generation mode (提前 return，不走 SSE 流) ────────────────────
       if (aiModeRef.current === "image") {
         // Optimistically add user message with reference images
@@ -974,13 +989,13 @@ export function AiChatPanel({
       // existing conversation. The server will later persist it on its own.
       // W5 fix: Chat 模式下也带上 userImages（与 Image/Video 模式一致），
       // 否则用户上传图片后，发送后图片从输入框消失，气泡只显示文字（要刷新页面
-      // 才从 attachments 重建）。Chat 模式用 images[]（chatInputFileIds 的来源），
-      // Image/Video 模式已在前面提前 return，不会走到这里。
-      const optimisticUserImages = images?.map((img) => ({
-        id: img.id,
-        url: img.url,
-        name: img.name,
-      }));
+      // 才从 attachments 重建）。Chat 模式优先用 onSend 的入参 images（最新值），
+      // fallback 到 chatImages state（避免 React stale closure）。
+      const optimisticUserImages = (images && images.length > 0)
+        ? images
+        : chatImages.length > 0
+          ? chatImages
+          : undefined;
       setMessages((prev) => [
         ...prev,
         {
@@ -1357,7 +1372,7 @@ export function AiChatPanel({
         setToolCallChain([]);
       }
     },
-    [conversationId, onConversationCreated, startPolling]
+    [conversationId, onConversationCreated, startPolling, chatImages]
   );
 
   const handleStop = useCallback(() => {
@@ -1532,7 +1547,10 @@ export function AiChatPanel({
                   }`}
                   title={option.description}
                 >
-                  {option.label}
+                  {/* Dynamic label: when in chat sub-mode, show the sub-mode label */}
+                  {(option.key === "chat"
+                    ? CHAT_SUB_MODE_OPTIONS.find(s => s.key === chatToolMode)?.label ?? "通用对话"
+                    : option.label)}
                   {option.key === "chat" && (
                     <svg className={`ml-0.5 inline h-2.5 w-2.5 transition-transform ${chatToolModeOpen ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="6 9 12 15 18 9" />
@@ -1716,6 +1734,7 @@ export function AiChatPanel({
           taskCategory={aiMode === "image" || aiMode === "video" ? aiMode : "chat"}
           initialReferenceImages={aiMode === "image" || aiMode === "video" ? inputFileIds : undefined}
           onReferenceImagesChange={aiMode === "image" || aiMode === "video" ? setInputFileIds : undefined}
+          onChatImagesChange={setChatImagesDebug}
         />
       </div>
     </div>

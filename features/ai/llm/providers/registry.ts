@@ -65,6 +65,32 @@ function withResponseNormalization(
   fetchFn: typeof globalThis.fetch
 ): typeof fetchFn {
   return async (url, init) => {
+    const urlStr =
+      typeof url === "string"
+        ? url
+        : url instanceof URL
+          ? url.href
+          : String(url);
+    // Debug: log Agnes request body for /chat/completions
+    if (init?.body && typeof init.body === "string" && urlStr.includes("/chat/completions")) {
+      try {
+        const parsed = JSON.parse(init.body);
+        const summary = {
+          model: parsed.model,
+          messagesCount: Array.isArray(parsed.messages) ? parsed.messages.length : 0,
+          messages: Array.isArray(parsed.messages)
+            ? parsed.messages.map((m: any, i: number) => ({
+                i,
+                role: m.role,
+                contentType: Array.isArray(m.content)
+                  ? m.content.map((p: any) => p.type ?? "unknown").join(",")
+                  : typeof m.content,
+              }))
+            : [],
+        };
+        console.log("[DEBUG:fetch] Agnes /chat/completions request:", JSON.stringify(summary));
+      } catch {}
+    }
     const res = await fetchFn(url, init);
     return normalizeResponse(res);
   };
@@ -93,7 +119,9 @@ function isHardcodedProvider(p: string): p is HardcodedProvider {
 }
 
 // ---------------------------------------------------------------------------
-// Agnes model list — hardcoded, initialized to DB by ensureSystemProvider()
+// Agnes uses openai-chat (NOT openai-responses):
+// The /responses endpoint rejects role='user', while /chat/completions supports
+// role='user' and multimodal image parts — exactly what the vision feature needs.
 // ---------------------------------------------------------------------------
 const AGNES_MODELS: ModelCatalogEntry[] = [
   // Chat models
@@ -105,7 +133,7 @@ const AGNES_MODELS: ModelCatalogEntry[] = [
     capabilities: ["fast"],
     enabled: true,
     provider: "agnes",
-    apiFormat: "openai-responses",
+    apiFormat: "openai-chat",
     ownerType: "SYSTEM",
   },
   {
@@ -116,7 +144,7 @@ const AGNES_MODELS: ModelCatalogEntry[] = [
     capabilities: ["fast"],
     enabled: true,
     provider: "agnes",
-    apiFormat: "openai-responses",
+    apiFormat: "openai-chat",
     ownerType: "SYSTEM",
   },
   // Image models
@@ -128,7 +156,7 @@ const AGNES_MODELS: ModelCatalogEntry[] = [
     capabilities: ["image"],
     enabled: true,
     provider: "agnes",
-    apiFormat: "openai-responses",
+    apiFormat: "openai-chat",
     ownerType: "SYSTEM",
   },
   {
@@ -139,7 +167,7 @@ const AGNES_MODELS: ModelCatalogEntry[] = [
     capabilities: ["image"],
     enabled: true,
     provider: "agnes",
-    apiFormat: "openai-responses",
+    apiFormat: "openai-chat",
     ownerType: "SYSTEM",
   },
   // Video models
@@ -151,7 +179,7 @@ const AGNES_MODELS: ModelCatalogEntry[] = [
     capabilities: ["video"],
     enabled: true,
     provider: "agnes",
-    apiFormat: "openai-responses",
+    apiFormat: "openai-chat",
     ownerType: "SYSTEM",
   },
 ];
@@ -370,13 +398,16 @@ export async function createModel(options: {
     `transport=${cred.transport} apiFormat=${cred.apiFormat} ownerType=${cred.ownerType}`
   );
 
-  // Select fetch based on transport setting
+  // Select fetch based on transport setting.
+  // The fetch wrapper also normalizes Agnes Responses API responses
+  // (`prompt_tokens`/`completion_tokens`) to AI SDK's expected
+  // (`input_tokens`/`output_tokens`) shape.
   const rawFetch =
     cred.transport === "proxy"
       ? getProxyFetch() ?? globalThis.fetch
       : globalThis.fetch;
 
-  // Always normalize Responses API → Chat Completions format, regardless of path
+  // Always normalize Responses API → Chat Completions format
   const fetchFn = withResponseNormalization(rawFetch);
 
   if (providerId === "deepseek") {
@@ -397,11 +428,14 @@ export async function createModel(options: {
     return anthropic(modelName) as unknown as ReturnType<typeof createOpenAI> extends (name: string) => infer R ? R : never;
   }
 
-  // openai-chat and openai-responses both use @ai-sdk/openai
+  // openai-chat and openai-responses both use @ai-sdk/openai.
+  // IMPORTANT: `openai(modelName)` defaults to the **Responses API** (`/responses`),
+  // which uses `developer` role and a different schema than Chat Completions.
+  // Agnes uses `/chat/completions`, so we must explicitly call `openai.chat(...)`.
   const openai = createOpenAI({
     apiKey: cred.apiKey,
     baseURL: cred.baseURL,
     fetch: fetchFn,
   });
-  return openai(modelName) as ReturnType<typeof createOpenAI> extends (name: string) => infer R ? R : never;
+  return openai.chat(modelName) as ReturnType<typeof createOpenAI> extends (name: string) => infer R ? R : never;
 }

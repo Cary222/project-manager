@@ -1,14 +1,19 @@
 import { webSearch } from "./web-search";
 import { searchKnowledge } from "./search-knowledge";
 import { searchStructured } from "./search-structured";
+import { webScrape, webMap } from "./web-scrape";
 
-export { webSearch, searchKnowledge, searchStructured };
+export { webSearch, searchKnowledge, searchStructured, webScrape, webMap };
 
-export type ToolMode = "auto" | "web" | "search" | "chat" | "image";
+export type ToolMode = "auto" | "web" | "scrape" | "search" | "chat" | "image";
 
 type WebToolSet = {
   webSearch: typeof webSearch;
   searchStructured: typeof searchStructured;
+};
+type ScrapeToolSet = {
+  webScrape: typeof webScrape;
+  webMap: typeof webMap;
 };
 type SearchToolSet = {
   searchKnowledge: typeof searchKnowledge;
@@ -22,7 +27,7 @@ type EmptyToolSet = Record<string, never>;
 
 interface ModePolicy {
   // key order = LLM schema order (= priority in Vercel AI SDK)
-  tools: WebToolSet | SearchToolSet | AutoToolSet | EmptyToolSet;
+  tools: WebToolSet | ScrapeToolSet | SearchToolSet | AutoToolSet | EmptyToolSet;
   maxSteps: number;
 }
 
@@ -38,13 +43,16 @@ const POLICIES: Record<ToolMode, ModePolicy> = {
   chat:   { tools: {},                                    maxSteps: 3 },
   // web: 联网优先，项目数据兜底；knowledge 不挂（联网场景下笔记兜底反而带偏）
   web:    { tools: { webSearch, searchStructured },       maxSteps: 15 },
+  // scrape: 深度爬取外部文档，用于抓取完整技术文档、面试题库等内容
+  // AI 可以根据 URL 直接爬取完整页面内容，用于知识库补充或对话上下文
+  scrape: { tools: { webScrape, webMap },                   maxSteps: 10 },
   // image: 前端直接调用 /api/ai/generate/image，不走 LLM
   image:  { tools: {},                                    maxSteps: 1 },
 };
 
 export function toolsetForMode(
   mode: ToolMode
-): WebToolSet | SearchToolSet | AutoToolSet | EmptyToolSet | undefined {
+): WebToolSet | ScrapeToolSet | SearchToolSet | AutoToolSet | EmptyToolSet | undefined {
   const policy = POLICIES[mode] ?? POLICIES.auto;
   if (Object.keys(policy.tools).length === 0) return undefined;
   return policy.tools;

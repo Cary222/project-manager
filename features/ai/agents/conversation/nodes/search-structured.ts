@@ -157,10 +157,12 @@ export async function searchStructuredNode(
       const isSelfLike = (name: string) =>
         /^(我|我自己|自己|我最近的|我的|此人?|本人|当前用户)$/.test(name);
 
-      // 如果已识别为自我引用（isSelf=true），禁止再从 contextUser/detectUser 读取姓名
-      // 以免"cary"等旧上下文覆盖"我"的语义
+      // 当 extractedUser 已包含有效用户名（≥2字符）时，消息本身已提供用户信号，
+      // 不应用 contextUser 覆盖。但如果 extractedUser 是 isSelf 或无效，则可读 contextUser。
+      const extractedUserIsValid = extractedUser && extractedUser.raw && extractedUser.raw.length >= 2;
+
       let effectiveUserName: string | undefined;
-      if (!extractedUser?.isSelf) {
+      if (!extractedUser?.isSelf && !extractedUserIsValid) {
         if (contextUser && contextUser.length > 1 && !isSelfLike(contextUser)) {
           effectiveUserName = extractPureName(contextUser);
         } else if (detectUser && detectUser.length > 1 && !isSelfLike(detectUser) && !detectUser.includes("最近")) {

@@ -10,6 +10,20 @@ export const AGNES_API_CHAT_URL = `${AGNES_API_BASE_URL}/chat/completions`;
 export const AGNES_PROVIDER_ID = "agnes";
 
 /**
+ * Convert AI SDK's ImagePart format to Agnes-compatible format.
+ * 
+ * AI SDK ImagePart: { type: "image", image: "data:image/png;base64,..." }
+ * Agnes expects:     { type: "image_url", image_url: { url: "..." } }
+ */
+function convertRequestFormat(body: string): string {
+  // Convert AI SDK ImagePart to Agnes format
+  return body.replace(
+    /"type":\s*"image",\s*"image":\s*"([^"]*)"/g,
+    '"type": "image_url", "image_url": { "url": "$1" }'
+  );
+}
+
+/**
  * Builds a fetch function that routes Agnes API calls through the configured proxy.
  * External providers (DeepSeek, OpenRouter, etc.) bypass the proxy and connect directly.
  *
@@ -36,9 +50,23 @@ export function buildProxyAwareFetch(): typeof fetch | undefined {
           ? input.href
           : String(input);
 
+    // For Agnes API chat completions, convert AI SDK format to Agnes format
+    const isAgnsChat = urlStr.includes("/chat/completions");
+    let finalInit = init;
+    if (isAgnsChat && init?.body) {
+      const bodyStr = typeof init.body === "string" 
+        ? init.body 
+        : JSON.stringify(init.body);
+      const convertedBody = convertRequestFormat(bodyStr);
+      finalInit = {
+        ...init,
+        body: convertedBody,
+      };
+    }
+
     const { request } = await import("undici");
     const response = await request(urlStr, {
-      ...init,
+      ...finalInit,
       dispatcher: proxyAgent,
     } as Parameters<typeof request>[1]);
 
@@ -96,9 +124,72 @@ export async function proxyFetch(
   init?: RequestInit
 ): Promise<Response> {
   const fn = getProxyFetch();
-  return fn
-    ? fn(input, init)
-    : globalThis.fetch(input, init);
+  const fetchFn = fn ?? globalThis.fetch;
+  
+  // Get URL string for format conversion check
+  const urlStr =
+    typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.href
+        : String(input);
+
+  // For Agnes API chat completions, convert AI SDK format to Agnes format
+  const isAgnsChat = urlStr.includes("/chat/completions");
+  let finalInit = init;
+  if (isAgnsChat && init?.body) {
+    const bodyStr = typeof init.body === "string"
+      ? init.body
+      : JSON.stringify(init.body);
+    
+    // Step 1: Extract image URLs from __IMAGES__ marker
+    let parsed: any;
+    try {
+      parsed = JSON.parse(bodyStr);
+      
+      // Process each message to extract image URLs
+      if (parsed.messages && Array.isArray(parsed.messages)) {
+        for (const msg of parsed.messages) {
+          if (msg.role === "user" && typeof msg.content === "string") {
+            const match = msg.content.match(/\n\n__IMAGES__:(\[.*\])$/);
+            if (match) {
+              const imageUrls: string[] = JSON.parse(match[1]);
+              const textContent = msg.content.replace(/\n\n__IMAGES__:.*$/, "");
+              
+              // Convert to multimodal format
+              const contentParts: any[] = [
+                { type: "text", text: textContent }
+              ];
+              
+              for (const url of imageUrls) {
+                contentParts.push({
+                  type: "image_url",
+                  image_url: { url }
+                });
+              }
+              
+              msg.content = contentParts;
+              console.log('[PROXY] Converted __IMAGES__ marker to multimodal:', {
+                imageCount: imageUrls.length,
+                textLength: textContent.length
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[PROXY] Failed to parse body for image extraction:', e);
+    }
+    
+    // Step 2: Convert to Agnes format
+    const convertedBody = convertRequestFormat(parsed ? JSON.stringify(parsed) : bodyStr);
+    finalInit = {
+      ...init,
+      body: convertedBody,
+    };
+  }
+
+  return fetchFn(input, finalInit);
 }
 
 /**

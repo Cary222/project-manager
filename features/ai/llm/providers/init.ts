@@ -33,7 +33,10 @@ export async function ensureSystemProvider(): Promise<void> {
       keyLast4: apiKey.slice(-4),
       keyHash: hashApiKey(apiKey),
       transport: "proxy",
-      apiFormat: "openai-responses",
+      apiFormat: "openai-chat", // NOT openai-responses — Agnes /responses endpoint
+                               // rejects role='user' (only system/assistant/tool/developer).
+                               // openai-chat routes to /chat/completions which supports
+                               // role='user' and multimodal image parts.
     },
   });
   console.log("[system-provider] Agnes provider initialized");
