@@ -19,10 +19,14 @@ const runSchema = z.object({
  * - coding 类任务：SSE 实时推送 Pi 事件
  */
 export async function POST(request: NextRequest) {
+  console.log('[WorkAgent API] Request received');
   try {
     const session = await requireSession();
+    console.log('[WorkAgent API] Session validated:', session.user.id);
     const body = await request.json();
+    console.log('[WorkAgent API] Body parsed:', { input: body.input?.substring(0, 50) });
     const parsed = runSchema.parse(body);
+    console.log('[WorkAgent API] Schema validated');
 
     // Initialize Work Agent
     initializeWorkAgent();
