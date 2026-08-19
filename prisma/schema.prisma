@@ -47,6 +47,9 @@ model User {
   monthlyExpenses        MonthlyExpense[]
   expenseShares          ExpenseShare[]
   userApiKeys            UserApiKey[]
+  policyRules            PolicyRule[]            @relation("PolicyRules")
+  policyAuditLogs        PolicyAuditLog[]        @relation("PolicyAuditLogs")
+  subAgentRuns           SubAgentRun[]           @relation("SubAgentRuns")
 
   @@schema("pm")
 }
@@ -1027,5 +1030,128 @@ model AiFileAsset {
   @@index([storageKey])
   @@index([checksum])
   @@map("AiFileAsset")
+  @@schema("pm")
+}
+
+// ============================================================================
+// Phase 4: Policy Gateway + SubAgent Persistence
+// ============================================================================
+
+/// Policy Gateway 审计日志
+/// 记录所有 tool_call 的安全检查结果，用于合规审计和安全事件溯源
+model PolicyAuditLog {
+  id         String         @id @default(cuid())
+  runId      String // SubAgent run ID
+  userId     String // 执行用户
+  tool       String // 工具名称（bash, read_file, git_push 等）
+  args       Json // 工具参数
+  decision   PolicyDecision // allow | approve | deny
+  reason     String? // 决策原因（deny 时必填）
+  command    String? // bash 工具的命令（仅 shell 类工具）
+  filePaths  String[] // 文件路径（仅文件类工具）
+  workspace  String // 工作目录
+  approvedAt DateTime? // HIL 审批时间（仅 approve 决策）
+  approvedBy String? // HIL 审批人（仅 approve 决策）
+  createdAt  DateTime       @default(now())
+
+  user       User           @relation("PolicyAuditLogs", fields: [userId], references: [id], onDelete: Cascade)
+  subAgentRun SubAgentRun?  @relation("RunAuditLogs", fields: [runId], references: [runId], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([runId])
+  @@index([tool, createdAt(sort: Desc)])
+  @@index([decision, createdAt(sort: Desc)])
+  @@schema("pm")
+}
+
+/// Policy 规则外部化
+/// 从硬编码迁移到数据库，支持运行时动态更新
+model PolicyRule {
+  id          String         @id @default(cuid())
+  ruleType    PolicyRuleType // TOOL_WHITELIST | TOOL_BLACKLIST | TOOL_HIL | COMMAND_WHITELIST | COMMAND_BLACKLIST | PATH_BLACKLIST
+  pattern     String // 规则模式（工具名 / 命令前缀 / 路径前缀）
+  targetName  String? // 目标名称（工具名 / 命令名 / 路径）
+  riskLevel   String? // 风险等级（SAFE / LOW / MEDIUM / HIGH / DANGEROUS）
+  decision    PolicyDecision // 匹配后的决策（ALLOW / APPROVE / DENY）
+  reason      String? // 决策原因说明
+  description String? // 规则描述
+  requiresApproval Boolean @default(false) // 是否需要人工审批
+  priority    Int            @default(0) // 优先级（数字越大越优先）
+  enabled     Boolean        @default(true)
+  metadata    Json? // 扩展字段（如正则表达式、额外条件等）
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  createdBy   String? // 创建者（可选，用于审计）
+
+  creator User? @relation("PolicyRules", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([ruleType, enabled])
+  @@index([priority(sort: Desc)])
+  @@schema("pm")
+}
+
+/// SubAgent 运行会话
+/// 记录 Pi / Claude Code 等 SubAgent 的运行历史，支持 HIL 审批和跨请求恢复
+model SubAgentRun {
+  id           String         @id @default(cuid())
+  runId        String         @unique // 业务 ID（run_xxx）
+  sessionId    String // Pi SDK session ID
+  agentType    String // pi | claude-code | ...
+  userId       String // 执行用户
+  workspaceId  String // 工作空间路径（或项目 ID）
+  status       SubAgentStatus // pending | running | waiting_approval | paused | completed | failed | cancelled
+  parentRunId  String? // 父 run ID（支持嵌套）
+  prompt       String // 初始 prompt
+  contextFiles String[] // 上下文文件列表
+  lastEventId  String? // 最后处理的事件 ID
+  lastInput    String? // 最后的用户输入（用于 resume）
+  result       Json? // 运行结果（SubAgentResult）
+  error        String? // 错误信息
+  startedAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  completedAt  DateTime? // 完成时间
+  durationMs   Int? // 运行时长（毫秒）
+
+  user      User             @relation("SubAgentRuns", fields: [userId], references: [id], onDelete: Cascade)
+  auditLogs PolicyAuditLog[] @relation("RunAuditLogs")
+
+  @@index([userId, startedAt(sort: Desc)])
+  @@index([status, startedAt(sort: Desc)])
+  @@index([agentType, startedAt(sort: Desc)])
+  @@index([sessionId])
+  @@schema("pm")
+}
+
+/// Policy 决策枚举
+enum PolicyDecision {
+  ALLOW
+  APPROVE
+  DENY
+
+  @@schema("pm")
+}
+
+/// Policy 规则类型
+enum PolicyRuleType {
+  TOOL_WHITELIST // 工具白名单（匹配即 ALLOW）
+  TOOL_BLACKLIST // 工具黑名单（匹配即 DENY）
+  TOOL_HIL // 工具需要 HIL（匹配即 APPROVE）
+  COMMAND_WHITELIST // 命令白名单（匹配即 ALLOW）
+  COMMAND_BLACKLIST // 命令黑名单（匹配即 DENY）
+  PATH_BLACKLIST // 路径黑名单（匹配即 DENY）
+
+  @@schema("pm")
+}
+
+/// SubAgent 状态枚举
+enum SubAgentStatus {
+  PENDING
+  RUNNING
+  WAITING_APPROVAL // HIL 审批中
+  PAUSED
+  COMPLETED
+  FAILED
+  CANCELLED
+
   @@schema("pm")
 }

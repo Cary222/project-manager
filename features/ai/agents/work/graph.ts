@@ -9,10 +9,14 @@
  * 3. Tools: 受限的文件和命令工具
  *
  * 使用 LangGraph 的 Command 和 interrupt 实现 HIL。
+ *
+ * Phase 1: dispatchNode 接入 router，将任务分诊到 workflow 或 coding。
  */
 
-import { Annotation, Command, START } from "@langchain/langgraph";
+import { Annotation, StateGraph, START, END } from "@langchain/langgraph";
 import { registerWorkTools } from "./tools";
+import { TemplateMatcher } from "./router/matcher";
+import { listWorkflows } from "./workflows/registry";
 
 // ============================================================================
 // State Annotation
@@ -31,7 +35,11 @@ const WorkAgentAnnotation = Annotation.Root({
   userName: lastValue(() => ""),
   sessionId: lastValue(() => ""),
 
-  // Workflow
+  // Input
+  userInput: lastValue(() => ""),
+
+  // Dispatch / Routing
+  taskType: lastValue<"workflow" | "coding" | "unknown">(() => "unknown"),
   workflowType: lastValue(() => ""),
   workflowName: lastValue(() => ""),
 
@@ -81,33 +89,205 @@ export function initializeWorkAgent(): void {
 }
 
 // ============================================================================
-// Nodes (Placeholder)
+// CODING_KEYWORDS — 用于 coding 类任务检测
+// ============================================================================
+
+const CODING_KEYWORDS = [
+  "重构", "refactor", "修复", "fix", "bug", "代码", "code",
+  "实现", "implement", "新增", "add feature", "功能",
+  "测试", "test", "单元测试", "接口", "api", "模块",
+];
+
+function isCodingTask(input: string): boolean {
+  const lower = input.toLowerCase();
+  return CODING_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+// ============================================================================
+// Nodes
 // ============================================================================
 
 /**
- * Plan node: break down goal into steps.
+ * Execute coding node: 启动 Pi session 运行 coding 任务。
+ *
+ * Phase 2: 启动 Pi session，返回 handle（不处理完整事件流）
+ * Phase 3: 接入真实 Pi SDK，返回完整事件流
  */
-async function planNode(state: WorkAgentState): Promise<Partial<WorkAgentState>> {
+async function executeCodingNode(state: WorkAgentState): Promise<Partial<WorkAgentState>> {
+  const { runId, userInput } = state;
+
+  try {
+    // 1. 导入 PiSubAgent
+    const { getPiSubAgent } = await import("./subagents/pi/subagent");
+    const piAgent = getPiSubAgent();
+
+    // 2. 创建 SubAgentRun
+    const subAgentRun = {
+      runId: `pi-${runId}`,
+      agentType: "pi" as const,
+      workspaceId: process.cwd(),
+      sessionId: "",
+      status: "pending" as const,
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    // 3. 创建 SubAgentInput
+    const subAgentInput = {
+      prompt: userInput,
+      workspace: process.cwd(),
+      contextFiles: [],
+    };
+
+    // 4. 启动 Pi session（Phase 2: mock）
+    const handle = await piAgent.start(subAgentRun, subAgentInput);
+
+    // 5. 返回 running 状态（Phase 2: 不等待完整事件流）
+    return {
+      status: "running",
+      artifacts: {
+        piSessionId: handle.sessionId,
+        piRunId: handle.runId,
+      },
+      summary: `Pi Coding Session 已启动 (${handle.sessionId})`,
+      updatedAt: Date.now(),
+    };
+  } catch (err) {
+    return {
+      status: "failed",
+      error: err instanceof Error ? err.message : "Pi session 启动失败",
+      updatedAt: Date.now(),
+    };
+  }
+}
+
+/**
+ * Dispatch node: 任务分诊。
+ * - 检测用户输入意图，路由到 workflow 或 coding。
+ * - Phase 1: coding 类返回提示，workflow 类路由到对应 graph。
+ */
+async function dispatchNode(state: WorkAgentState): Promise<Partial<WorkAgentState>> {
+  const input = state.userInput;
+
+  // Step 1: 尝试 workflow 路由（关键词匹配）
+  const templates = listWorkflows();
+  const matcher = new TemplateMatcher(templates);
+  const matchResult = await matcher.match(input);
+
+  if (matchResult.workflowId && matchResult.confidence >= 0.8) {
+    return {
+      taskType: "workflow",
+      workflowType: matchResult.workflowId,
+      workflowName: templates.find((t) => t.type === matchResult.workflowId)?.name ?? matchResult.workflowId,
+      status: "dispatched",
+      updatedAt: Date.now(),
+    };
+  }
+
+  // Step 2: 检测 coding 类任务（Phase 1: 暂时占位）
+  if (isCodingTask(input)) {
+    return {
+      taskType: "coding",
+      status: "pi_pending",
+      summary: "Pi Coding Runtime 接入中，该功能将在 Phase 2 上线。",
+      updatedAt: Date.now(),
+    };
+  }
+
+  // Step 3: 无法识别的任务类型
   return {
-    status: "planning",
+    taskType: "unknown",
+    status: "failed",
+    error: `无法识别任务类型: "${input}"，请尝试更具体的描述。`,
     updatedAt: Date.now(),
   };
 }
 
 /**
- * Execute node: run current step.
+ * Execute workflow node: 运行对应的 workflow graph。
  */
-async function executeNode(state: WorkAgentState): Promise<Partial<WorkAgentState>> {
-  return {
-    status: "executing",
-    updatedAt: Date.now(),
-  };
+async function executeWorkflowNode(state: WorkAgentState): Promise<Partial<WorkAgentState>> {
+  const { workflowType, userId, runId } = state;
+
+  try {
+    // Phase 1: Only weekly_report is supported
+    if (workflowType !== "weekly_report") {
+      return {
+        status: "failed",
+        error: `未知工作流类型: ${workflowType}`,
+        updatedAt: Date.now(),
+      };
+    }
+
+    // Get weekly report graph
+    const { getWeeklyReportGraph } = await import("./workflows/weekly-report/graph");
+    const workflowGraph = await getWeeklyReportGraph();
+    
+    // Prepare workflow input (adapt from Work Agent state)
+    const workflowInput = {
+      userId,
+      threadId: runId,
+      status: "collecting" as const,
+    };
+
+    // Invoke workflow graph (this will block until completion or interrupt)
+    const result = await workflowGraph.invoke(workflowInput, {
+      configurable: {
+        thread_id: runId,
+      },
+    });
+
+    // Map workflow status to Work Agent status
+    if (result.status === "done") {
+      return {
+        status: "completed",
+        artifacts: { reportId: result.reportId },
+        summary: result.reportId ? `周报已生成（ID: ${result.reportId}）` : "工作流已完成",
+        updatedAt: Date.now(),
+      };
+    } else if (result.status === "cancelled") {
+      return {
+        status: "failed",
+        error: "工作流已取消",
+        updatedAt: Date.now(),
+      };
+    } else if (result.error) {
+      return {
+        status: "failed",
+        error: result.error,
+        updatedAt: Date.now(),
+      };
+    } else if (result.status === "waiting_review") {
+      // Workflow interrupted for HIL
+      return {
+        status: "waiting_approval",
+        waitingForHuman: true,
+        pendingApproval: {
+          title: "周报审批",
+          description: result.draft?.highlights?.join(", ") ?? result.draft?.rawMarkdown?.slice(0, 100) ?? "请审阅周报草稿",
+        },
+        updatedAt: Date.now(),
+      };
+    }
+
+    // Default: still executing
+    return {
+      status: "executing",
+      updatedAt: Date.now(),
+    };
+  } catch (err) {
+    return {
+      status: "failed",
+      error: err instanceof Error ? err.message : String(err),
+      updatedAt: Date.now(),
+    };
+  }
 }
 
 /**
  * Approval node: request human approval.
  */
-async function approvalNode(state: WorkAgentState): Promise<Partial<WorkAgentState>> {
+async function approvalNode(): Promise<Partial<WorkAgentState>> {
   // This will be replaced with actual interrupt() call
   return {
     status: "waiting_approval",
@@ -123,7 +303,7 @@ async function approvalNode(state: WorkAgentState): Promise<Partial<WorkAgentSta
 /**
  * Finish node: complete the workflow.
  */
-async function finishNode(state: WorkAgentState): Promise<Partial<WorkAgentState>> {
+async function finishNode(): Promise<Partial<WorkAgentState>> {
   return {
     status: "completed",
     waitingForHuman: false,
@@ -145,17 +325,75 @@ async function failNode(state: WorkAgentState): Promise<Partial<WorkAgentState>>
 }
 
 // ============================================================================
-// Edges
+// Routing Edges
 // ============================================================================
 
-function shouldApprove(state: WorkAgentState): string {
-  if (state.steps.length === 0) return "plan";
-  const lastStep = state.steps[state.steps.length - 1];
-  if (lastStep.status === "done" && state.waitingForHuman) return "approval";
+/**
+ * After dispatch: route based on taskType.
+ * - workflow → executeWorkflow
+ * - coding → executeCoding (Phase 2: Pi SubAgent)
+ * - unknown / error → END
+ */
+function routeAfterDispatch(state: WorkAgentState): string {
+  if (state.taskType === "workflow" && state.status === "dispatched") {
+    return "executeWorkflow";
+  }
+  if (state.taskType === "coding") {
+    return "executeCoding";
+  }
+  return END;
+}
+
+/**
+ * After executeWorkflow: check for errors or completion.
+ */
+function routeAfterWorkflow(state: WorkAgentState): string {
+  if (state.status === "failed") return "fail";
   if (state.waitingForHuman) return "approval";
-  if (state.error) return "fail";
-  if (state.status === "completed") return "finish";
-  return "execute";
+  return "finish";
+}
+
+// ============================================================================
+// Graph Builder
+// ============================================================================
+
+let _graph: ReturnType<typeof buildWorkAgentGraph> | null = null;
+
+function buildWorkAgentGraph() {
+  const graph = new StateGraph(WorkAgentAnnotation)
+    .addNode("dispatch", dispatchNode)
+    .addNode("executeWorkflow", executeWorkflowNode)
+    .addNode("executeCoding", executeCodingNode)
+    .addNode("approval", approvalNode)
+    .addNode("finish", finishNode)
+    .addNode("fail", failNode)
+    .addEdge(START, "dispatch")
+    .addConditionalEdges("dispatch", routeAfterDispatch, {
+      executeWorkflow: "executeWorkflow",
+      executeCoding: "executeCoding",
+      [END]: END,
+    })
+    .addConditionalEdges("executeWorkflow", routeAfterWorkflow, {
+      fail: "fail",
+      approval: "approval",
+      finish: "finish",
+    })
+    .addEdge("executeCoding", "finish")
+    .addEdge("approval", "executeWorkflow")
+    .addEdge("finish", END)
+    .addEdge("fail", END);
+
+  return graph.compile();
+}
+
+/**
+ * Get (or lazily build) the Work Agent compiled graph.
+ */
+export function getWorkAgentGraph() {
+  if (!_graph) {
+    _graph = buildWorkAgentGraph();
+  }
+  return _graph;
 }
 
 // ============================================================================

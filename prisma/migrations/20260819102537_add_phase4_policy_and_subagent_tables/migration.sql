@@ -1,0 +1,113 @@
+-- CreateEnum
+CREATE TYPE "pm"."PolicyDecision" AS ENUM ('ALLOW', 'APPROVE', 'DENY');
+
+-- CreateEnum
+CREATE TYPE "pm"."PolicyRuleType" AS ENUM ('TOOL_WHITELIST', 'TOOL_BLACKLIST', 'TOOL_HIL', 'COMMAND_WHITELIST', 'COMMAND_BLACKLIST', 'PATH_BLACKLIST');
+
+-- CreateEnum
+CREATE TYPE "pm"."SubAgentStatus" AS ENUM ('PENDING', 'RUNNING', 'WAITING_APPROVAL', 'PAUSED', 'COMPLETED', 'FAILED', 'CANCELLED');
+
+-- CreateTable
+CREATE TABLE "pm"."SubAgentRun" (
+    "id" TEXT NOT NULL,
+    "runId" TEXT NOT NULL,
+    "sessionId" TEXT NOT NULL,
+    "agentType" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "workspaceId" TEXT NOT NULL,
+    "status" "pm"."SubAgentStatus" NOT NULL,
+    "parentRunId" TEXT,
+    "prompt" TEXT NOT NULL,
+    "contextFiles" TEXT[],
+    "lastEventId" TEXT,
+    "lastInput" TEXT,
+    "result" JSONB,
+    "error" TEXT,
+    "startedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "completedAt" TIMESTAMP(3),
+    "durationMs" INTEGER,
+
+    CONSTRAINT "SubAgentRun_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "pm"."PolicyAuditLog" (
+    "id" TEXT NOT NULL,
+    "runId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "tool" TEXT NOT NULL,
+    "args" JSONB NOT NULL,
+    "decision" "pm"."PolicyDecision" NOT NULL,
+    "reason" TEXT,
+    "command" TEXT,
+    "filePaths" TEXT[],
+    "workspace" TEXT NOT NULL,
+    "approvedAt" TIMESTAMP(3),
+    "approvedBy" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "PolicyAuditLog_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "pm"."PolicyRule" (
+    "id" TEXT NOT NULL,
+    "ruleType" "pm"."PolicyRuleType" NOT NULL,
+    "pattern" TEXT NOT NULL,
+    "decision" "pm"."PolicyDecision" NOT NULL,
+    "reason" TEXT,
+    "priority" INTEGER NOT NULL DEFAULT 0,
+    "enabled" BOOLEAN NOT NULL DEFAULT true,
+    "metadata" JSONB,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "createdBy" TEXT,
+
+    CONSTRAINT "PolicyRule_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "SubAgentRun_runId_key" ON "pm"."SubAgentRun"("runId");
+
+-- CreateIndex
+CREATE INDEX "SubAgentRun_userId_startedAt_idx" ON "pm"."SubAgentRun"("userId", "startedAt" DESC);
+
+-- CreateIndex
+CREATE INDEX "SubAgentRun_status_startedAt_idx" ON "pm"."SubAgentRun"("status", "startedAt" DESC);
+
+-- CreateIndex
+CREATE INDEX "SubAgentRun_agentType_startedAt_idx" ON "pm"."SubAgentRun"("agentType", "startedAt" DESC);
+
+-- CreateIndex
+CREATE INDEX "SubAgentRun_sessionId_idx" ON "pm"."SubAgentRun"("sessionId");
+
+-- CreateIndex
+CREATE INDEX "PolicyAuditLog_userId_createdAt_idx" ON "pm"."PolicyAuditLog"("userId", "createdAt" DESC);
+
+-- CreateIndex
+CREATE INDEX "PolicyAuditLog_runId_idx" ON "pm"."PolicyAuditLog"("runId");
+
+-- CreateIndex
+CREATE INDEX "PolicyAuditLog_tool_createdAt_idx" ON "pm"."PolicyAuditLog"("tool", "createdAt" DESC);
+
+-- CreateIndex
+CREATE INDEX "PolicyAuditLog_decision_createdAt_idx" ON "pm"."PolicyAuditLog"("decision", "createdAt" DESC);
+
+-- CreateIndex
+CREATE INDEX "PolicyRule_ruleType_enabled_idx" ON "pm"."PolicyRule"("ruleType", "enabled");
+
+-- CreateIndex
+CREATE INDEX "PolicyRule_priority_idx" ON "pm"."PolicyRule"("priority" DESC);
+
+-- AddForeignKey
+ALTER TABLE "pm"."SubAgentRun" ADD CONSTRAINT "SubAgentRun_userId_fkey" FOREIGN KEY ("userId") REFERENCES "pm"."User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "pm"."PolicyAuditLog" ADD CONSTRAINT "PolicyAuditLog_userId_fkey" FOREIGN KEY ("userId") REFERENCES "pm"."User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "pm"."PolicyAuditLog" ADD CONSTRAINT "PolicyAuditLog_runId_fkey" FOREIGN KEY ("runId") REFERENCES "pm"."SubAgentRun"("runId") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "pm"."PolicyRule" ADD CONSTRAINT "PolicyRule_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "pm"."User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
