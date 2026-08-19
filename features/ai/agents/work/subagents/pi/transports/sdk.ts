@@ -221,14 +221,13 @@ export class PiSdkRuntime implements PiRuntime {
    * 
    * Phase 5: 真实 Pi SDK 集成
    * Phase 5 P1: 添加重试机制
+   * Phase 5 P0 修复：使用 setRuntimeApiKey 注册凭证
    */
   private async createPiSession(input: PiRunInput): Promise<any> {
     // 使用重试机制创建 session（网络临时故障可重试）
     return await withRetry(
       async () => {
-        // Phase 5 P0 修复：每次都创建新的 ModelRuntime，确保读取最新的环境变量
-        // 原因：ModelRuntime.create() 会在初始化时读取环境变量（DEEPSEEK_API_KEY 等）
-        // 如果复用旧的 ModelRuntime，它不会感知到新设置的环境变量
+        // Phase 5 P0 修复：每次都创建新的 ModelRuntime
         console.log("[PiSdkRuntime] Creating fresh ModelRuntime...");
         
         const modelRuntime = await ModelRuntime.create({
@@ -236,6 +235,40 @@ export class PiSdkRuntime implements PiRuntime {
           refreshOnCreate: false,
         } as any);
         console.log("[PiSdkRuntime] ModelRuntime created");
+        
+        // Phase 5 P0 关键修复：使用 setRuntimeApiKey 注册 API key
+        // 仅仅设置环境变量是不够的，Pi SDK 需要通过 setRuntimeApiKey 注册凭证
+        const providerName = input.provider || "deepseek";
+        const apiKey = providerName === "deepseek" 
+          ? process.env.DEEPSEEK_API_KEY
+          : providerName === "anthropic"
+          ? process.env.ANTHROPIC_API_KEY
+          : process.env.OPENAI_API_KEY;
+        
+        if (!apiKey) {
+          throw new Error(`API key not found in environment for provider: ${providerName}`);
+        }
+        
+        // 注册到 Pi SDK（使用 openai provider，因为 DeepSeek 兼容 OpenAI API）
+        const providerKey = providerName === "deepseek" ? "openai" : providerName;
+        const baseUrl = providerName === "deepseek" 
+          ? "https://api.deepseek.com"
+          : process.env.OPENAI_API_BASE_URL;
+        
+        console.log(`[PiSdkRuntime] Registering API key for provider: ${providerKey}`);
+        await modelRuntime.setRuntimeApiKey(
+          providerKey, 
+          apiKey, 
+          baseUrl ? { baseUrl } as any : undefined
+        );
+        
+        // 验证认证状态
+        const authStatus = modelRuntime.getProviderAuthStatus(providerKey);
+        console.log(`[PiSdkRuntime] Auth status for ${providerKey}:`, authStatus);
+        
+        if (!authStatus.configured) {
+          throw new Error(`Failed to configure authentication for provider: ${providerKey}`);
+        }
         
         // 2. 创建 session
         console.log("[PiSdkRuntime] Creating AgentSession...");
@@ -248,7 +281,7 @@ export class PiSdkRuntime implements PiRuntime {
         const { session } = result;
         console.log(`[PiSdkRuntime] AgentSession created`);
         
-        // 更新缓存（供后续可能的复用，虽然现在不复用了）
+        // 更新缓存
         this.modelRuntime = modelRuntime;
         
         return session;
@@ -264,11 +297,12 @@ export class PiSdkRuntime implements PiRuntime {
    * 创建 Pi 事件流
    * 
    * Phase 5 P0: 将 Pi SDK 的事件转换为 PiEvent
+   * Phase 5 P0 修复：使用回调 API 而不是异步迭代器
    * 
-   * 注意：Pi SDK 的 session API 可能与预期不同
+   * Pi SDK 的 subscribe() 接受回调函数，不返回异步迭代器
    */
   private async *createPiEventStream(
-    session: any, // Pi SDK AgentSession 类型不明确
+    session: any, // Pi SDK AgentSession 类型
     runId: string
   ): AsyncIterable<PiEvent> {
     console.log(`[PiSdkRuntime] Starting event stream for runId=${runId}`);
@@ -277,31 +311,66 @@ export class PiSdkRuntime implements PiRuntime {
     yield {
       type: "session_started",
       runId,
-      sessionId: session.sessionId || session.id || runId, // 适配不同 SDK 版本
+      sessionId: session.sessionId || session.id || runId,
     } as PiEvent;
     
-    try {
-      // 2. 订阅 Pi SDK 事件流
-      // Phase 5: subscribe() 可能需要参数或返回不同类型
-      const events = typeof session.subscribe === "function" 
-        ? session.subscribe() 
-        : this.createFallbackEventStream(session, runId);
-      
-      for await (const event of events) {
-        // 转换 Pi SDK 原生事件 → PiEvent
-        const piEvent = this.mapPiSdkEvent(event, runId);
-        if (piEvent) {
-          yield piEvent;
-        }
+    // 2. 使用队列桥接回调 API 到异步迭代器
+    const eventQueue: PiEvent[] = [];
+    let isCompleted = false;
+    let resolveNext: ((value: IteratorResult<PiEvent>) => void) | null = null;
+    let rejectNext: ((error: Error) => void) | null = null;
+    
+    // 订阅 Pi SDK 事件（回调 API）
+    const unsubscribe = session.subscribe((event: any) => {
+      // 转换 Pi SDK 原生事件 → PiEvent
+      const piEvent = this.mapPiSdkEvent(event, runId);
+      if (piEvent) {
+        eventQueue.push(piEvent);
         
-        // 检查是否完成
-        if (this.isCompletionEvent(event)) {
-          console.log(`[PiSdkRuntime] Session completed for runId=${runId}`);
-          break;
+        // 如果有等待中的 promise，立即 resolve
+        if (resolveNext) {
+          resolveNext({ value: eventQueue.shift()!, done: false });
+          resolveNext = null;
         }
       }
+      
+      // 检查是否完成
+      if (this.isCompletionEvent(event)) {
+        console.log(`[PiSdkRuntime] Session completed for runId=${runId}`);
+        isCompleted = true;
+        unsubscribe(); // 取消订阅
+        
+        // 如果有等待中的 promise，通知完成
+        if (resolveNext) {
+          resolveNext({ value: undefined as any, done: true });
+          resolveNext = null;
+        }
+      }
+    });
+    
+    // 3. 生成器循环：从队列中 yield 事件
+    try {
+      while (!isCompleted || eventQueue.length > 0) {
+        // 如果队列有事件，立即 yield
+        if (eventQueue.length > 0) {
+          yield eventQueue.shift()!;
+          continue;
+        }
+        
+        // 队列为空，等待下一个事件
+        if (!isCompleted) {
+          await new Promise<IteratorResult<PiEvent>>((resolve, reject) => {
+            resolveNext = resolve;
+            rejectNext = reject;
+          });
+        }
+      }
+      
+      console.log(`[PiSdkRuntime] Event stream ended for runId=${runId}`);
+      
     } catch (error) {
       console.error("[PiSdkRuntime] Event stream error:", error);
+      unsubscribe();
       
       // 发送错误事件
       yield {
@@ -309,37 +378,21 @@ export class PiSdkRuntime implements PiRuntime {
         runId,
         message: error instanceof Error ? error.message : String(error),
       } as PiEvent;
+    } finally {
+      unsubscribe();
       
-      // 发送 session_completed（失败）
+      // 发送 session_completed
       yield {
         type: "session_completed",
         runId,
         result: {
           runId,
-          status: "failed",
-          error: error instanceof Error ? error.message : String(error),
+          status: isCompleted ? "completed" : "failed",
           artifacts: {},
           durationMs: 0,
         },
       } as PiEvent;
     }
-  }
-  
-  /**
-   * Fallback: 如果 Pi SDK 不支持 subscribe()，使用轮询方式
-   */
-  private async *createFallbackEventStream(
-    session: any,
-    runId: string
-  ): AsyncIterable<any> {
-    console.warn("[PiSdkRuntime] Pi SDK subscribe() not available, using fallback");
-    
-    // Phase 5: 实现 fallback 策略（轮询或其他方式）
-    // 暂时抛出错误，提示需要适配 SDK
-    throw new Error(
-      "Pi SDK session.subscribe() not available. " +
-      "Please check Pi SDK version and API documentation."
-    );
   }
   
   /**
@@ -367,12 +420,15 @@ export class PiSdkRuntime implements PiRuntime {
   
   /**
    * 检查是否为完成事件
+   * 
+   * Phase 5 P0: Pi SDK 0.84.2 使用 agent_settled 作为完成事件
    */
   private isCompletionEvent(event: any): boolean {
     if (!event || typeof event !== "object") return false;
     
     const type = event.type as string;
     return (
+      type === "agent_settled" ||      // Pi SDK 实际完成事件
       type === "session_completed" ||
       type === "run_completed" ||
       type === "agent_completed" ||
@@ -504,7 +560,7 @@ export class PiSdkRuntime implements PiRuntime {
     
     // 2. 查找对应的 runId（从 runStore 反查）
     let foundRunId: string | null = null;
-    for (const [runId, handle] of this.runStore.entries()) {
+    for (const [runId, handle] of Array.from(this.runStore.entries())) {
       if (handle.sessionId === sessionId) {
         foundRunId = runId;
         break;
