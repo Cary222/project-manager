@@ -224,27 +224,30 @@ export class PiSdkRuntime implements PiRuntime {
     // 使用重试机制创建 session（网络临时故障可重试）
     return await withRetry(
       async () => {
-        // 1. 创建或复用 ModelRuntime
-        if (!this.modelRuntime) {
-          console.log("[PiSdkRuntime] Creating ModelRuntime...");
-          
-          this.modelRuntime = await ModelRuntime.create({
-            allowModelNetwork: false,
-            refreshOnCreate: false,
-          } as any);
-          console.log("[PiSdkRuntime] ModelRuntime created");
-        }
+        // Phase 5 P0 修复：每次都创建新的 ModelRuntime，确保读取最新的环境变量
+        // 原因：ModelRuntime.create() 会在初始化时读取环境变量（DEEPSEEK_API_KEY 等）
+        // 如果复用旧的 ModelRuntime，它不会感知到新设置的环境变量
+        console.log("[PiSdkRuntime] Creating fresh ModelRuntime...");
+        
+        const modelRuntime = await ModelRuntime.create({
+          allowModelNetwork: false,
+          refreshOnCreate: false,
+        } as any);
+        console.log("[PiSdkRuntime] ModelRuntime created");
         
         // 2. 创建 session
         console.log("[PiSdkRuntime] Creating AgentSession...");
         
         const result = await createAgentSession({
           cwd: input.workspace || process.cwd(),
-          modelRuntime: this.modelRuntime,
+          modelRuntime: modelRuntime,
         } as any);
         
         const { session } = result;
         console.log(`[PiSdkRuntime] AgentSession created`);
+        
+        // 更新缓存（供后续可能的复用，虽然现在不复用了）
+        this.modelRuntime = modelRuntime;
         
         return session;
       },
