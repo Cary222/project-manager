@@ -192,12 +192,25 @@ export class PiSdkRuntime implements PiRuntime {
     
     // ⚠️ 设置环境变量（Pi SDK 会读取）
     // 注意：这会修改全局 process.env，多租户场景有隔离风险
-    process.env.OPENAI_API_KEY = cred.apiKey;
+    // Phase 5 P0 修复：根据 provider 设置正确的环境变量名
+    const providerName = provider || "deepseek";
     
-    // DeepSeek 需要设置 baseURL
-    if ((provider || "deepseek") === "deepseek" || cred.baseURL.includes("deepseek")) {
-      process.env.OPENAI_API_BASE_URL = cred.baseURL;
-      console.log(`[PiSdkRuntime] Set OPENAI_API_BASE_URL to ${cred.baseURL}`);
+    if (providerName === "deepseek") {
+      process.env.DEEPSEEK_API_KEY = cred.apiKey;
+      console.log(`[PiSdkRuntime] Set DEEPSEEK_API_KEY (length: ${cred.apiKey.length})`);
+    } else if (providerName === "openai") {
+      process.env.OPENAI_API_KEY = cred.apiKey;
+      console.log(`[PiSdkRuntime] Set OPENAI_API_KEY (length: ${cred.apiKey.length})`);
+    } else if (providerName === "anthropic") {
+      process.env.ANTHROPIC_API_KEY = cred.apiKey;
+      console.log(`[PiSdkRuntime] Set ANTHROPIC_API_KEY (length: ${cred.apiKey.length})`);
+    } else {
+      // 其他 provider 尝试通用 OPENAI_API_KEY
+      process.env.OPENAI_API_KEY = cred.apiKey;
+      if (cred.baseURL) {
+        process.env.OPENAI_API_BASE_URL = cred.baseURL;
+        console.log(`[PiSdkRuntime] Set OPENAI_API_BASE_URL to ${cred.baseURL}`);
+      }
     }
   }
   
