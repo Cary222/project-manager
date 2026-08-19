@@ -117,7 +117,9 @@ export class PiSdkRuntime implements PiRuntime {
     // TODO Phase 5 P1: 集成 Policy Gateway
     
     // 5. 发送用户消息
-    await piSession.sendUserMessage(input.prompt);
+    // Phase 5 P0 修复：必须明确指定模型，否则 Pi SDK 会报 "No API key found"
+    const modelName = input.model?.name || "deepseek-v4-flash"; // 默认使用 deepseek-v4-flash
+    await piSession.sendUserMessage(input.prompt, { model: modelName } as any);
     
     // 6. 转换事件流（Pi native → SubAgentEvent）
     const piEvents = this.createPiEventStream(piSession, runId);
