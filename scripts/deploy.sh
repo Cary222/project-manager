@@ -35,7 +35,7 @@ fi
 
 log "发现更新: $LOCAL → $REMOTE"
 log "拉取最新代码..."
-git --git-dir="$WORK/.git" --work-tree="$WORK" pull origin main
+git --git-dir="$WORK/.git" --work-tree="$WORK" pull --ff-only origin main
 
 log "开始安装依赖与生成 Prisma Client..."
 if ! npm install --no-audit --no-fund >> "$LOG" 2>&1; then
@@ -56,14 +56,14 @@ fi
 
 log "重启 project-manager 服务..."
 
-systemctl --user restart project-manager-web.service
+systemctl --user restart project-manager.service
 systemctl --user restart project-manager-worker.service
 systemctl --user restart project-manager-background-worker.service
 systemctl --user restart embedding-api.service
 
 # 健康检查
 sleep 5
-for svc in project-manager-web project-manager-worker project-manager-background-worker embedding-api; do
+for svc in project-manager project-manager-worker project-manager-background-worker embedding-api; do
     if ! systemctl --user is-active --quiet "${svc}.service"; then
         log "警告: ${svc} 未达到 active 状态"
     fi
