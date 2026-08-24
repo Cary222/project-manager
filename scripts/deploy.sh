@@ -42,6 +42,8 @@ if ! npm install --no-audit --no-fund >> "$LOG" 2>&1; then
     log "依赖安装失败！旧服务保持不变。查看日志: tail -60 $LOG"
     exit 1
 fi
+# npm install 可能因本机 npm 版本差异改写 package-lock.json,复位保持部署树干净,避免下次 pull 被脏树挡住
+git --git-dir="$WORK/.git" --work-tree="$WORK" checkout -- package-lock.json 2>/dev/null || true
 if ! npx prisma generate >> "$LOG" 2>&1; then
     log "Prisma Client 生成失败！旧服务保持不变。查看日志: tail -60 $LOG"
     exit 1
