@@ -20,12 +20,8 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 // ---------------------------------------------------------------------------
 
 async function resetModelsCache() {
-  const state = (await import("@/lib/models-cache")).getModelsCacheState?.();
-  if (state) {
-    state.generation = 0;
-    state.entries.clear();
-    state.inFlight.clear();
-  }
+  const { __resetModelsCacheState } = await import("@/lib/models-cache");
+  __resetModelsCacheState();
 }
 
 // ---------------------------------------------------------------------------

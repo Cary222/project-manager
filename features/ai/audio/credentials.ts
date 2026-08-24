@@ -15,7 +15,8 @@
 
 import { prisma } from "@/shared/db/client";
 import { decrypt } from "../llm/credentials/encryption";
-import { getEffectiveBaseURL, normalizeBaseURL, discoverModelsFromAPI } from "../llm/providers/registry";
+import { discoverModelsFromAPI } from "../llm/providers/registry";
+import { getEffectiveBaseURL, normalizeBaseURL } from "@/lib/normalize-base-url";
 import type { CredentialRecord } from "../llm/credentials/api-key-store";
 
 export type VoiceCapability = "tts" | "stt" | "realtime";

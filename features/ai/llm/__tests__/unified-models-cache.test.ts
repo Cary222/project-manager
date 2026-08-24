@@ -320,7 +320,7 @@ describe("api-key-store — 凭证变更触发 unified cache 失效", () => {
 
   const systemRecord = {
     id: "sys-key-1",
-    userId: null as const,
+    userId: null,
     ownerType: "SYSTEM" as const,
     provider: "agnes",
     name: "Agnes System Key",

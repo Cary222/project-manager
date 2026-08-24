@@ -261,7 +261,7 @@ test.describe("模块编辑与合并 E2E", () => {
     if (!hasMergeDialog) {
       // 关闭编辑模态框并跳过测试
       await page.keyboard.press("Escape");
-      test.skip("合并对话框未出现，可能是模块名不完全匹配");
+      test.skip(true, "合并对话框未出现，可能是模块名不完全匹配");
       return;
     }
 
@@ -291,7 +291,7 @@ test.describe("模块编辑与合并 E2E", () => {
     // 验证模块已创建
     const editButton = await getEditButton(page, testModuleName);
     if (!(await editButton.isVisible({ timeout: 3000 }).catch(() => false))) {
-      test.skip("无法创建测试模块，跳过测试");
+      test.skip(true, "无法创建测试模块，跳过测试");
       return;
     }
 

@@ -133,6 +133,18 @@ export function invalidateModelsCache(): void {
   state.inFlight.clear();
 }
 
+/**
+ * Reset cache state — for testing only.
+ * Resets generation to 0 and clears all entries.
+ * WARNING: Do not call in production code.
+ */
+export function __resetModelsCacheState(): void {
+  const state = getModelsCacheState();
+  state.generation = 0;
+  state.entries.clear();
+  state.inFlight.clear();
+}
+
 export function withModelRuntimeError(data: ModelsData, modelError: string | undefined): ModelsData {
   return modelError ? { ...data, modelError } : data;
 }
