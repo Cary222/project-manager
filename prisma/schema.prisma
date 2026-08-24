@@ -47,6 +47,7 @@ model User {
   monthlyExpenses        MonthlyExpense[]
   expenseShares          ExpenseShare[]
   userApiKeys            UserApiKey[]
+  userAiModelPreferences UserAiModelPreference[]
   policyRules            PolicyRule[]            @relation("PolicyRules")
   policyAuditLogs        PolicyAuditLog[]        @relation("PolicyAuditLogs")
   subAgentRuns           SubAgentRun[]           @relation("SubAgentRuns")
@@ -882,6 +883,28 @@ model UserApiKey {
   @@index([userId, provider, deletedAt])
   @@index([keyHash])
   @@index([ownerType])
+  @@schema("pm")
+}
+
+// ========== User Scope AI 模型偏好（Stage 6 Settings Schema Phase） ==========
+// enabled 语义：无行 = 默认启用；仅当显式禁用/收藏/覆盖参数时建行
+model UserAiModelPreference {
+  id            String   @id @default(cuid())
+  userId        String
+  provider      String
+  modelId       String
+  enabled       Boolean  @default(true)
+  favorite      Boolean  @default(false)
+  thinkingLevel String? // off|minimal|low|medium|high|xhigh
+  temperature   Float?
+  maxTokens     Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider, modelId])
+  @@index([userId])
   @@schema("pm")
 }
 

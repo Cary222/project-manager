@@ -23,16 +23,21 @@ import { TicketStatus, UserRole } from "@prisma/client";
 //
 // 这些都不是我们要测的内容，所以全部伪造。
 // vi.mock() 的特点：只在这一批测试里有效，不影响真实代码。
-vi.mock("@/lib/permissions", () => ({
+vi.mock("@/shared/lib/permissions", () => ({
   // requireRoot() 返回一个 mock session，包含 id / name / role
   requireRoot: vi.fn(() =>
     Promise.resolve({
       user: { id: "admin-001", name: "测试管理员", role: UserRole.ROOT },
     })
   ),
+  requireSession: vi.fn(() =>
+    Promise.resolve({
+      user: { id: "admin-001", name: "测试管理员", role: UserRole.ROOT },
+    })
+  ),
 }));
 
-vi.mock("@/lib/db", () => ({
+vi.mock("@/shared/db/client", () => ({
   prisma: {
     // mock 一个 users 表
     user: {
@@ -48,7 +53,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-vi.mock("@/lib/moderation", () => ({
+vi.mock("@/features/admin/moderation", () => ({
   createModerationLog: vi.fn(),
 }));
 
@@ -102,8 +107,8 @@ describe("getUserByIdAction", () => {
       bannedAt: null,
       createdAt: new Date("2026-01-01"),
     };
-    const { prisma } = await import("@/lib/db");
-    vi.mocked(prisma.user.findUnique).mockResolvedValue(mockUser);
+    const { prisma } = await import("@/shared/db/client");
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(mockUser as never);
 
     // Act：调用 action
     const result = await getUserByIdAction("user-123");
@@ -116,7 +121,7 @@ describe("getUserByIdAction", () => {
 
   it("不存在的用户返回 null", async () => {
     // Arrange：让 findUnique 返回 null，模拟"找不到"
-    const { prisma } = await import("@/lib/db");
+    const { prisma } = await import("@/shared/db/client");
     vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
 
     // Act
@@ -153,8 +158,8 @@ describe("getUserTicketsAction", () => {
         module: { name: "文档", responsibility: { kind: "DESIGN" } },
       },
     ];
-    const { prisma } = await import("@/lib/db");
-    vi.mocked(prisma.ticket.findMany).mockResolvedValue(mockTickets);
+    const { prisma } = await import("@/shared/db/client");
+    vi.mocked(prisma.ticket.findMany).mockResolvedValue(mockTickets as never);
 
     const result = await getUserTicketsAction("user-123");
 
@@ -164,7 +169,7 @@ describe("getUserTicketsAction", () => {
   });
 
   it("带 status 筛选只返回对应状态的单子", async () => {
-    const { prisma } = await import("@/lib/db");
+    const { prisma } = await import("@/shared/db/client");
     vi.mocked(prisma.ticket.findMany).mockResolvedValue([]);
 
     await getUserTicketsAction("user-123", TicketStatus.DEVELOPING);
@@ -187,13 +192,13 @@ describe("getUserTicketsAction", () => {
  */
 describe("getUsersAction", () => {
   beforeEach(async () => {
-    const { prisma } = await import("@/lib/db");
+    const { prisma } = await import("@/shared/db/client");
     vi.mocked(prisma.user.findMany).mockResolvedValue([]);
     vi.mocked(prisma.user.count).mockResolvedValue(0);
   });
 
   it("无参数时默认第一页，每页 20 条", async () => {
-    const { prisma } = await import("@/lib/db");
+    const { prisma } = await import("@/shared/db/client");
     await getUsersAction();
 
     expect(prisma.user.findMany).toHaveBeenCalledWith(
@@ -202,7 +207,7 @@ describe("getUsersAction", () => {
   });
 
   it("带搜索词时按 name 或 email 过滤", async () => {
-    const { prisma } = await import("@/lib/db");
+    const { prisma } = await import("@/shared/db/client");
     await getUsersAction({ search: "张三" });
 
     expect(prisma.user.findMany).toHaveBeenCalledWith(
@@ -215,7 +220,7 @@ describe("getUsersAction", () => {
   });
 
   it("带 role 参数时按角色过滤", async () => {
-    const { prisma } = await import("@/lib/db");
+    const { prisma } = await import("@/shared/db/client");
     await getUsersAction({ role: UserRole.ROOT });
 
     expect(prisma.user.findMany).toHaveBeenCalledWith(
@@ -227,8 +232,8 @@ describe("getUsersAction", () => {
 
   it("返回 { users, total } 结构", async () => {
     const mockUsers = [{ id: "u1", name: "张三", email: "a@b.com", role: UserRole.USER, bannedAt: null, createdAt: new Date() }];
-    const { prisma } = await import("@/lib/db");
-    vi.mocked(prisma.user.findMany).mockResolvedValue(mockUsers);
+    const { prisma } = await import("@/shared/db/client");
+    vi.mocked(prisma.user.findMany).mockResolvedValue(mockUsers as never);
     vi.mocked(prisma.user.count).mockResolvedValue(1);
 
     const result = await getUsersAction();
@@ -248,7 +253,7 @@ describe("getUsersAction", () => {
  */
 describe("updateUserRoleAction", () => {
   beforeEach(async () => {
-    const { prisma } = await import("@/lib/db");
+    const { prisma } = await import("@/shared/db/client");
     vi.mocked(prisma.user.findUnique).mockResolvedValue({
       id: "target-user",
       name: "目标用户",
@@ -256,8 +261,8 @@ describe("updateUserRoleAction", () => {
       role: UserRole.USER,
       bannedAt: null,
       createdAt: new Date(),
-    });
-    vi.mocked(prisma.user.update).mockResolvedValue({} as any);
+    } as never);
+    vi.mocked(prisma.user.update).mockResolvedValue({} as never);
   });
 
   it("正常修改角色返回 success: true", async () => {
@@ -272,7 +277,7 @@ describe("updateUserRoleAction", () => {
   });
 
   it("目标用户不存在返回错误", async () => {
-    const { prisma } = await import("@/lib/db");
+    const { prisma } = await import("@/shared/db/client");
     vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
 
     const result = await updateUserRoleAction("not-exist", UserRole.ROOT);
@@ -290,7 +295,7 @@ describe("updateUserRoleAction", () => {
  */
 describe("banUserAction", () => {
   beforeEach(async () => {
-    const { prisma } = await import("@/lib/db");
+    const { prisma } = await import("@/shared/db/client");
     vi.mocked(prisma.user.findUnique).mockResolvedValue({
       id: "target-user",
       name: "目标用户",
@@ -298,8 +303,8 @@ describe("banUserAction", () => {
       role: UserRole.USER,
       bannedAt: null,
       createdAt: new Date(),
-    });
-    vi.mocked(prisma.user.update).mockResolvedValue({} as any);
+    } as never);
+    vi.mocked(prisma.user.update).mockResolvedValue({} as never);
   });
 
   it("正常封禁返回 success: true", async () => {
@@ -313,7 +318,7 @@ describe("banUserAction", () => {
   });
 
   it("封禁 ROOT 用户返回错误", async () => {
-    const { prisma } = await import("@/lib/db");
+    const { prisma } = await import("@/shared/db/client");
     vi.mocked(prisma.user.findUnique).mockResolvedValue({
       id: "root-user",
       name: "ROOT",
@@ -321,14 +326,14 @@ describe("banUserAction", () => {
       role: UserRole.ROOT,
       bannedAt: null,
       createdAt: new Date(),
-    });
+    } as never);
 
     const result = await banUserAction("root-user");
     expect(result).toEqual({ error: "不能封禁 ROOT 用户" });
   });
 
   it("重复封禁返回错误", async () => {
-    const { prisma } = await import("@/lib/db");
+    const { prisma } = await import("@/shared/db/client");
     vi.mocked(prisma.user.findUnique).mockResolvedValue({
       id: "target-user",
       name: "目标用户",
@@ -336,7 +341,7 @@ describe("banUserAction", () => {
       role: UserRole.USER,
       bannedAt: new Date(),   // 已有 bannedAt，表示已被封禁
       createdAt: new Date(),
-    });
+    } as never);
 
     const result = await banUserAction("target-user");
     expect(result).toEqual({ error: "该用户已被封禁" });
@@ -352,7 +357,7 @@ describe("banUserAction", () => {
  */
 describe("unbanUserAction", () => {
   beforeEach(async () => {
-    const { prisma } = await import("@/lib/db");
+    const { prisma } = await import("@/shared/db/client");
     vi.mocked(prisma.user.findUnique).mockResolvedValue({
       id: "banned-user",
       name: "已封禁用户",
@@ -360,8 +365,8 @@ describe("unbanUserAction", () => {
       role: UserRole.USER,
       bannedAt: new Date(),   // 已封禁状态
       createdAt: new Date(),
-    });
-    vi.mocked(prisma.user.update).mockResolvedValue({} as any);
+    } as never);
+    vi.mocked(prisma.user.update).mockResolvedValue({} as never);
   });
 
   it("正常解封返回 success: true", async () => {
@@ -375,7 +380,7 @@ describe("unbanUserAction", () => {
   });
 
   it("解封未封禁的用户返回错误", async () => {
-    const { prisma } = await import("@/lib/db");
+    const { prisma } = await import("@/shared/db/client");
     vi.mocked(prisma.user.findUnique).mockResolvedValue({
       id: "normal-user",
       name: "正常用户",
@@ -383,7 +388,7 @@ describe("unbanUserAction", () => {
       role: UserRole.USER,
       bannedAt: null,   // 未封禁
       createdAt: new Date(),
-    });
+    } as never);
 
     const result = await unbanUserAction("normal-user");
     expect(result).toEqual({ error: "该用户未被封禁" });

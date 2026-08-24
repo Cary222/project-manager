@@ -55,10 +55,11 @@ export class PiSubAgent implements BaseSubAgent {
     const runtime = await getPiRuntime();
     
     // 2. 启动 Pi run（会自动注入 runtime context）
+    // userId 来自 SubAgentInput，由 graph.ts 传递
     const piHandle = await runtime.start({
       prompt: input.prompt,
       workspace: input.workspace,
-      userId: run.workspaceId, // workspaceId 作为 userId
+      userId: input.userId || "system",
       contextFiles: input.contextFiles,
     });
 

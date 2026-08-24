@@ -1,12 +1,26 @@
 /**
- * API Key 存储层
- * 提供 save/get/delete 接口，操作 prisma UserApiKey 表
+ * API Key 存储层 — CredentialService 核心
+ *
+ * 职责边界：
+ * - ✅ 负责：UserApiKey CRUD、加密存储、凭证解析、三级降级链路
+ * - ❌ 不负责：Provider-specific auth parsing（由 Pi SDK 负责）
+ * - ❌ 不负责：模型发现（由 registry.ts 的 discoverModelsFromAPI 负责）
+ * - ❌ 不负责：BaseURL 规范化（由 lib/normalize-base-url.ts 负责）
+ *
  * 统一凭证链路：USER key → SYSTEM key fallback（Agnes）
+ *
+ * 依赖关系：
+ * - @/lib/normalize-base-url.ts: BaseURL 规范化
+ * - @/lib/user-models-cache.ts: User scope 缓存失效
+ * - @/lib/unified-models-cache.ts: 跨端点 unified models 缓存失效（每次凭证变更均触发）
+ * - prisma.userApiKey: 凭证存储
  */
 import { prisma } from "@/shared/db/client";
 import { encrypt, decrypt, hashApiKey } from "./encryption";
-import { getEffectiveBaseURL, normalizeBaseURL } from "../providers/registry";
+import { normalizeBaseURL, getEffectiveBaseURL } from "@/lib/normalize-base-url";
 import type { ApiFormat } from "../providers/types";
+import { invalidateUserModelsCache, invalidateAllUserModelsCache } from "@/lib/user-models-cache";
+import { invalidateUnifiedModelsCache } from "@/lib/unified-models-cache";
 
 // ---------------------------------------------------------------------------
 // baseURL normalization — ensures all API calls use consistent /v1 suffix
@@ -216,6 +230,11 @@ export async function saveApiKey(input: SaveApiKeyInput): Promise<MaskedKeyInfo>
     });
   }
 
+  // 失效该用户的模型缓存
+  invalidateUserModelsCache(userId);
+  // 失效 unified models 缓存（跨端点共享）
+  invalidateUnifiedModelsCache();
+
   return {
     id: record.id,
     provider: record.provider,
@@ -284,6 +303,10 @@ export async function deleteApiKeyById(id: string, userId: string): Promise<void
     where: { id, userId, ownerType: "USER" },
     data: { deletedAt: new Date() },
   });
+  // 失效该用户的模型缓存
+  invalidateUserModelsCache(userId);
+  // 失效 unified models 缓存（跨端点共享）
+  invalidateUnifiedModelsCache();
 }
 
 /**
@@ -298,6 +321,10 @@ export async function deleteApiKey(
     where: { userId, provider, deletedAt: null },
     data: { deletedAt: new Date() },
   });
+  // 失效该用户的模型缓存
+  invalidateUserModelsCache(userId);
+  // 失效 unified models 缓存（跨端点共享）
+  invalidateUnifiedModelsCache();
 }
 
 /**
@@ -445,6 +472,11 @@ export async function saveSystemProvider(
     });
   }
 
+  // 失效所有用户的模型缓存（SYSTEM provider 变更影响全局）
+  invalidateAllUserModelsCache();
+  // 失效 unified models 全量缓存（SYSTEM 凭证变更影响所有用户）
+  invalidateUnifiedModelsCache();
+
   return {
     id: record.id,
     provider: record.provider,
@@ -467,6 +499,10 @@ export async function deleteSystemProviderById(id: string): Promise<void> {
     where: { id, ownerType: "SYSTEM" },
     data: { deletedAt: new Date() },
   });
+  // 失效所有用户的模型缓存
+  invalidateAllUserModelsCache();
+  // 失效 unified models 全量缓存（SYSTEM 凭证变更影响所有用户）
+  invalidateUnifiedModelsCache();
 }
 
 /**
@@ -477,4 +513,8 @@ export async function deleteSystemProvider(provider: string): Promise<void> {
     where: { ownerType: "SYSTEM", provider, deletedAt: null },
     data: { deletedAt: new Date() },
   });
+  // 失效所有用户的模型缓存
+  invalidateAllUserModelsCache();
+  // 失效 unified models 全量缓存（SYSTEM 凭证变更影响所有用户）
+  invalidateUnifiedModelsCache();
 }

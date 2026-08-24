@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/shared/lib/permissions";
-import { getRealtimeConfig } from "@/features/ai/audio/realtime/dashscope";
+import { getRealtimeConfig } from "@/features/ai/llm/providers/audio/realtime/dashscope";
 
 /**
  * POST /api/ai/audio/realtime/config

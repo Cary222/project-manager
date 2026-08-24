@@ -52,6 +52,10 @@ export interface ModelCatalogEntry {
   apiFormat?: ApiFormat;
   /** SYSTEM = 平台默认模型（如 Agnes）；USER = 用户导入的模型 */
   ownerType?: "SYSTEM" | "USER";
+  /** Stage 6 增量元数据（来自 models.dev catalog，查不到留空，向后兼容） */
+  contextWindow?: number;
+  /** 模型是否支持 reasoning（catalog 元数据；undefined = 未知） */
+  reasoning?: boolean;
 }
 
 export interface UserRoutingConfig {

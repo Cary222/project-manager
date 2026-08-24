@@ -43,6 +43,8 @@ export interface SubAgentInput {
   workspace: string;
   contextFiles?: string[];
   policy?: PolicyConfig;
+  /** 用户 ID（用于获取用户 API key 配置） */
+  userId?: string;
 }
 
 export interface PolicyConfig {

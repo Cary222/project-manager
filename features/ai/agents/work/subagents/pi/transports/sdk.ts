@@ -14,9 +14,10 @@
  */
 
 import { createAgentSession, ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AgentSession, CreateAgentSessionOptions, CreateModelRuntimeOptions } from "@earendil-works/pi-coding-agent";
 import { prisma } from "@/shared/db/client";
-import { resolveCredentialWithFallback } from "@/features/ai/llm/credentials/api-key-store";
+import { resolveCredentialWithFallback, getUserProviderRecords } from "@/features/ai/llm/credentials/api-key-store";
+import { synthesizeSessionModelsConfig, type SessionModelsConfigHandle } from "@/features/ai/llm/pi-session-config";
 import { withRetry, classifyError, ErrorType } from "../error-recovery";
 import type {
   PiRuntime,
@@ -29,6 +30,20 @@ import type {
 import { translateEvents } from "../events";
 import { injectRuntimeContext } from "../context";
 import type { PolicyContext, PiEvent } from "../../types";
+
+/**
+ * Pi SDK Transport 类型定义
+ * 
+ * 定义 SDK 类型接口以替代 `as any` 类型断言
+ */
+
+/**
+ * createPiSession 的参数类型（对应 SDK 的 CreateAgentSessionOptions）
+ */
+type PiSessionOptions = Pick<
+  CreateAgentSessionOptions,
+  "cwd" | "modelRuntime" | "model"
+>;
 
 /**
  * 获取 Policy Gateway（延迟导入避免循环依赖）
@@ -52,9 +67,26 @@ export class PiSdkRuntime implements PiRuntime {
     reject: (error: Error) => void;
   }>(); // runId → HIL 等待中的 promise resolver
   private modelRuntime: ModelRuntime | null = null; // 全局 ModelRuntime（复用）
+  private registeredTools: unknown[] = []; // Phase 4: 注册的业务工具
+  // Stage 8：会话级临时 models.json 句柄（合成失败时回落默认行为）
+  private sessionConfigCleanups = new Map<string, SessionModelsConfigHandle>();
   
   constructor(options?: PiRuntimeOptions) {
     this.options = options ?? {};
+  }
+  
+  /**
+   * 注册业务工具到 Runtime（Phase 4）
+   */
+  registerTool(tool: unknown): void {
+    this.registeredTools.push(tool);
+  }
+  
+  /**
+   * 获取已注册的工具列表（Phase 4）
+   */
+  getRegisteredTools(): string[] {
+    return this.registeredTools.map((tool: any) => tool?.name || 'unknown');
   }
   
   /**
@@ -110,23 +142,28 @@ export class PiSdkRuntime implements PiRuntime {
     await this.setupCredentials(input.userId, input.provider);
     
     // 3. 创建 Pi session（真实 Pi SDK）
-    const piSession = await this.createPiSession(input);
+    const { session: piSession, sessionConfig } = await this.createPiSession(input);
     this.sessionStore.set(sessionId, piSession);
+    // Stage 8：临时 models.json 句柄按本 run 的 sessionId 登记，完成/中止时清理
+    if (sessionConfig) {
+      this.sessionConfigCleanups.set(sessionId, sessionConfig);
+    }
     
     // 4. 注册 tool_call hook（Policy Gateway 前置拦截）
     // TODO Phase 5 P1: 集成 Policy Gateway
     
-    // 5. 发送用户消息
-    // Phase 5 P0 修复：必须明确指定模型，否则 Pi SDK 会报 "No API key found"
-    const modelName = input.model?.name || "deepseek-v4-flash"; // 默认使用 deepseek-v4-flash
-    await piSession.sendUserMessage(input.prompt, { model: modelName } as any);
-    
-    // 6. 转换事件流（Pi native → SubAgentEvent）
+    // 5. 先创建事件流订阅（必须在 sendUserMessage 之前，避免死锁）
     const piEvents = this.createPiEventStream(piSession, runId);
     const events = translateEvents(
       piEvents as AsyncIterable<PiEvent>,
       runId
     );
+    
+    // 6. 发送用户消息
+    // 注意：模型已在 createAgentSession 时指定，不需要在 sendUserMessage 中重复指定
+    piSession.sendUserMessage(input.prompt).catch((err: Error) => {
+      console.error("[PiSdkRuntime] sendUserMessage failed:", err);
+    });
     
     // 7. 创建 handle
     const handle: PiRunHandle = {
@@ -192,28 +229,15 @@ export class PiSdkRuntime implements PiRuntime {
       `(transport: ${cred.transport}, apiFormat: ${cred.apiFormat})`
     );
     
-    // ⚠️ 设置环境变量（Pi SDK 会读取）
-    // 注意：这会修改全局 process.env，多租户场景有隔离风险
-    // Phase 5 P0 修复：根据 provider 设置正确的环境变量名
-    const providerName = provider || "deepseek";
-    
-    if (providerName === "deepseek") {
-      process.env.DEEPSEEK_API_KEY = cred.apiKey;
-      console.log(`[PiSdkRuntime] Set DEEPSEEK_API_KEY (length: ${cred.apiKey.length})`);
-    } else if (providerName === "openai") {
-      process.env.OPENAI_API_KEY = cred.apiKey;
-      console.log(`[PiSdkRuntime] Set OPENAI_API_KEY (length: ${cred.apiKey.length})`);
-    } else if (providerName === "anthropic") {
-      process.env.ANTHROPIC_API_KEY = cred.apiKey;
-      console.log(`[PiSdkRuntime] Set ANTHROPIC_API_KEY (length: ${cred.apiKey.length})`);
-    } else {
-      // 其他 provider 尝试通用 OPENAI_API_KEY
-      process.env.OPENAI_API_KEY = cred.apiKey;
-      if (cred.baseURL) {
-        process.env.OPENAI_API_BASE_URL = cred.baseURL;
-        console.log(`[PiSdkRuntime] Set OPENAI_API_BASE_URL to ${cred.baseURL}`);
-      }
-    }
+    // ✅ Stage 3 P3: 不再设置 process.env，凭证通过 createPiSession() 中的
+    // modelRuntime.setRuntimeApiKey() 注入，提供实例级别隔离。
+    // 
+    // 职责边界：
+    // - setupCredentials(): 凭证解析和验证
+    // - createPiSession(): 凭证注入到 ModelRuntime（通过 setRuntimeApiKey）
+    //
+    // Pi SDK 不读取 process.env 中的 API key，真正生效的是 RuntimeCredentials.overrides Map。
+    // 参考: docs/ai/Stage3-P2-Credential-Runtime-Research.md
   }
   
   /**
@@ -221,62 +245,131 @@ export class PiSdkRuntime implements PiRuntime {
    * 
    * Phase 5: 真实 Pi SDK 集成
    * Phase 5 P1: 添加重试机制
-   * Phase 5 P0 修复：使用 setRuntimeApiKey 注册凭证
+   * Phase 5 P0 修复：使用 setRuntimeApiKey 注册凭证，从用户 DB 配置获取模型
    */
-  private async createPiSession(input: PiRunInput): Promise<any> {
+  private async createPiSession(input: PiRunInput): Promise<{
+    session: AgentSession;
+    sessionConfig: SessionModelsConfigHandle | null;
+  }> {
     // 使用重试机制创建 session（网络临时故障可重试）
     return await withRetry(
       async () => {
-        // Phase 5 P0 修复：每次都创建新的 ModelRuntime
         console.log("[PiSdkRuntime] Creating fresh ModelRuntime...");
-        
+
+        // Stage 8：会话级临时 models.json（workspace 优先 + 站点模型补充 + 偏好注入）。
+        // 合成失败时回落默认行为（不阻断会话）。
+        let sessionConfig: SessionModelsConfigHandle | null = null;
+        try {
+          sessionConfig = await synthesizeSessionModelsConfig(input.userId || "system");
+        } catch (error) {
+          console.warn(
+            "[PiSdkRuntime] session models.json synthesis failed, falling back to default config:",
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+
         const modelRuntime = await ModelRuntime.create({
           allowModelNetwork: false,
           refreshOnCreate: false,
-        } as any);
+          ...(sessionConfig ? { modelsPath: sessionConfig.modelsPath } : {}),
+        } as CreateModelRuntimeOptions);
         console.log("[PiSdkRuntime] ModelRuntime created");
         
-        // Phase 5 P0 关键修复：使用 setRuntimeApiKey 注册 API key
-        // 仅仅设置环境变量是不够的，Pi SDK 需要通过 setRuntimeApiKey 注册凭证
-        const providerName = input.provider || "deepseek";
-        const apiKey = providerName === "deepseek" 
-          ? process.env.DEEPSEEK_API_KEY
-          : providerName === "anthropic"
-          ? process.env.ANTHROPIC_API_KEY
-          : process.env.OPENAI_API_KEY;
+        // ============================================================
+        // Phase 5 P0 关键修复：从用户 DB 配置获取凭证和模型
+        // ============================================================
         
-        if (!apiKey) {
-          throw new Error(`API key not found in environment for provider: ${providerName}`);
+        const userId = input.userId || "system";
+        console.log(`[PiSdkRuntime] Resolving credentials for userId=${userId}`);
+        
+        // 1. 从用户 API Key 配置获取凭证
+        // 优先顺序：input.provider → 用户的第一个 provider → SYSTEM fallback
+        // 使用 api-key-store.ts 的三级降级链路（SYSTEM → USER → ENV）
+        let providerName = input.provider;
+        let cred = null;
+
+        if (providerName) {
+          // 用户指定了 provider，走三级降级
+          cred = await resolveCredentialWithFallback(userId, providerName);
+        } else {
+          // 没有指定 provider，获取用户第一个可用 provider
+          const userProviders = await getUserProviderRecords(userId);
+          if (userProviders.length > 0) {
+            providerName = userProviders[0].provider;
+            cred = await resolveCredentialWithFallback(userId, providerName);
+          }
+        }
+
+        // resolveCredentialWithFallback 已覆盖 SYSTEM fallback，无需额外处理
+        if (!cred || !providerName) {
+          throw new Error(`No credentials available for user ${userId}. Please configure an API key in settings.`);
         }
         
-        // 注册到 Pi SDK（使用 openai provider，因为 DeepSeek 兼容 OpenAI API）
-        const providerKey = providerName === "deepseek" ? "openai" : providerName;
-        const baseUrl = providerName === "deepseek" 
-          ? "https://api.deepseek.com"
-          : process.env.OPENAI_API_BASE_URL;
+        console.log(`[PiSdkRuntime] Using credential from ${cred.ownerType} provider: ${providerName}`);
         
-        console.log(`[PiSdkRuntime] Registering API key for provider: ${providerKey}`);
-        await modelRuntime.setRuntimeApiKey(
-          providerKey, 
-          apiKey, 
-          baseUrl ? { baseUrl } as any : undefined
-        );
+        // 2. Register API key to ModelRuntime.
+        // Provider names are canonical: "deepseek" stays "deepseek", etc.
+        // The SDK's getModel(providerId, modelId) indexes by the model's provider field,
+        // so setRuntimeApiKey must use the same providerId.
+        console.log(`[PiSdkRuntime] Registering API key for provider: ${providerName}`);
+        await modelRuntime.setRuntimeApiKey(providerName, cred.apiKey);
         
         // 验证认证状态
-        const authStatus = modelRuntime.getProviderAuthStatus(providerKey);
-        console.log(`[PiSdkRuntime] Auth status for ${providerKey}:`, authStatus);
+        const authStatus = modelRuntime.getProviderAuthStatus(providerName);
+        console.log(`[PiSdkRuntime] Auth status for ${providerName}:`, authStatus);
         
         if (!authStatus.configured) {
-          throw new Error(`Failed to configure authentication for provider: ${providerKey}`);
+          throw new Error(`Failed to configure authentication for provider: ${providerName}`);
         }
         
-        // 2. 创建 session
-        console.log("[PiSdkRuntime] Creating AgentSession...");
+        // 3. 从用户可用模型中选择合适的模型
+        console.log("[PiSdkRuntime] Discovering available models...");
         
+        let selectedModel = null;
+        
+        if (input.model?.name) {
+          // 用户指定了模型
+          const modelName = input.model.name;
+          console.log(`[PiSdkRuntime] Looking for user-specified model: ${providerName}/${modelName}`);
+          selectedModel = modelRuntime.getModel(providerName, modelName);
+          
+          if (!selectedModel) {
+            // First getModel already tried providerName; no need to retry
+          }
+        }
+        
+        if (!selectedModel) {
+          // 没有指定模型或没找到，使用用户配置的默认模型
+          const available = await modelRuntime.getAvailable();
+          console.log(`[PiSdkRuntime] Available models:`, available.map(m => `${m.provider}/${m.id}`));
+          
+          // 优先选择与凭证 provider 匹配的模型
+          const matchingModels = available.filter(m => m.provider === providerName);
+          
+          if (matchingModels.length > 0) {
+            // 选择第一个匹配的模型
+            selectedModel = matchingModels[0];
+            console.log(`[PiSdkRuntime] Selected matching model: ${selectedModel.provider}/${selectedModel.id}`);
+          } else if (available.length > 0) {
+            // 没有匹配的，使用第一个可用模型
+            selectedModel = available[0];
+            console.log(`[PiSdkRuntime] No matching model, using first available: ${selectedModel.provider}/${selectedModel.id}`);
+          }
+        }
+        
+        if (!selectedModel) {
+          throw new Error(`No available models found for provider: ${providerName}`);
+        }
+        
+        console.log(`[PiSdkRuntime] Using model: ${selectedModel.provider}/${selectedModel.id}`);
+        
+        // 4. 创建 AgentSession
+        console.log("[PiSdkRuntime] Creating AgentSession...");
         const result = await createAgentSession({
           cwd: input.workspace || process.cwd(),
           modelRuntime: modelRuntime,
-        } as any);
+          model: selectedModel,
+        } as PiSessionOptions);
         
         const { session } = result;
         console.log(`[PiSdkRuntime] AgentSession created`);
@@ -284,10 +377,10 @@ export class PiSdkRuntime implements PiRuntime {
         // 更新缓存
         this.modelRuntime = modelRuntime;
         
-        return session;
+        return { session, sessionConfig };
       },
       {
-        maxAttempts: 3, // Session 创建最多重试 3 次
+        maxAttempts: 3,
         baseDelay: 1000,
       }
     );
@@ -321,7 +414,10 @@ export class PiSdkRuntime implements PiRuntime {
     let rejectNext: ((error: Error) => void) | null = null;
     
     // 订阅 Pi SDK 事件（回调 API）
+    console.log(`[PiSdkRuntime] Subscribing to Pi SDK events for runId=${runId}`);
     const unsubscribe = session.subscribe((event: any) => {
+      console.log(`[PiSdkRuntime] Received Pi SDK event:`, event);
+      
       // 转换 Pi SDK 原生事件 → PiEvent
       const piEvent = this.mapPiSdkEvent(event, runId);
       if (piEvent) {
@@ -342,7 +438,8 @@ export class PiSdkRuntime implements PiRuntime {
         
         // 如果有等待中的 promise，通知完成
         if (resolveNext) {
-          resolveNext({ value: undefined as any, done: true });
+          // 完成时使用无 value 的结构，TypeScript IteratorResult 会正确处理
+          resolveNext({ done: true } as IteratorResult<PiEvent>);
           resolveNext = null;
         }
       }
@@ -538,6 +635,9 @@ export class PiSdkRuntime implements PiRuntime {
     if (session) {
       this.sessionStore.delete(handle.sessionId);
     }
+
+    // 4. Stage 8：清理会话级临时 models.json
+    this.cleanupSessionConfig(handle.sessionId);
   }
   
   /**
@@ -657,6 +757,9 @@ export class PiSdkRuntime implements PiRuntime {
           console.error("[PiSdkRuntime] Failed to update SubAgentRun status:", error);
         }
         
+        // Stage 8：清理会话级临时 models.json
+        this.cleanupSessionConfig(handle.sessionId);
+
         return {
           runId: event.result.runId,
           sessionId: handle.sessionId,
@@ -682,6 +785,9 @@ export class PiSdkRuntime implements PiRuntime {
       console.error("[PiSdkRuntime] Failed to update SubAgentRun status:", error);
     }
     
+    // Stage 8：清理会话级临时 models.json
+    this.cleanupSessionConfig(handle.sessionId);
+
     return {
       runId,
       sessionId: handle.sessionId,
@@ -693,6 +799,14 @@ export class PiSdkRuntime implements PiRuntime {
   }
   
   // ─── 私有方法：生成 ID──────────────────────────────────────
+
+  /** Stage 8：清理会话级临时 models.json（幂等） */
+  private cleanupSessionConfig(sessionId: string): void {
+    const config = this.sessionConfigCleanups.get(sessionId);
+    if (!config) return;
+    config.cleanup();
+    this.sessionConfigCleanups.delete(sessionId);
+  }
 
   private generateRunId(): string {
     return `run_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;

@@ -33,6 +33,7 @@ interface WorkAgentRunResult {
   workflowName?: string;
   summary?: string | null;
   error?: string | null;
+  piOutput?: string; // Pi SDK 累积输出文本
 }
 
 interface SSERecord {
@@ -112,6 +113,8 @@ export function WorkModePanel({ onSelectRun }: WorkModePanelProps) {
   const handleSSEEvent = useCallback((event: MessageEvent) => {
     try {
       const data = JSON.parse(event.data);
+      console.log("[WorkModePanel] Received SSE event:", data.type, data.payload);
+      
       const record: SSERecord = {
         id: eventIdRef.current++,
         type: data.type,
@@ -124,6 +127,27 @@ export function WorkModePanel({ onSelectRun }: WorkModePanelProps) {
         // 保留最近 10 条事件
         return updated.slice(-10);
       });
+
+      // 处理 Pi SDK 的 assistant_message 事件（文本输出）
+      // payload 结构: { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '文字', content: '完整文本' } }
+      if (data.type === "pi_assistant_message") {
+        console.log("[WorkModePanel] Processing pi_assistant_message:", data.payload);
+        const payload = data.payload as {
+          assistantMessageEvent?: {
+            content?: string;
+            delta?: string;
+            type?: string;
+          };
+        };
+        const text = payload?.assistantMessageEvent?.content ?? payload?.assistantMessageEvent?.delta ?? "";
+        if (text) {
+          console.log("[WorkModePanel] Appending text:", text);
+          setLastResult((prev) => ({
+            ...prev!,
+            piOutput: (prev?.piOutput ?? "") + text,
+          }));
+        }
+      }
 
       // 如果是 approval_required，触发审批弹窗
       if (data.type === "pi_approval_required") {
@@ -148,12 +172,32 @@ export function WorkModePanel({ onSelectRun }: WorkModePanelProps) {
         setIsStreaming(false);
         setIsRunning(false);
         setPendingApproval(null);
-        const payload = data.payload as { runId?: string };
+        
+        // 尝试从 payload 中提取最终文本
+        // payload 结构: { message: { content: [{ text: '完整文本' }] } }
+        let finalText = "";
+        const payload = data.payload as {
+          message?: {
+            content?: Array<{ text?: string }>;
+          };
+          runId?: string;
+        };
+        
+        if (payload?.message?.content && Array.isArray(payload.message.content)) {
+          finalText = payload.message.content
+            .map((c) => c.text ?? "")
+            .join("");
+        }
+        
+        console.log("[WorkModePanel] pi_run_completed, finalText:", finalText.substring(0, 100));
+        
         setLastResult((prev) => ({
           ...prev!,
-          runId: payload.runId ?? prev?.runId ?? "",
+          runId: payload?.runId ?? prev?.runId ?? "",
           status: "completed",
-          summary: "Pi 任务已完成",
+          // 优先使用流式累积的文本，其次使用最终文本，最后使用默认消息
+          summary: prev?.piOutput || finalText || "Pi 任务已完成",
+          piOutput: prev?.piOutput || finalText,
         }));
       }
 
@@ -554,6 +598,11 @@ export function WorkModePanel({ onSelectRun }: WorkModePanelProps) {
                 {lastResult.taskType === "workflow" && lastResult.workflowName && (
                   <p>✅ 已启动工作流：{lastResult.workflowName}</p>
                 )}
+                {lastResult.piOutput && (
+                  <div className="mt-2 whitespace-pre-wrap font-mono text-xs text-ink-700">
+                    {lastResult.piOutput}
+                  </div>
+                )}
               </div>
             )}
 
@@ -582,6 +631,17 @@ export function WorkModePanel({ onSelectRun }: WorkModePanelProps) {
                     停止
                   </button>
                 </div>
+                
+                {/* 显示累积的 Pi 输出文本 */}
+                {lastResult?.piOutput && (
+                  <div className="mb-3 rounded-md border border-brand-300 bg-white p-3">
+                    <p className="mb-1 text-xs font-medium text-brand-700">🤖 Pi 输出:</p>
+                    <div className="whitespace-pre-wrap font-mono text-xs text-ink-700">
+                      {lastResult.piOutput}
+                    </div>
+                  </div>
+                )}
+                
                 <div className="space-y-2">
                   {realtimeEvents.map(renderEventCard)}
                 </div>

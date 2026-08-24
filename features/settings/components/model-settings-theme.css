@@ -1,0 +1,45 @@
+/**
+ * Model Settings 主题变量作用域（ProjectHub Settings 页专用）
+ *
+ * 共享 model-settings 套件使用 Pi 风格 CSS 变量（--bg/--border/--text…）。
+ * ai-workspace 页由 pi-web.css 提供这些变量；Settings 页不加载 pi-web.css，
+ * 因此在挂载点包一层 .model-settings-theme 提供等价变量。
+ */
+
+.model-settings-theme {
+  --bg: #ffffff;
+  --bg-panel: #f5f5f5;
+  --bg-hover: #eeeeee;
+  --bg-selected: #e8e8e8;
+  --border: #e0e0e0;
+  --text: #1a1a1a;
+  --text-muted: #6b7280;
+  --text-dim: #9ca3af;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+.dark .model-settings-theme {
+  --bg: #1a1a1a;
+  --bg-panel: #242424;
+  --bg-hover: #2e2e2e;
+  --bg-selected: #383838;
+  --border: #3a3a3a;
+  --text: #e8e8e8;
+  --text-muted: #9ca3af;
+  --text-dim: #6b7280;
+  --accent: #60a5fa;
+  --accent-hover: #93c5fd;
+}
+
+@keyframes saved-pop {
+  0% { transform: scale(0.96); }
+  60% { transform: scale(1.03); }
+  100% { transform: scale(1); }
+}
+
+@keyframes saved-check-draw {
+  from { stroke-dashoffset: 18; }
+  to { stroke-dashoffset: 0; }
+}

@@ -15,9 +15,18 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  serverExternalPackages: [
+    "@earendil-works/pi-coding-agent",
+    "@earendil-works/pi-ai",
+  ],
   experimental: {
     serverActions: {
       bodySizeLimit: "10mb",
+    },
+  },
+  turbopack: {
+    resolveAlias: {
+      "./lib/*": "./lib/*",
     },
   },
 };

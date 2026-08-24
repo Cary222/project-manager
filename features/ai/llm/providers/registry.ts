@@ -1,34 +1,75 @@
 /**
- * Provider Registry & Dynamic Model Discovery
+ * Provider Registry & Dynamic Model Discovery — User Scope
  *
- * 架构参考:
+ * =============================================================================
+ * 职责边界
+ * =============================================================================
+ * ✅ 负责：
+ *   - Provider Registry（KNOWN_DEFAULTS 常量）
+ *   - Model Discovery（discoverModelsFromAPI）— 调用 Provider API 获取模型列表
+ *   - Model Creation（createModel）— 创建 AI SDK 模型实例
+ *   - API Format 推断（inferApiFormat）
+ *   - Capability 推断（inferCapabilities）
+ *   - Agnes Hardcoded Models（AGNES_MODELS）
+ *   - Response Normalization（Agnes Responses API → Chat Completions）
+ *
+ * ❌ 不负责：
+ *   - Credential CRUD / 解析（由 api-key-store.ts 提供）
+ *   - BaseURL 规范化（由 lib/normalize-base-url.ts 提供）
+ *   - 模型价格元数据（由 lib/model-catalog.ts 提供）
+ *   - Workspace Scope 的 Pi ModelRuntime（由 lib/model-discovery.ts 提供）
+ *
+ * =============================================================================
+ * Scope 边界
+ * =============================================================================
+ * 本文件属于 User Scope，服务于 /api/ai/models（用户可用的 AI 模型）
+ *
+ * User Scope vs Workspace Scope：
+ * - User Scope：用户个人配置的 Provider / 模型，服务 Chat / WorkAgent
+ * - Workspace Scope：Pi Runtime 的模型配置，服务 PiSubAgent
+ *
+ * Shared vs Isolated：
+ * - ✅ Shared：BaseURL Normalization、Response Normalization、discoverModelsFromAPI
+ * - ❌ Isolated：createModel（User）、Pi ModelRuntime（Workspace）
+ *
+ * =============================================================================
+ * Discovery 链路（User Scope）
+ * =============================================================================
+ * /api/ai/models
+ *   → loadUserModelsWithCache(userId)          [lib/user-models-cache.ts]
+ *   → getEnabledModels(userId)                  [registry.ts]
+ *     → getSystemCredentials()                  [api-key-store.ts]
+ *     → discoverModelsFromAPI()                 [registry.ts] ← 本文件
+ *     → getUserProviderRecords()                [api-key-store.ts]
+ *     → discoverModelsFromAPI()                 [registry.ts] ← 本文件
+ *   → 返回 ModelCatalogEntry[]
+ *
+ * =============================================================================
+ * Runtime 链路（User Scope）
+ * =============================================================================
+ * createModel(userId, modelRef)
+ *   → resolveCredential(userId, provider)        [api-key-store.ts]
+ *   → createModel()                            [registry.ts] ← 本文件
+ *   → 返回 AI SDK Model Instance
+ *
+ * =============================================================================
+ * 架构参考
+ * =============================================================================
  * - llm-gateway: credential resolver + transport per provider
  * - cc-switch: ApiFormat = anthropic | openai-chat | openai-responses
- *
- * 统一凭证链路：所有模型走 resolveCredential() → createModel()
- * SYSTEM provider（Agnes）存 DB，运行时由 ensureSystemProvider() 初始化
  */
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createDeepSeek } from "@ai-sdk/deepseek";
-import { proxyFetch, getProxyFetch } from "./agnes/proxy";
+import { getProxyFetch } from "./agnes/proxy";
+import { normalizeBaseURL } from "@/lib/normalize-base-url";
 import { resolveCredential } from "../credentials/api-key-store";
 import { getUserProviderRecords, getSystemCredentials } from "../credentials/api-key-store";
 import type { ModelCatalogEntry, ApiFormat } from "./types";
 import { inferApiFormat } from "./types";
+import { loadModelsDevCatalog, type ModelCatalogEntry as ModelsDevCatalogEntry } from "@/lib/model-catalog";
 
 export type { ModelCatalogEntry, ApiFormat };
-
-// ---------------------------------------------------------------------------
-// baseURL normalization — exported so api-key-store can use it
-// ---------------------------------------------------------------------------
-export function normalizeBaseURL(baseURL: string): string {
-  const trimmed = baseURL.replace(/\/$/, "");
-  if (!trimmed.includes("/v1")) {
-    return `${trimmed}/v1`;
-  }
-  return trimmed;
-}
 
 // ---------------------------------------------------------------------------
 // Response normalization
@@ -79,13 +120,16 @@ function withResponseNormalization(
           model: parsed.model,
           messagesCount: Array.isArray(parsed.messages) ? parsed.messages.length : 0,
           messages: Array.isArray(parsed.messages)
-            ? parsed.messages.map((m: any, i: number) => ({
-                i,
-                role: m.role,
-                contentType: Array.isArray(m.content)
-                  ? m.content.map((p: any) => p.type ?? "unknown").join(",")
-                  : typeof m.content,
-              }))
+            ? parsed.messages.map((m: unknown, i: number) => {
+                const message = m as { role?: unknown; content?: unknown };
+                return {
+                  i,
+                  role: message.role,
+                  contentType: Array.isArray(message.content)
+                    ? message.content.map((p) => (p as { type?: unknown }).type ?? "unknown").join(",")
+                    : typeof message.content,
+                };
+              })
             : [],
         };
         console.log("[DEBUG:fetch] Agnes /chat/completions request:", JSON.stringify(summary));
@@ -95,18 +139,6 @@ function withResponseNormalization(
     return normalizeResponse(res);
   };
 }
-
-// ---------------------------------------------------------------------------
-// Known provider defaults — used when user doesn't specify a custom baseURL
-// ---------------------------------------------------------------------------
-const KNOWN_DEFAULTS: Record<string, string> = {
-  deepseek: "https://api.deepseek.com",
-  openai: "https://api.openai.com/v1",
-  anthropic: "https://api.anthropic.com",
-  groq: "https://api.groq.com/openai/v1",
-  openrouter: "https://openrouter.ai/api/v1",
-  together: "https://api.together.xyz/v1",
-};
 
 // ---------------------------------------------------------------------------
 // Hardcoded providers — models defined in code, skip dynamic discovery
@@ -183,17 +215,6 @@ const AGNES_MODELS: ModelCatalogEntry[] = [
     ownerType: "SYSTEM",
   },
 ];
-
-// ---------------------------------------------------------------------------
-// Get the effective baseURL for a user provider
-// ---------------------------------------------------------------------------
-export function getEffectiveBaseURL(
-  provider: string,
-  customBaseURL?: string | null
-): string {
-  const raw = customBaseURL?.trim() || KNOWN_DEFAULTS[provider] || `https://api.${provider}.com/v1`;
-  return normalizeBaseURL(raw);
-}
 
 // ---------------------------------------------------------------------------
 // Dynamic model discovery — fetches /v1/models from the provider's API
@@ -275,27 +296,47 @@ export async function discoverModelsFromAPI(options: {
   }));
 }
 
-/**
- * Infer capabilities from model ID string.
- * This is a heuristic — the real capabilities come from provider docs.
- */
-function inferCapabilities(modelId: string): ModelCatalogEntry["capabilities"] {
-  const lower = modelId.toLowerCase();
-  if (lower.includes("image") || lower.includes("wan2.7") || lower.includes("dall") || lower.includes("flux"))
-    return ["image"];
-  if (lower.includes("video") || lower.includes("wan-video"))
-    return ["video"];
-  if (lower.includes("audio") || lower.includes("tts") || lower.includes("realtime") || lower.includes("asr"))
-    return ["audio"];
-  if (lower.includes("vision") || lower.includes("gpt-4o") || lower.includes("claude-3-opus"))
-    return ["vision"];
-  if (lower.includes("reasoner") || lower.includes("o1") || lower.includes("deepseek-r1"))
-    return ["reasoning"];
-  if (lower.includes("flash") || lower.includes("fast") || lower.includes("mini") || lower.includes("gpt-4o-mini"))
-    return ["fast"];
-  if (lower.includes("gpt-4") || lower.includes("claude-3") || lower.includes("sonnet"))
-    return ["strong"];
-  return ["standard"];
+import { inferCapabilities } from "@/features/ai/llm/capabilities";
+
+// ---------------------------------------------------------------------------
+// Catalog metadata enrichment（models.dev）
+// Stage 6：为 /api/ai/models 追加可选元数据 contextWindow?/reasoning?，向后兼容。
+// 目录不可用时静默降级，不阻塞模型可用性。
+// ---------------------------------------------------------------------------
+
+function findCatalogEntry(
+  catalog: readonly ModelsDevCatalogEntry[],
+  provider: string,
+  modelName: string,
+): ModelsDevCatalogEntry | undefined {
+  const normalizedProvider = provider.toLowerCase();
+  const normalizedModel = modelName.toLowerCase();
+  return catalog.find((entry) =>
+    entry.providerId.toLowerCase() === normalizedProvider && entry.id.toLowerCase() === normalizedModel,
+  ) ?? catalog.find((entry) => entry.id.toLowerCase() === normalizedModel);
+}
+
+async function enrichWithCatalogMetadata(models: ModelCatalogEntry[]): Promise<ModelCatalogEntry[]> {
+  if (models.length === 0) return models;
+  let catalog: ModelsDevCatalogEntry[];
+  try {
+    catalog = await loadModelsDevCatalog();
+  } catch (error) {
+    console.warn("[registry] models.dev catalog unavailable, skipping metadata enrichment:", error instanceof Error ? error.message : String(error));
+    return models;
+  }
+
+  return models.map((model) => {
+    if (model.contextWindow !== undefined && model.reasoning !== undefined) return model;
+    const match = findCatalogEntry(catalog, model.provider ?? "", model.modelName);
+    if (!match) return model;
+    return {
+      ...model,
+      contextWindow: model.contextWindow ?? match.contextWindow,
+      reasoning: model.reasoning ?? match.reasoning,
+      maxTokens: model.maxTokens ?? match.maxTokens,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -307,24 +348,27 @@ export async function getEnabledModels(userId?: string): Promise<ModelCatalogEnt
 
   // 1. SYSTEM providers — ROOT-configured default providers (discovered dynamically)
   const systemCreds = await getSystemCredentials();
-  for (const cred of systemCreds) {
-    systemProviderSet.add(cred.provider);
-    // Hardcoded providers skip dynamic discovery — they have their own model lists
-    if (isHardcodedProvider(cred.provider)) continue;
-    try {
-      const models = await discoverModelsFromAPI({
-        provider: cred.provider,
-        baseURL: cred.baseURL,
-        apiKey: cred.apiKey,
-        transport: cred.transport,
-        ownerType: "SYSTEM",
-      });
-      console.log(`[getEnabledModels] SYSTEM provider "${cred.provider}": discovered ${models.length} models`, models.map((m) => m.modelName));
-      enabledModels.push(...models);
-    } catch (err) {
-      console.warn(`[registry] SYSTEM provider "${cred.provider}" model discovery failed:`, err instanceof Error ? err.message : String(err));
-    }
-  }
+
+  // 1a. Parallel HTTP discovery for all SYSTEM providers (hardcoded providers excluded)
+  const systemDiscoveryPromises = systemCreds
+    .filter((cred) => !isHardcodedProvider(cred.provider))
+    .map(async (cred) => {
+      systemProviderSet.add(cred.provider);
+      try {
+        const models = await discoverModelsFromAPI({
+          provider: cred.provider,
+          baseURL: cred.baseURL,
+          apiKey: cred.apiKey,
+          transport: cred.transport,
+          ownerType: "SYSTEM",
+        });
+        console.log(`[getEnabledModels] SYSTEM provider "${cred.provider}": discovered ${models.length} models`, models.map((m) => m.modelName));
+        return { kind: "ok" as const, models };
+      } catch (err) {
+        console.warn(`[registry] SYSTEM provider "${cred.provider}" model discovery failed:`, err instanceof Error ? err.message : String(err));
+        return { kind: "err" as const, provider: cred.provider, error: err };
+      }
+    });
 
   // 2. Agnes hardcoded models (always available as fallback)
   for (const model of AGNES_MODELS) {
@@ -334,29 +378,34 @@ export async function getEnabledModels(userId?: string): Promise<ModelCatalogEnt
   }
 
   // 3. User providers — dynamically discover models from their API
+  let userProviders: Awaited<ReturnType<typeof getUserProviderRecords>> = [];
   if (userId) {
-    const userProviders = await getUserProviderRecords(userId);
-    for (const record of userProviders) {
-      // Skip hardcoded providers (e.g. agnes)
-      if (isHardcodedProvider(record.provider)) continue;
+    userProviders = await getUserProviderRecords(userId);
+  }
 
-      const userCred = await resolveCredential(userId, record.provider);
-      if (!userCred) continue;
-
-      // If SYSTEM also covers this provider, compare API keys
-      if (systemProviderSet.has(record.provider)) {
+  // 3a. Resolve credentials and check deduplication in parallel
+  const userCredResults = await Promise.all(
+    userProviders
+      .filter((record) => !isHardcodedProvider(record.provider))
+      .map(async (record) => {
+        const userCred = await resolveCredential(userId!, record.provider);
+        if (!userCred) return null;
         const sysCred = systemCreds.find((c) => c.provider === record.provider);
-        if (sysCred) {
-          // Key identical → skip USER, use SYSTEM only
-          if (sysCred.apiKey === userCred.apiKey) {
-            console.log(`[getEnabledModels] USER provider "${record.provider}" skipped (same key as SYSTEM)`);
-            continue;
-          }
-          // Key different → USER overrides, mark as USER
-          console.log(`[getEnabledModels] USER provider "${record.provider}" has different key — using USER version`);
-        }
-      }
+        return { record, userCred, sysCred };
+      })
+  );
 
+  // 3b. Parallel HTTP discovery for all USER providers (deduplicated against SYSTEM)
+  const userDiscoveryPromises = userCredResults
+    .filter((r): r is NonNullable<typeof r> => r !== null)
+    .map(async ({ record, userCred, sysCred }) => {
+      if (sysCred && sysCred.apiKey === userCred.apiKey) {
+        console.log(`[getEnabledModels] USER provider "${record.provider}" skipped (same key as SYSTEM)`);
+        return null;
+      }
+      if (sysCred) {
+        console.log(`[getEnabledModels] USER provider "${record.provider}" has different key — using USER version`);
+      }
       try {
         const models = await discoverModelsFromAPI({
           provider: record.provider,
@@ -365,14 +414,29 @@ export async function getEnabledModels(userId?: string): Promise<ModelCatalogEnt
           transport: userCred.transport,
         });
         console.log(`[getEnabledModels] USER provider "${record.provider}": discovered ${models.length} models`, models.map((m) => m.modelName));
-        enabledModels.push(...models);
+        return models;
       } catch (err) {
         console.warn(`[registry] USER provider "${record.provider}" model discovery failed:`, err instanceof Error ? err.message : String(err));
+        return null;
       }
+    });
+
+  // Resolve all discovery promises in parallel
+  const allDiscoveryResults = await Promise.all([
+    ...systemDiscoveryPromises,
+    ...userDiscoveryPromises,
+  ]);
+
+  // Collect successful results
+  for (const result of allDiscoveryResults) {
+    if (Array.isArray(result)) {
+      enabledModels.push(...result);
+    } else if (result?.kind === "ok") {
+      enabledModels.push(...result.models);
     }
   }
 
-  return enabledModels;
+  return enrichWithCatalogMetadata(enabledModels);
 }
 
 // ---------------------------------------------------------------------------

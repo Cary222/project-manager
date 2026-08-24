@@ -1,6 +1,6 @@
 import { AppShellWithSuspense } from "@/shared/ui/AppShell";
 import { SimplePageHeader } from "@/shared/ui/headers";
-import AiChatPage from "@/features/ai/ui/AiChatPage";
+import AiChatPage from "@/features/ai/ui/ai-chat/AiChatPage";
 
 export default function Page() {
   return (

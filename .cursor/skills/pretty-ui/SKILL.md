@@ -330,3 +330,5 @@ const BADGE = {
   把 hex 值换到 `brand-*` / `ink-*` token，而不是直接抄 hex。
 - **全局规则**：`~/.cursor/rules/ultimate-frontend-development-guide.mdc`（架构层面）
   与本 skill 是「上层规则 + 本项目 token 落地」的组合。
+- **AI 对话 UI 参考**：[`pi-web-ui-reference`](https://github.com/badlogic/pi-mono/tree/main/mariozechner/pi-web-ui)（`~/.cursor/skills/pi-web-ui-reference/SKILL.md`）：
+  AI 对话页面改造时，**先读 pi-web-ui-reference 拿布局模式**，再读本 skill 拿颜色/圆角 token。

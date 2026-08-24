@@ -8,7 +8,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/shared/lib/permissions";
-import { synthesizeWithDashScope } from "@/features/ai/audio/tts/dashscope";
+import { synthesizeWithDashScope } from "@/features/ai/llm/providers/audio/tts/dashscope";
 import { z } from "zod";
 
 const synthesizeSchema = z.object({

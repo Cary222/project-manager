@@ -96,6 +96,9 @@ const CODING_KEYWORDS = [
   "重构", "refactor", "修复", "fix", "bug", "代码", "code",
   "实现", "implement", "新增", "add feature", "功能",
   "测试", "test", "单元测试", "接口", "api", "模块",
+  "读取", "read", "写入", "write", "创建", "create", "删除", "delete",
+  "文件", "file", "package.json", "查看", "检查", "check",
+  "修改", "modify", "更新", "update", "编辑", "edit",
 ];
 
 function isCodingTask(input: string): boolean {
@@ -137,6 +140,7 @@ async function executeCodingNode(state: WorkAgentState): Promise<Partial<WorkAge
       prompt: userInput,
       workspace: process.cwd(),
       contextFiles: [],
+      userId: state.userId, // 传递 userId 到 Pi Runtime
     };
 
     // 4. 启动 Pi session（Phase 2: mock）

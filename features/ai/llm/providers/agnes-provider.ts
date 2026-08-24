@@ -8,7 +8,7 @@
  */
 import { resolveCredentialWithFallback } from "../credentials/api-key-store";
 import { AGNES_API_BASE_URL, getProxyFetch } from "./agnes/proxy";
-import { normalizeBaseURL } from "./registry";
+import { normalizeBaseURL } from "@/lib/normalize-base-url";
 
 export const AGNES_PROVIDER = "agnes";
 

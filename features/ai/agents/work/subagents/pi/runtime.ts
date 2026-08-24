@@ -74,6 +74,18 @@ export interface PiRunResult {
 
 export interface PiRuntime {
   /**
+   * 注册业务工具到 Runtime
+   * 
+   * Phase 4: 支持加载 ProjectHub Extension
+   */
+  registerTool(tool: unknown): void;
+  
+  /**
+   * 获取已注册的工具列表
+   */
+  getRegisteredTools(): string[];
+  
+  /**
    * 启动新 run（或恢复 session）
    */
   start(input: PiRunInput): Promise<PiRunHandle>;

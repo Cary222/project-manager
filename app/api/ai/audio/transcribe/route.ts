@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireSession } from "@/shared/lib/permissions";
-import { transcribeWithDashScope } from "@/features/ai/audio/stt/dashscope";
+import { transcribeWithDashScope } from "@/features/ai/llm/providers/audio/stt/dashscope";
 
 const TranscribeSchema = z.object({
   audio: z.string(), // base64 编码的音频数据

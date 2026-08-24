@@ -4,6 +4,7 @@ import { prisma } from "@/shared/db/client";
 import { Prisma } from "@prisma/client";
 import { resolveCredential, resolveCredentialWithFallback } from "./credentials/api-key-store";
 import { getProxyFetch, AGNES_API_BASE_URL } from "./providers/agnes/proxy";
+import { resolveModelRuntimeConfig } from "./model-runtime-config";
 
 const AGNES_MODEL = "agnes-2.0-flash";
 const AGNES_PROVIDER = "agnes";
@@ -84,6 +85,17 @@ async function callWithUserModel(
   const fetchFn = cred.transport === "proxy" ? (getProxyFetch() ?? globalThis.fetch) : globalThis.fetch;
   const chatURL = `${cred.baseURL.replace(/\/$/, "")}/chat/completions`;
 
+  // Stage 6：User Scope Runtime Config 字段级覆盖（无偏好时保持原默认 0.3/2048）
+  let temperature = 0.3;
+  let maxTokens = 2048;
+  try {
+    const runtimeConfig = await resolveModelRuntimeConfig(userId, modelRef);
+    if (runtimeConfig.temperature !== undefined) temperature = runtimeConfig.temperature;
+    if (runtimeConfig.maxTokens !== undefined) maxTokens = runtimeConfig.maxTokens;
+  } catch (error) {
+    console.warn(`[summarizer] resolveModelRuntimeConfig failed for "${modelRef}":`, error instanceof Error ? error.message : String(error));
+  }
+
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -103,8 +115,8 @@ async function callWithUserModel(
           model,
           messages,
           stream: false,
-          temperature: 0.3,
-          max_tokens: 2048,
+          temperature,
+          max_tokens: maxTokens,
         }),
       });
 

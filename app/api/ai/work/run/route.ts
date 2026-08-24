@@ -49,7 +49,9 @@ export async function POST(request: NextRequest) {
     };
 
     // Phase 2: 使用 graph.stream() 返回 SSE
+    console.log('[WorkAgent API] Creating graph stream');
     const stream = await graph.stream(initialState);
+    console.log('[WorkAgent API] Graph stream created');
 
     // Create SSE stream
     const encoder = new TextEncoder();
@@ -59,22 +61,28 @@ export async function POST(request: NextRequest) {
 
     const stream_ = new ReadableStream({
       async start(controller) {
+        console.log('[WorkAgent API] ReadableStream started');
         // Helper to send SSE event
         const sendEvent = (type: string, payload: unknown) => {
           try {
             const data = JSON.stringify({ type, payload });
+            console.log('[WorkAgent API] Sending SSE event:', type);
             controller.enqueue(encoder.encode(`data: ${data}\n\n`));
-          } catch {
+          } catch (err) {
+            console.error('[WorkAgent API] Failed to send event:', err);
             // controller closed, ignore
           }
         };
 
         try {
           // 1. 发送 run_started 事件
+          console.log('[WorkAgent API] Sending run_started');
           sendEvent("run_started", { runId });
 
           // 2. 流式处理 graph 事件
+          console.log('[WorkAgent API] Starting to iterate graph stream');
           for await (const chunk of stream) {
+            console.log('[WorkAgent API] Received chunk:', Object.keys(chunk));
             // 检查是否已取消
             if (abortController.signal.aborted) {
               break;
@@ -83,13 +91,16 @@ export async function POST(request: NextRequest) {
             // dispatch 阶段：获取 taskType
             if (chunk.dispatch) {
               const dispatchResult = chunk.dispatch;
+              console.log('[WorkAgent API] Dispatch result:', JSON.stringify(dispatchResult, null, 2));
               sendEvent("dispatch_result", {
                 taskType: dispatchResult.taskType,
                 workflowType: dispatchResult.workflowType,
               });
 
               // 如果是 coding 类任务，启动 Pi SubAgent 并发送 SSE 事件
+              console.log('[WorkAgent API] Checking taskType:', dispatchResult.taskType, '=== "coding"?', dispatchResult.taskType === "coding");
               if (dispatchResult.taskType === "coding") {
+                console.log('[WorkAgent API] Starting handleCodingTask');
                 await handleCodingTask(
                   runId,
                   session.user.id,
@@ -97,6 +108,9 @@ export async function POST(request: NextRequest) {
                   sendEvent,
                   abortController.signal
                 );
+                console.log('[WorkAgent API] handleCodingTask completed');
+              } else {
+                console.log('[WorkAgent API] Task type is not "coding", skipping Pi SDK execution');
               }
             }
 
@@ -180,10 +194,17 @@ async function handleCodingTask(
     };
 
     // 创建 SubAgentInput
+    // Phase 5: 传递 userId 让 Pi SDK 从用户配置中读取模型
     const subAgentInput = {
       prompt: userInput,
       workspace: process.cwd(),
       contextFiles: [],
+      userId, // 用于从用户配置读取模型和凭证
+      provider: "deepseek", // 默认使用 deepseek
+      model: {
+        provider: "deepseek",
+        name: "deepseek-v4-flash",
+      },
     };
 
     // 启动 Pi session
@@ -223,8 +244,22 @@ async function handleCodingTask(
 
 /**
  * 将 SubAgentEvent 映射为 SSE 事件类型
+ * Pi SDK 事件结构: { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '字', content: '完整文本' } }
  */
-function mapSubAgentEventToSSEType(event: SubAgentEvent): string {
+function mapSubAgentEventToSSEType(event: SubAgentEvent | { type: string; [key: string]: unknown }): string {
+  // 特殊处理 Pi SDK 的 message_update 事件（包含 assistantMessageEvent）
+  if (event.type === "message_update") {
+    const assistantEvent = event.assistantMessageEvent as { type?: string } | undefined;
+    if (assistantEvent?.type === "text_delta" || assistantEvent?.type === "text_end") {
+      return "pi_assistant_message";
+    }
+    if (assistantEvent?.type === "tool_call") {
+      return "pi_tool_call";
+    }
+    // 其他类型的 message_update 忽略
+    return "pi_ignore";
+  }
+
   switch (event.type) {
     case "run_started":
       return "pi_run_started";

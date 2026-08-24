@@ -6,6 +6,7 @@ import type { ModelMessage, UserModelMessage, AssistantModelMessage, TextPart, F
 import { createModel } from "@/features/ai/llm/providers/registry";
 import { ensureSystemProvider } from "@/features/ai/llm/providers/init";
 import { selectModel } from "@/features/ai/llm/model-routing";
+import { resolveModelRuntimeConfig, buildReasoningProviderOptions, type ModelRuntimeConfig } from "@/features/ai/llm/model-runtime-config";
 import { isUserActivityQuery } from "./detect-intent";
 import { type MultimodalPart } from "@/features/ai/core/context/messages/multimodal-builder";
 import type { UserContent } from "ai";
@@ -33,10 +34,32 @@ async function callWithDynamicModel(
     const modelRef = `${providerId}:${modelName}`;
     console.log(`[generateResponseNode] calling model: providerId=${providerId} modelName=${modelName} modelRef=${modelRef}`);
 
+    // Stage 6：Selection（selectModel）与 Runtime Configuration（resolveModelRuntimeConfig）分离。
+    // 解析失败时降级为无覆盖（行为与接入前完全一致）。
+    let runtimeConfig: ModelRuntimeConfig | null = null;
+    try {
+      runtimeConfig = await resolveModelRuntimeConfig(userId, modelRef);
+    } catch (error) {
+      console.warn(`[generateResponseNode] resolveModelRuntimeConfig failed for "${modelRef}":`, error instanceof Error ? error.message : String(error));
+    }
+
     const model = await createModel({ userId, modelRef });
     console.log(`[generateResponseNode] using model instance for "${modelRef}", calling generateText...`);
-    
-    const result = await generateText({ model, system: systemPrompt, messages });
+
+    // Stage 7：reasoning level → provider-specific 请求参数（anthropic thinking / openai reasoningEffort）
+    const providerOptions = runtimeConfig ? buildReasoningProviderOptions(runtimeConfig) : undefined;
+
+    const result = await generateText({
+      model,
+      system: systemPrompt,
+      messages,
+      // 字段级覆盖：仅当用户偏好存在时传入对应字段
+      ...(runtimeConfig?.temperature !== undefined ? { temperature: runtimeConfig.temperature } : {}),
+      ...(runtimeConfig?.maxTokens !== undefined ? { maxOutputTokens: runtimeConfig.maxTokens } : {}),
+      ...(providerOptions
+        ? { providerOptions: providerOptions as Parameters<typeof generateText>[0]["providerOptions"] }
+        : {}),
+    });
     
     console.log(`[DEBUG:H2:callWithDynamicModel] generateText called with messages.length=${messages.length} message[0].role=${messages[0]?.role} message[last].role=${messages[messages.length-1]?.role}`);
     console.log(`[DEBUG:H2:callWithDynamicModel] message[last].content types:`, (() => { const c = messages[messages.length-1]?.content; return Array.isArray(c) ? c.map((p: any) => ({ type: p.type })) : "string"; })());

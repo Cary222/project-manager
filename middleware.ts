@@ -10,6 +10,7 @@ export default auth((req) => {
   const isRegisterApi = pathname === "/api/register";
   const isKnowledgeApi = pathname.startsWith("/api/knowledge");
   const isAdmin = pathname.startsWith("/admin");
+  
   const loginUrl = req.nextUrl.clone();
   loginUrl.pathname = "/login";
   loginUrl.search = "";
@@ -17,7 +18,16 @@ export default auth((req) => {
   homeUrl.pathname = "/";
   homeUrl.search = "";
 
-  if (isApiAuth || isRegisterApi || isKnowledgeApi || pathname.startsWith("/api/ai/geo")) return NextResponse.next();
+  // 跳过认证检查的路由
+  if (isApiAuth || isRegisterApi || isKnowledgeApi || pathname.startsWith("/api/ai/geo")) {
+    return NextResponse.next();
+  }
+  
+  // AI Workspace 页面需要登录
+  const isAiWorkspace = pathname.startsWith("/ai-workspace");
+  if (isAiWorkspace && !isLoggedIn) {
+    return NextResponse.redirect(loginUrl);
+  }
 
   if (!isLoggedIn && !isLoginPage) {
     return NextResponse.redirect(loginUrl);

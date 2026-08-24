@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Toaster } from "sonner";
-import { AiFloatingButton } from "@/features/ai/ui/AiFloatingButton";
+import { AiFloatingButton } from "@/features/ai/ui/ai-chat/AiFloatingButton";
 import {
   getNotificationsAction,
   getUnreadNotificationCountAction,
@@ -15,6 +15,7 @@ import {
 } from "@/features/admin/notifications";
 import { KnowledgeSearchPanel } from "@/features/knowledge/ui/KnowledgeSearchPanel";
 import { SearchInput } from "@/shared/ui/SearchInput";
+import { useInitialSidebarCollapsed } from "@/shared/ui/SidebarStateContext";
 import {
   IconBell,
   IconChevronDown,
@@ -25,8 +26,8 @@ import {
   IconPkm,
   IconProject,
   IconReport,
-  IconSearch,
   IconSettings,
+  IconSparkles,
   IconTask,
   IconTeam,
 } from "@/shared/ui/icons";
@@ -44,7 +45,13 @@ const NAV_ITEMS: NavItem[] = [
     href: "/ai",
     label: "AI 助手",
     icon: IconTask,
-    match: (p) => p.startsWith("/ai"),
+    match: (p) => p.startsWith("/ai") && !p.startsWith("/ai-workspace"),
+  },
+  {
+    href: "/ai-workspace",
+    label: "AI Workspace",
+    icon: IconSparkles,
+    match: (p) => p.startsWith("/ai-workspace"),
   },
   {
     href: "/projects",
@@ -93,12 +100,21 @@ function timeAgo(value: string) {
   return `${days} 天前`;
 }
 
+const SIDEBAR_STORAGE_KEY = 'app-sidebar-collapsed';
+const SIDEBAR_INTERACTED_KEY = `${SIDEBAR_STORAGE_KEY}-interacted`;
+
 export function AppShell({
   children,
   header,
+  sidebarCollapsed: sidebarCollapsedProp,
+  onSidebarCollapsedChange,
 }: {
   children: ReactNode;
   header?: ReactNode;
+  /** 半收缩模式（只显示图标），不传则自动从 localStorage 恢复 */
+  sidebarCollapsed?: boolean;
+  /** 半收缩状态变化回调 */
+  onSidebarCollapsedChange?: (collapsed: boolean) => void;
 }) {
   const { data: session } = useSession();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -110,9 +126,61 @@ export function AppShell({
   const [unreadCount, setUnreadCount] = useState(0);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
   const [notificationsLoaded, setNotificationsLoaded] = useState(false);
+
+  // 内部状态：半收缩模式
+  // SSR 阶段用 context（根 layout 从 cookie 读取）作为初始值，客户端首次渲染读 localStorage，
+  // 二者通过 handleSidebarChange 双写保持同步，确保 SSR 首帧即正确、无 hydration mismatch。
+  const initialCollapsedFromContext = useInitialSidebarCollapsed();
+  const [sidebarCollapsedState, setSidebarCollapsedState] = useState(() => {
+    if (typeof window === 'undefined') return initialCollapsedFromContext;
+    try {
+      return localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true';
+    } catch {
+      return initialCollapsedFromContext;
+    }
+  });
+  const [sidebarInteractedState, setSidebarInteractedState] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return localStorage.getItem(SIDEBAR_INTERACTED_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  // firstRenderRef：首帧渲染时 showTransition=false，防止页面加载/切 tab 时触发动画
+  const firstRenderRef = useRef(true);
+
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const notificationRef = useRef<HTMLDivElement | null>(null);
   const globalSearchRef = useRef<HTMLDivElement | null>(null);
+
+  // isCollapsed：优先外部 prop，否则从内部状态恢复
+  const isCollapsed = sidebarCollapsedProp !== undefined
+    ? sidebarCollapsedProp
+    : sidebarCollapsedState;
+
+  // 持久化状态：localStorage（客户端即时读）+ cookie（服务端 SSR 读）
+  const handleSidebarChange = (collapsed: boolean) => {
+    setSidebarCollapsedState(collapsed);
+    try {
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, String(collapsed));
+      localStorage.setItem(SIDEBAR_INTERACTED_KEY, 'true');
+      document.cookie = `${SIDEBAR_STORAGE_KEY}=${collapsed}; path=/; max-age=31536000; SameSite=Lax`;
+    } catch {
+      // localStorage/cookie 不可用时仅更新内存状态
+    }
+    setSidebarInteractedState(true);
+    onSidebarCollapsedChange?.(collapsed);
+  };
+
+  // 仅在用户主动交互后才启用过渡动画；首帧禁用动画
+  const showTransition = !firstRenderRef.current && sidebarInteractedState;
+
+  // 首帧渲染结束后（不触发 re-render），后续用户交互才启用动画
+  useEffect(() => {
+    firstRenderRef.current = false;
+  }, []);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -185,45 +253,85 @@ export function AppShell({
       ) : null}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r border-ink-200 bg-white transition-transform lg:static lg:translate-x-0 ${
-          mobileOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
+        className={`fixed inset-y-0 left-0 z-40 flex flex-col border-r border-ink-200 bg-white lg:static lg:translate-x-0 ${
+          mobileOpen ? "translate-x-0 w-60" : "-translate-x-full"
+        } ${isCollapsed ? "lg:w-16 lg:shrink-0" : "w-60"} ${showTransition ? "transition-all duration-200" : ""}`}
       >
-        <div className="flex h-16 items-center gap-2 px-5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white shadow-sm">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-            </svg>
-          </div>
-          <span className="text-base font-semibold tracking-tight">ProjectHub</span>
+        <div className={`flex h-16 items-center gap-2 border-b border-ink-200 ${isCollapsed ? "lg:justify-center lg:px-0 px-5" : "px-5"}`}>
+          {!isCollapsed ? (
+            <>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white shadow-sm">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                </svg>
+              </div>
+              <span className="flex-1 text-base font-semibold tracking-tight">ProjectHub</span>
+              <button
+                type="button"
+                onClick={() => setMobileOpen(false)}
+                className="rounded-lg p-1.5 text-ink-400 transition hover:bg-ink-100 hover:text-ink-600 lg:hidden"
+                aria-label="关闭侧边栏"
+              >
+                <IconMenu />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSidebarChange(true)}
+                className="hidden lg:flex rounded-lg p-1.5 text-ink-400 transition hover:bg-ink-100 hover:text-ink-600"
+                aria-label="收缩侧边栏"
+              >
+                <IconMenu />
+              </button>
+            </>
+          ) : (
+            <div className="hidden lg:flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white shadow-sm">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+              </svg>
+            </div>
+          )}
         </div>
 
-        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
-          <SidebarNavClient onNavigate={() => setMobileOpen(false)} />
+        <nav className={`flex-1 space-y-1 overflow-y-auto py-2 ${isCollapsed ? "lg:px-2 px-3" : "px-3"}`}>
+          <SidebarNavClient
+            onNavigate={() => setMobileOpen(false)}
+            collapsed={isCollapsed}
+          />
         </nav>
 
-        <div className="border-t border-ink-200 p-3">
+        <div className={`border-t border-ink-200 p-3 ${isCollapsed ? "lg:px-2" : ""}`}>
           <button
             type="button"
             onClick={() => signOut({ redirectTo: "/login" })}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-ink-500 transition hover:bg-ink-100 hover:text-danger"
+            className={`flex items-center gap-3 rounded-lg py-2.5 text-sm font-medium text-ink-500 transition hover:bg-ink-100 hover:text-danger ${isCollapsed ? "lg:justify-center lg:px-0 px-3 w-full" : "px-3 w-full"}`}
           >
-            <IconLogout className="text-ink-400" />
-            <span>退出登录</span>
+            <IconLogout className="text-ink-400 shrink-0" />
+            {!isCollapsed && <span>退出登录</span>}
           </button>
         </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-ink-200 bg-white/90 px-4 backdrop-blur sm:px-6">
-          <button
-            type="button"
-            className="rounded-lg p-2 text-ink-500 hover:bg-ink-100 lg:hidden"
-            onClick={() => setMobileOpen(true)}
-            aria-label="打开菜单"
-          >
-            <IconMenu />
-          </button>
+          {isCollapsed ? (
+              <button
+                type="button"
+                onClick={() => handleSidebarChange(false)}
+                className="hidden lg:flex rounded-lg p-2 text-ink-500 hover:bg-ink-100"
+                aria-label="展开侧边栏"
+              >
+              <IconMenu />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="rounded-lg p-2 text-ink-500 hover:bg-ink-100 lg:hidden"
+              onClick={() => setMobileOpen(true)}
+              aria-label="打开菜单"
+            >
+              <IconMenu />
+            </button>
+          )}
 
           <div className="min-w-0 flex-1 shrink-0">{header}</div>
 
@@ -425,9 +533,11 @@ export function AppShell({
 function SidebarNav({
   pathname,
   onNavigate,
+  collapsed = false,
 }: {
   pathname: string;
   onNavigate: () => void;
+  collapsed?: boolean;
 }) {
   return (
     <>
@@ -439,12 +549,13 @@ function SidebarNav({
             key={item.href}
             href={item.href}
             onClick={onNavigate}
-            className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
+            title={collapsed ? item.label : undefined}
+            className={`group flex items-center gap-3 rounded-lg py-2.5 text-sm font-medium transition ${
               active ? "bg-brand-50 text-brand-700" : "text-ink-500 hover:bg-ink-100 hover:text-ink-900"
-            }`}
+            } ${collapsed ? "lg:justify-center lg:px-0 px-3" : "px-3"}`}
           >
-            <Icon className={active ? "text-brand-600" : "text-ink-400 group-hover:text-ink-700"} />
-            <span>{item.label}</span>
+            <Icon className={`shrink-0 ${active ? "text-brand-600" : "text-ink-400 group-hover:text-ink-700"}`} />
+            {!collapsed && <span>{item.label}</span>}
           </Link>
         );
       })}
@@ -454,11 +565,13 @@ function SidebarNav({
 
 function SidebarNavClient({
   onNavigate,
+  collapsed = false,
 }: {
   onNavigate: () => void;
+  collapsed?: boolean;
 }) {
   const pathname = usePathname() || "/";
-  return <SidebarNav pathname={pathname} onNavigate={onNavigate} />;
+  return <SidebarNav pathname={pathname} onNavigate={onNavigate} collapsed={collapsed} />;
 }
 
 export function AppShellWithSuspense(props: React.ComponentProps<typeof AppShell>) {

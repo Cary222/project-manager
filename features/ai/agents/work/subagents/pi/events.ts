@@ -201,6 +201,21 @@ export function translateSingleEvent(piEvent: PiEvent, runId: string): SubAgentE
         content: (piEvent.content as string) ?? "",
         delta: piEvent.delta as string | undefined,
       };
+    
+    // ─── Pi SDK 流式消息更新事件（text_delta）────────
+    case "message_update": {
+      const event = piEvent as any;
+      if (event.assistantMessageEvent?.type === "text_delta") {
+        return {
+          type: "assistant_message",
+          runId,
+          content: event.assistantMessageEvent.delta ?? "",
+          delta: event.assistantMessageEvent.delta,
+        };
+      }
+      // 其他类型的 message_update（如 text_end）忽略
+      return null;
+    }
 
     // ─── 工具调用事件 ────────────────────────────────
     case "tool_call":

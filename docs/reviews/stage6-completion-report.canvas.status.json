@@ -1,0 +1,4 @@
+{
+  "status": "compile-error",
+  "diagnosticsText": "Canvas local images must use a path relative to the Canvas file. Temporary absolute paths are supported only for local Canvas files."
+}

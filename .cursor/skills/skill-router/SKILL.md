@@ -52,6 +52,7 @@ description: Cursor 生态 Skill 路由与能力地图。ProjectHub 4 子代理�
 ## A. ProjectHub 专属开发（7 个）— **fullstack-developer 主战场**
 
 > 这些是项目核心 skill，fullstack-developer 必须熟。
+> **所有路径相对于项目根目录 `/Users/vastgui/Desktop/project-manager/`**
 
 | Skill | 路径 | 触发词 | 必读/按需 | 适用任务 |
 |-------|------|--------|----------|----------|
@@ -61,7 +62,7 @@ description: Cursor 生态 Skill 路由与能力地图。ProjectHub 4 子代理�
 | **pretty-ui** | `.cursor/skills/pretty-ui/SKILL.md` | `美化 / 改好看 / 统一风格 / modern UI / 卡片 / 按钮 / 表单 / 弹窗 / 表格 / 写新页面 / 改旧页面` | **按需**（涉及 UI 时必读）| UI 改动 |
 | **feature-first** | `.cursor/skills/feature-first/SKILL.md` | `FSD / feature-first / 重构 / 代码组织 / 架构升级` | **按需**（FSD 决策时读）| 架构层重构 |
 | **dev-to-doc-recap** | `.cursor/skills/dev-to-doc-recap/SKILL.md` | `帮我把这个功能写成 md / 生成复现文档 / 写知识笔记 / 总结这次实现 / 让新手能复现` | **必读**（PR 完成后 → 8 段式复现文档）| 收尾留档 |
-| **git-commit-assistant** | `~/.cursor/skills/git-commit-assistant/SKILL.md` | `提交 / commit / push / 帮我 push / git add / 帮我 commit` | **必读**（用户提到提交词时第一动作）| Git 提交 |
+| **git-commit-assistant** | `/Users/vastgui/.cursor/skills/git-commit-assistant/SKILL.md` | `提交 / commit / push / 帮我 push / git add / 帮我 commit` | **必读**（用户提到提交词时第一动作）| Git 提交 |
 
 **🔗 跨引用**：
 - pm-dev + pm-ops 的"事实"统一在 L2 `PROJECT-HUB.md`（唯一真相源）
@@ -72,7 +73,8 @@ description: Cursor 生态 Skill 路由与能力地图。ProjectHub 4 子代理�
 
 ## B. AI / LLM 框架（11 个）— **fullstack-developer 开发 AI 时按需读**
 
-> 这些 skill 都在 `~/.cursor/skills/` 或 `.agents/skills/`（用户级），**优先用项目 agents skills**（更新更勤）。
+> 这些 skill 在 `.agents/skills/`（项目内，更新勤）或 `~/.cursor/skills/`（用户级，通用）。
+> **项目内 skills 优先使用 `.agents/skills/`**
 
 ### B1. LangChain 生态（5 个）
 
@@ -88,18 +90,20 @@ description: Cursor 生态 Skill 路由与能力地图。ProjectHub 4 子代理�
 
 | Skill | 路径 | 触发词 | 必读/按需 |
 |-------|------|--------|----------|
-| **dive-into-langgraph** | `~/.cursor/skills/dive-into-langgraph/SKILL.md` | `LangGraph 1.0 / ReAct / state graph / Tool integration` | **按需**（深度学习 LangGraph 时）|
+| **dive-into-langgraph** | `/Users/vastgui/.cursor/skills/dive-into-langgraph/SKILL.md` | `LangGraph 1.0 / ReAct / state graph / Tool integration` | **按需**（深度学习 LangGraph 时）|
 | **langgraph-fundamentals** | `.agents/skills/langgraph-fundamentals/SKILL.md` | `LangGraph StateGraph / 节点 / 边 / Command / Send` | **按需**（写 LangGraph 代码时）|
 | **langgraph-human-in-the-loop** | `.agents/skills/langgraph-human-in-the-loop/SKILL.md` | `interrupt() / Command(resume) / 审批 / 验证` | **按需**（HITL 时）|
 | **langgraph-persistence** | `.agents/skills/langgraph-persistence/SKILL.md` | `checkpointers / thread_id / time travel / Store` | **按需**（状态持久化时）|
 
-### B3. LLM 响应处理（1 个）
+### B3. AI 对话 UI（2 个）
 
 | Skill | 路径 | 触发词 | 必读/按需 |
 |-------|------|--------|----------|
-| **llm-streaming-response-handler** | `~/.cursor/skills/llm-streaming-response-handler/SKILL.md` | `LLM streaming / SSE / token stream / chat UI / 打字机 / 实时 AI` | **按需**（涉及 SSE 流式 UI 时）|
+| **llm-streaming-response-handler** | `/Users/vastgui/.cursor/skills/llm-streaming-response-handler/SKILL.md` | `LLM streaming / SSE / token stream / 打字机 / 实时 AI` | **按需**（涉及 SSE 流式 UI 时）|
+| **pi-web-ui-reference** | `.cursor/skills/pi-web-ui/SKILL.md` | `AI 助手 tab / 重构 chat UI / 加 artifact 面板 / 双面板布局 / 流式光标 / artifact pill` | **按需**（重构 AI 对话 UI 时）|
 
 **🔗 决策建议**：
+- **AI 对话 UI 布局**：先读 `pi-web-ui-reference`（布局灵感）→ 再读 `llm-streaming-response-handler`（SSE 流式）→ 最后读 `pretty-ui`（颜色/圆角 token）
 - **LangChain 与 LangGraph 重叠时**：`langchain-architecture` 是入口；要深挖某专题再选 B2/B3 子 skill
 - **RAG 入门**：`langchain-rag`；**RAG 调优**：`rag-retrieval`
 - **LangGraph 入门**：`langgraph-fundamentals` 或 `dive-into-langgraph`；**HITL**：`langgraph-human-in-the-loop`；**持久化**：`langgraph-persistence`
@@ -130,7 +134,7 @@ description: Cursor 生态 Skill 路由与能力地图。ProjectHub 4 子代理�
 |-------|------|--------|----------|
 | **tdd** | `.agents/skills/tdd/SKILL.md` | `TDD / 测试驱动 / red-green-refactor / 写测试优先` | **按需**（TDD 模式时）|
 | **code-review** | `.agents/skills/code-review/SKILL.md` | `code review / 审查 / Standards / Spec` | **按需**（与 code-reviewer 子代理互补）|
-| **diagnosing-bugs** | `~/.cursor/skills/diagnosing-bugs/SKILL.md` | `diagnose / debug / 排查 / 性能下降 / 异常` | **按需**（debug 时）|
+| **diagnosing-bugs** | `/Users/vastgui/.cursor/skills/diagnosing-bugs/SKILL.md` | `diagnose / debug / 排查 / 性能下降 / 异常` | **按需**（debug 时）|
 
 **🔗 决策建议**：
 - **TDD 写新功能**：`tdd`
@@ -144,7 +148,7 @@ description: Cursor 生态 Skill 路由与能力地图。ProjectHub 4 子代理�
 | Skill | 路径 | 触发词 | 必读/按需 |
 |-------|------|--------|----------|
 | **context-engineering** | `.agents/skills/context-engineering/SKILL.md` | `context 优化 / agent 输出质量下降 / session 切换 / 配置 rules` | **按需**（context 工程）|
-| **cursor-subagent-creator** | `~/.cursor/skills/cursor-subagent-creator/SKILL.md` | `创建子代理 / Cursor 子代理 / .cursor/agents/` | **按需**（建新 subagent 时）|
+| **cursor-subagent-creator** | `/Users/vastgui/.cursor/skills/cursor-subagent-creator/SKILL.md` | `创建子代理 / Cursor 子代理 / .cursor/agents/` | **按需**（建新 subagent 时）|
 | **implement** | `.agents/skills/implement/SKILL.md` | `实现 / implement / 基于规格实现` | **按需**（spec-driven 实现）|
 
 ---
@@ -153,7 +157,7 @@ description: Cursor 生态 Skill 路由与能力地图。ProjectHub 4 子代理�
 
 | Skill | 路径 | 触发词 | 必读/按需 |
 |-------|------|--------|----------|
-| **learning-progress-tracker** | `~/.cursor/skills/learning-progress-tracker/SKILL.md` | `学习进度 / 知识地图 / 已掌握 / 学习笔记` | **必读**（ai-learning-mentor 每次会话首读）|
+| **learning-progress-tracker** | `/Users/vastgui/.cursor/skills/learning-progress-tracker/SKILL.md` | `学习进度 / 知识地图 / 已掌握 / 学习笔记` | **必读**（ai-learning-mentor 每次会话首读）|
 
 ---
 
@@ -205,7 +209,8 @@ description: Cursor 生态 Skill 路由与能力地图。ProjectHub 4 子代理�
 | 必读 | 按需 |
 |------|------|
 | `skill-router`（先查现有 skill 避免重复推荐）| `cursor-subagent-creator`（用户要建新 subagent 时）|
-| `~/.cursor/skills/` 目录扫描 | |
+| `.cursor/skills/` 目录扫描 | |
+| `.agents/skills/` 目录扫描 | |
 
 ---
 
@@ -239,6 +244,9 @@ description: Cursor 生态 Skill 路由与能力地图。ProjectHub 4 子代理�
 
 用户说："SSE" / "流式" / "打字机" / "token stream"
   └→ 必读 llm-streaming-response-handler
+
+用户说："AI 助手 tab" / "重构 chat" / "加 artifact" / "双面板" / "artifact pill"
+  └→ 必读 pi-web-ui-reference
 
 用户说："生图" / "image"
   └→ 必读 ai-image-generation
@@ -277,22 +285,24 @@ description: Cursor 生态 Skill 路由与能力地图。ProjectHub 4 子代理�
 
 | 路径前缀 | 数量 | 特征 |
 |---------|------|------|
-| `.cursor/skills/` | 6 | 项目级，跟随仓库；只放项目相关（pm-dev/pm-ops/pm-testing/pretty-ui/feature-first/dev-to-doc-recap）|
+| `.cursor/skills/` | 6 | 项目级，跟随仓库；只放项目相关（pm-dev/pm-ops/pm-testing/pretty-ui/feature-first/dev-to-doc-recap/skill-router）|
 | `.agents/skills/` | 22 | 项目内 agents skills（langchain-*、多模态、tdd、code-review 等）|
-| `~/.cursor/skills/` | 14 | 用户级，全局共享；不进入项目仓库（git-commit-assistant、learning-progress-tracker 等）|
+| `/Users/vastgui/.cursor/skills/` | 5 | 用户级，全局共享；不进入项目仓库（git-commit-assistant、learning-progress-tracker、dive-into-langgraph、llm-streaming-response-handler、diagnosing-bugs、cursor-subagent-creator）|
 
 **⛔ 路径优先级**：
 1. **项目级 `.cursor/skills/`** 优先（项目定制）
 2. **项目内 `.agents/skills/`** 次之（更新勤）
-3. **用户级 `~/.cursor/skills/`** 兜底（通用）
+3. **用户级 `/Users/vastgui/.cursor/skills/`** 兜底（通用）
 
-> ProjectHub 文档（pm-dev/pm-ops/pm-testing/pretty-ui）只在 `.cursor/skills/` 下，**不要去 `~/.cursor/skills/` 找**（那里没有）。
+> **ProjectHub 文档（pm-dev/pm-ops/pm-testing/pretty-ui）只在 `.cursor/skills/` 下，**不要去 `~/.cursor/skills/` 找**（那里没有）。
+> 用户级 skills 使用绝对路径 `/Users/vastgui/.cursor/skills/`。
 
 ---
 
 ## 🔗 必读链接
 
-- L1 入口：[AGENTS.md](../../../AGENTS.md)
-- L2 事实层：[PROJECT-HUB.md](../pm-dev/PROJECT-HUB.md)
-- L3 操作层：[pm-dev/SKILL.md](../pm-dev/SKILL.md)
-- 4 子代理调用策略：[.cursor/agents/](../../agents/)
+- L1 入口：[AGENTS.md](../AGENTS.md)
+- L2 事实层：[PROJECT-HUB.md](pm-dev/PROJECT-HUB.md)
+- L3 操作层：[pm-dev/SKILL.md](pm-dev/SKILL.md)
+- 4 子代理调用策略：[.cursor/agents/](../agents/)
+- Skill 路由表：[skill-router/SKILL.md](./SKILL.md)（本文档）

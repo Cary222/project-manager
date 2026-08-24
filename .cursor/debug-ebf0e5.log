@@ -1,0 +1,11 @@
+{"sessionId":"ebf0e5","location":"route.ts:283","message":"[H-C] body parsed","data":{"inputImageIdsLength":0},"timestamp":1787379686062,"hypothesisId":"C"}
+{"sessionId":"ebf0e5","location":"route.ts:769","message":"[H-D] buildMessages result","data":{"messagesCount":2,"lastMessageContent":"你好"},"timestamp":1787379686093,"hypothesisId":"D"}
+{"sessionId":"ebf0e5","location":"buildMessages:return","message":"[H-F] buildMessages output","data":{"messagesCount":2,"messages":[{"index":0,"role":"assistant","contentType":"string"},{"index":1,"role":"user","contentType":"string"}]},"timestamp":1787379686129,"hypothesisId":"F"}
+{"sessionId":"ebf0e5","location":"route.ts:283","message":"[H-C] body parsed","data":{"inputImageIdsLength":0},"timestamp":1787379700577,"hypothesisId":"C"}
+{"sessionId":"ebf0e5","location":"route.ts:769","message":"[H-D] buildMessages result","data":{"messagesCount":4,"lastMessageContent":"我最近干了什么"},"timestamp":1787379700588,"hypothesisId":"D"}
+{"sessionId":"ebf0e5","location":"route.ts:283","message":"[H-C] body parsed","data":{"inputImageIdsLength":0},"timestamp":1787381753464,"hypothesisId":"C"}
+{"sessionId":"ebf0e5","location":"route.ts:769","message":"[H-D] buildMessages result","data":{"messagesCount":2,"lastMessageContent":"你好"},"timestamp":1787381753495,"hypothesisId":"D"}
+{"sessionId":"ebf0e5","location":"buildMessages:return","message":"[H-F] buildMessages output","data":{"messagesCount":2,"messages":[{"index":0,"role":"assistant","contentType":"string"},{"index":1,"role":"user","contentType":"string"}]},"timestamp":1787381753516,"hypothesisId":"F"}
+{"sessionId":"ebf0e5","location":"route.ts:283","message":"[H-C] body parsed","data":{"inputImageIdsLength":0},"timestamp":1787391033766,"hypothesisId":"C"}
+{"sessionId":"ebf0e5","location":"route.ts:769","message":"[H-D] buildMessages result","data":{"messagesCount":4,"lastMessageContent":"你好"},"timestamp":1787391033796,"hypothesisId":"D"}
+{"sessionId":"ebf0e5","location":"buildMessages:return","message":"[H-F] buildMessages output","data":{"messagesCount":4,"messages":[{"index":0,"role":"assistant","contentType":"string"},{"index":1,"role":"user","contentType":"string"},{"index":2,"role":"assistant","contentType":"string"},{"index":3,"role":"user","contentType":"string"}]},"timestamp":1787391033831,"hypothesisId":"F"}
