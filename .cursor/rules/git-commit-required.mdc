@@ -1,7 +1,5 @@
 ---
-description: 强制 agent 在执行 git commit / git push / git add 之前,先 Read ~/.cursor/skills/git-commit-assistant/SKILL.md 并完整执行其 9 步流程。任何 agent 协助的提交都必须遵循不可降级的三条纪律:必问工单单号(用户原话未含 #XXXXX 时)、必带 agent 标识(末尾追加 Co-authored-by: Cursor <cursoragent@cursor.com>)、双远端禁止默认推 github(默认 origin 局域网裸仓)。
-globs: "**/*"
-alwaysApply: true
+disable-model-invocation: false
 ---
 
 # Git Commit Required Rule (Cursor Agent 强制纪律)

@@ -871,6 +871,7 @@ model UserApiKey {
   keyLast4     String // 明文后 4 位，用于 UI 显示（如 "sk-...abcd"）
   keyHash      String // SHA-256 hash，用于去重校验（hex 编码）
   lastUsedAt   DateTime?
+  enabledModelIds Json? // 模型可用性白名单（JSON string[]，原始 model id）；null = 不过滤。由导入流程可用性检测生成
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   deletedAt    DateTime? // 软删除

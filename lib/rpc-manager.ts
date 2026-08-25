@@ -7,6 +7,7 @@ import { resolve } from "path";
 import { validateAgentImages } from "./image-attachments";
 import { invalidateModelsCache } from "./models-cache";
 import { resetModelRuntime } from "./model-discovery";
+import { resolveForkLeaf } from "./fork-leaf";
 import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
 import {
   createProjectCommandBashExtension,
@@ -18,6 +19,7 @@ import { getRegistry } from "./session-registry";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
 import { resolveCredentialWithFallback } from "@/features/ai/llm/credentials/api-key-store";
+import { getLocalModels } from "@/lib/unified-model-registry";
 import { prisma } from "@/shared/db/client";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
@@ -206,14 +208,30 @@ async function injectProviderCredential(
   const sdkProvider = toSdkProviderName(provider);
   const cred = await resolveCredentialWithFallback(userId ?? "system", provider);
 
-  if (!cred) {
-    return `No API key configured for provider "${provider}". ` +
-      `Please configure your API key in Settings → AI Configuration.`;
+  if (cred) {
+    await modelRuntime.setRuntimeApiKey(sdkProvider, cred.apiKey);
+    return undefined;
   }
 
-  await modelRuntime.setRuntimeApiKey(sdkProvider, cred.apiKey);
+  // No DB credential (Site provider / UserApiKey). Fall back to models.json: a
+  // local provider's apiKey lives in ~/.pi/agent/models.json and is read by the
+  // Pi runtime directly. Inject it so set_model works for local-only providers.
+  try {
+    const local = await getLocalModels();
+    const localKey = local.providers?.[provider]?.apiKey;
+    if (localKey) {
+      await modelRuntime.setRuntimeApiKey(sdkProvider, localKey);
+      return undefined;
+    }
+  } catch (err) {
+    console.warn(
+      "[injectProviderCredential] models.json fallback failed:",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 
-  return undefined;
+  return `No API key configured for provider "${provider}". ` +
+    `Please configure your API key in Settings → AI Configuration.`;
 }
 
 // ============================================================================
@@ -645,9 +663,11 @@ export class AgentSessionWrapper {
           newManager.newSession({ parentSession: currentSessionFile });
           newSessionFile = newManager.getSessionFile() as string;
         } else {
-          // Fork after some history: copy path up to (but not including) the fork point
+          // 用户消息：排除被点的问题（旧行为）；AI 回答：包含该回答及整个回合
+          //（后续 toolResult 直到回合末尾，见 lib/fork-leaf.ts）
           const sourceManager = SessionManager.open(currentSessionFile, sessionDir);
-          const forkedPath = sourceManager.createBranchedSession(entry.parentId);
+          const branchLeafId = resolveForkLeaf(sourceManager.getEntries(), entryId);
+          const forkedPath = sourceManager.createBranchedSession(branchLeafId);
           if (!forkedPath) throw new Error("Failed to create forked session");
           newSessionFile = forkedPath;
         }

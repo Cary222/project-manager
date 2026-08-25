@@ -54,6 +54,23 @@ export interface SkillsResponse {
   projectResourcesLoaded: boolean;
 }
 
+export type RuleScope = "project" | "global";
+
+export interface RuleInfo {
+  scope: RuleScope;
+  path: string;
+  name: string;
+  description?: string;
+  alwaysApply?: boolean;
+  globs?: string | string[];
+  disableModelInvocation?: boolean;
+  content: string;
+}
+
+export interface RulesResponse {
+  rules: RuleInfo[];
+}
+
 export interface ProjectTrustStatus {
   requiresTrust: boolean;
   trusted: boolean;

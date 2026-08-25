@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { stat } from "fs/promises";
 import { resolve } from "path";
 import {
@@ -6,84 +7,103 @@ import {
   withSafeModelLoadFailure,
   type ModelsData,
 } from "@/lib/models-cache";
-import { resolveVisibleModels } from "@/lib/model-scope";
 import { getModelRuntime } from "@/lib/model-discovery";
-import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
+import {
+  getAllowedFileRoots,
+  isExistingFilePathAllowed,
+} from "@/lib/file-access";
 import { requireSession } from "@/shared/lib/permissions";
-import { getUnifiedModels } from "@/lib/unified-model-registry";
+import {
+  getUnifiedModels,
+  type UnifiedProviderEntry,
+} from "@/lib/unified-model-registry";
 import { loadUnifiedModelsWithCache } from "@/lib/unified-models-cache";
 
 export const dynamic = "force-dynamic";
 
-const modelNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+const modelNameCollator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+});
 
 function compareModelEntries(
   a: { id: string; name: string; provider: string },
-  b: { id: string; name: string; provider: string }
+  b: { id: string; name: string; provider: string },
 ): number {
-  return modelNameCollator.compare(a.name || a.id, b.name || b.id)
-    || modelNameCollator.compare(a.provider, b.provider)
-    || modelNameCollator.compare(a.id, b.id);
+  return (
+    modelNameCollator.compare(a.name || a.id, b.name || b.id) ||
+    modelNameCollator.compare(a.provider, b.provider) ||
+    modelNameCollator.compare(a.id, b.id)
+  );
 }
 
 async function loadModels(cwd: string, userId?: string): Promise<ModelsData> {
   const runtime = await getModelRuntime(cwd);
-  const scope = await resolveVisibleModels(runtime, undefined);
-  const { visible, thinkingLevelPins, warnings } = scope;
 
-  // Build local model list from Pi Runtime (models.json via enabledModels scope)
+  // 模型列表以统一 registry 为准 —— 与设置弹窗 /api/ai/models/registry 同源（同一 5min 缓存），
+  // 只列出已配置的 provider/model（models.json 本地配置 + Site DB），
+  // 不再直接铺开 pi 内置目录（如 openrouter 的内置 346 个模型），保持两个视图作用域一致。
+  // runtime 仅用于模型元数据（thinking 等级），并在 registry 为空时兜底。
+  const runtimeModels = await runtime.getAvailable();
+  const runtimeByName = new Map(
+    runtimeModels.map((m) => [`${m.provider}:${m.id}`, m] as const),
+  );
+
   const nameMap = new Map<string, string>();
   const modelList: { id: string; name: string; provider: string }[] = [];
   const thinkingLevels: Record<string, string[]> = {};
   const thinkingLevelMaps: Record<string, Record<string, string | null>> = {};
 
-  // Build model list and name map from resolved visible models
-  for (const m of visible) {
-    const key = `${m.provider}:${m.id}`;
-    nameMap.set(key, m.name);
-    modelList.push({
-      id: m.id,
-      name: m.name,
-      provider: m.provider,
-    });
-    // Get thinking levels from the model if available
-    const modelAny = m as { thinking_levels?: string[]; thinkingLevelMap?: Record<string, string | null> };
-    thinkingLevels[key] = modelAny.thinking_levels ?? [];
-    if (modelAny.thinkingLevelMap) thinkingLevelMaps[key] = modelAny.thinkingLevelMap;
+  const addModel = (
+    provider: string,
+    modelId: string,
+    displayName: string,
+  ): void => {
+    const key = `${provider}:${modelId}`;
+    if (nameMap.has(key)) return;
+    nameMap.set(key, displayName);
+    modelList.push({ id: modelId, name: displayName, provider });
+    const runtimeModel = runtimeByName.get(key as `${string}:${string}`);
+    if (runtimeModel) {
+      // 用 Pi SDK 计算模型可用思考等级（对齐 pi-web-ref 参考实现；
+      // 不要读 m.thinking_levels —— Pi 模型对象没有该字段，恒为 [] 会导致思考菜单只剩 auto）
+      thinkingLevels[key] = getSupportedThinkingLevels(runtimeModel);
+      if (runtimeModel.thinkingLevelMap) {
+        thinkingLevelMaps[key] = runtimeModel.thinkingLevelMap;
+      }
+    }
+  };
+
+  let unified: UnifiedProviderEntry[] = [];
+  try {
+    unified = await loadUnifiedModelsWithCache(userId ?? null, () =>
+      getUnifiedModels(userId ?? null),
+    );
+  } catch (err) {
+    console.warn(
+      "[GET /api/models] failed to load unified models:",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+  for (const providerEntry of unified) {
+    for (const model of providerEntry.models) {
+      addModel(model.provider, model.modelName, model.displayName);
+    }
   }
 
-  // Merge site DB models (from Unified Model Registry) into the list.
-  // This ensures the workspace selector shows both Pi local models AND site DB models.
-  // Site models are cached via unified-models-cache.ts (TTL 5min) to avoid repeated HTTP discovery.
-  if (userId) {
-    try {
-      const unified = await loadUnifiedModelsWithCache(userId, () => getUnifiedModels(userId));
-      for (const providerEntry of unified) {
-        for (const model of providerEntry.models) {
-          const key = `${model.provider}:${model.modelName}`;
-          // Only add if not already present from Pi Runtime (local takes priority)
-          if (!nameMap.has(key)) {
-            nameMap.set(key, model.displayName);
-            modelList.push({
-              id: model.modelName,
-              name: model.displayName,
-              provider: model.provider,
-            });
-          }
-        }
-      }
-    } catch (err) {
-      console.warn("[GET /api/models] failed to merge site models:", err instanceof Error ? err.message : String(err));
-    }
+  // 兜底：未登录或统一 registry 为空时退回 runtime 全量列表，避免下拉无模型可选
+  if (modelList.length === 0) {
+    for (const m of runtimeModels) addModel(m.provider, m.id, m.name);
   }
 
   // Sort model list
   modelList.sort(compareModelEntries);
 
   // Default to first model if available
-  const defaultModel = modelList.length > 0
-    ? { provider: modelList[0].provider, modelId: modelList[0].id }
-    : null;
+  const defaultModel =
+    modelList.length > 0
+      ? { provider: modelList[0].provider, modelId: modelList[0].id }
+      : null;
 
   const runtimeAny = runtime as { getError?: () => string | undefined };
   const modelError = runtimeAny.getError?.() ?? undefined;
@@ -94,12 +114,8 @@ async function loadModels(cwd: string, userId?: string): Promise<ModelsData> {
     defaultModel,
     thinkingLevels,
     thinkingLevelMaps,
-    thinkingLevelPins,
+    thinkingLevelPins: {},
   };
-
-  if (warnings.length > 0) {
-    result.modelScopeWarnings = warnings;
-  }
 
   if (modelError) {
     result.modelError = modelError;
@@ -128,10 +144,16 @@ export async function GET(request: NextRequest) {
     try {
       cwdStat = await stat(cwd);
     } catch {
-      return NextResponse.json({ error: `Directory does not exist: ${cwd}` }, { status: 400 });
+      return NextResponse.json(
+        { error: `Directory does not exist: ${cwd}` },
+        { status: 400 },
+      );
     }
     if (!cwdStat.isDirectory()) {
-      return NextResponse.json({ error: `Not a directory: ${cwd}` }, { status: 400 });
+      return NextResponse.json(
+        { error: `Not a directory: ${cwd}` },
+        { status: 400 },
+      );
     }
 
     // Check path is allowed
@@ -144,7 +166,9 @@ export async function GET(request: NextRequest) {
     const session = await requireSession().catch(() => null);
     const userId = session?.user?.id;
 
-    const modelsData = await loadModelsWithCache(cwd, () => loadModels(cwd, userId));
+    const modelsData = await loadModelsWithCache(cwd, () =>
+      loadModels(cwd, userId),
+    );
     return NextResponse.json(modelsData);
   } catch {
     return NextResponse.json(withSafeModelLoadFailure(EMPTY_MODELS));

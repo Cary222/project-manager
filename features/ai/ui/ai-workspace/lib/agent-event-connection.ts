@@ -7,7 +7,11 @@ export interface AgentEventSourceLike {
   close(): void;
 }
 
-export type AgentEventConnectionStatus = "ready_timeout" | "startup_error" | "closed";
+export type AgentEventConnectionStatus =
+  | "ready_timeout"
+  | "startup_error"
+  | "closed"
+  | "canceled";
 
 export class AgentEventConnectionError extends Error {
   constructor(public readonly status: AgentEventConnectionStatus, message?: string) {
@@ -54,7 +58,10 @@ export class AgentEventConnection {
 
   close(): void {
     this.stopRetrying();
-    if (this.current) this.discard(this.current, new AgentEventConnectionError("closed"));
+    // Intentional teardown (session switch / new conversation / unmount):
+    // reject the in-flight connect as a cancellation, not a connection
+    // failure, so callers can distinguish it from a real stream error.
+    if (this.current) this.discard(this.current, new AgentEventConnectionError("canceled"));
   }
 
   maintain(sessionId: string): void {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { startRpcSession } from "@/lib/rpc-manager";
+import { invalidateSessionListCache } from "@/lib/session-reader";
 import type { RpcSessionStartOptions } from "@/lib/rpc-manager";
 
 export async function POST(request: NextRequest) {
@@ -8,7 +9,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json() as {
       cwd?: string;
       toolNames?: string[];
-      model?: { provider: string; modelId: string };
+      // 与 pi-web / useAgentSession.ensureNewSession 对齐：扁平字段
+      provider?: string;
+      modelId?: string;
       thinkingLevel?: string;
     };
 
@@ -19,10 +22,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const initialModel =
+      body.provider && body.modelId
+        ? { provider: body.provider, modelId: body.modelId }
+        : undefined;
     const sessionId = randomUUID();
     const options: RpcSessionStartOptions = {
       toolNames: body.toolNames,
-      initialModel: body.model,
+      initialModel,
       thinkingLevel: body.thinkingLevel as RpcSessionStartOptions["thinkingLevel"],
     };
 
@@ -32,6 +39,8 @@ export async function POST(request: NextRequest) {
       body.cwd,
       options,
     );
+    // 与 pi-web 对齐：新会话立即可见于会话列表，不等 30s TTL 缓存过期
+    invalidateSessionListCache();
 
     return NextResponse.json({
       success: true,

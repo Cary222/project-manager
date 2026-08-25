@@ -28,7 +28,9 @@ export function parseCompactionSummary(summary: string): ParsedCompactionSummary
 
   return {
     body: body.trim(),
-    readFiles,
-    modifiedFiles,
+    // 同一文件可能出现在多个 <read-files>/<modified-files> 块（多次压缩叠加），
+    // 若不去重，列表用文件路径当 key 会触发 “two children with the same key”，且计数重复
+    readFiles: Array.from(new Set(readFiles)),
+    modifiedFiles: Array.from(new Set(modifiedFiles)),
   };
 }

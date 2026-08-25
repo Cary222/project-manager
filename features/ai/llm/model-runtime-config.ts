@@ -19,7 +19,16 @@
  * 不含 transport：transport 属于 Runtime Routing Policy，现有语义在
  * api-key-store 的 CredentialRecord，createModel 已从凭证链路消费，不提升到模型配置层。
  */
-import type { ApiFormat, ModelCapability, ModelCatalogEntry } from "./providers/types";
+import type {
+ ApiFormat,
+ ModelCapability,
+ ModelCatalogEntry,
+} from "./providers/types";
+import {
+ availableReasoningLevels,
+ isReasoningLevel,
+ type ReasoningLevel,
+} from "./model-reasoning";
 import { loadUserModelsWithCache } from "@/lib/user-models-cache";
 import { getEnabledModels } from "./providers/registry";
 import { getModelPreference } from "./preferences/user-model-preferences";
@@ -28,90 +37,36 @@ import { getModelPreference } from "./preferences/user-model-preferences";
 // Types
 // ---------------------------------------------------------------------------
 
-/** 统一 reasoning level 内部语义（不含 Pi Workspace 的 max；Workspace 侧语义独立）。 */
-export type ReasoningLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-
-export const REASONING_LEVELS: readonly ReasoningLevel[] = [
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-];
-
-export function isReasoningLevel(value: unknown): value is ReasoningLevel {
-  return typeof value === "string" && (REASONING_LEVELS as readonly string[]).includes(value);
-}
+export {
+ availableReasoningLevels,
+ isReasoningLevel,
+ isReasoningModel,
+ REASONING_LEVELS,
+ type ReasoningLevel,
+} from "./model-reasoning";
 
 export interface ModelRuntimeConfig {
-  provider: string;
-  modelId: string;
-  /** "provider:modelId" */
-  modelRef: string;
-  apiFormat: ApiFormat;
-  /** 仅当模型支持 reasoning 时存在；不支持的模型不携带该字段（UI 不渲染 Thinking Selector）。 */
-  reasoning?: {
-    enabled: boolean;
-    level?: ReasoningLevel;
-  };
-  temperature?: number;
-  maxTokens?: number;
-  capabilities: ModelCapability[];
-  contextWindow?: number;
+ provider: string;
+ modelId: string;
+ /** "provider:modelId" */
+ modelRef: string;
+ apiFormat: ApiFormat;
+ /** 仅当模型支持 reasoning 时存在；不支持的模型不携带该字段（UI 不渲染 Thinking Selector）。 */
+ reasoning?: {
+  enabled: boolean;
+  level?: ReasoningLevel;
+ };
+ temperature?: number;
+ maxTokens?: number;
+ capabilities: ModelCapability[];
+ contextWindow?: number;
 }
 
 /** 参与字段级合并的用户偏好覆盖集（来自 UserAiModelPreference）。 */
 export interface RuntimeConfigOverrides {
-  thinkingLevel?: string | null;
-  temperature?: number | null;
-  maxTokens?: number | null;
-}
-
-// ---------------------------------------------------------------------------
-// Reasoning capability resolution
-// ---------------------------------------------------------------------------
-
-/** 模型是否支持 reasoning：catalog 元数据显式 false → 不支持；capability / reasoning=true → 支持。 */
-export function isReasoningModel(entry: Pick<ModelCatalogEntry, "capabilities" | "reasoning">): boolean {
-  if (entry.reasoning === false) return false;
-  if (entry.reasoning === true) return true;
-  return entry.capabilities.includes("reasoning");
-}
-
-/**
- * 动态推导模型实际支持的 reasoning levels 子集。
- *
- * 不支持 reasoning → []（UI 不渲染 Thinking Selector）。
- * Provider-specific adapter 优先，其次通用推理模型默认集。
- * Pi 的 level map 仅作交互参考，不把 Pi 全集硬编码进 Shared Domain。
- */
-export function availableReasoningLevels(
-  entry: Pick<ModelCatalogEntry, "provider" | "modelName" | "capabilities" | "reasoning">,
-): ReasoningLevel[] {
-  if (!isReasoningModel(entry)) return [];
-
-  const provider = (entry.provider ?? "").toLowerCase();
-  const modelId = entry.modelName.toLowerCase();
-
-  // DeepSeek R 系列：thinking budget 开/低/高
-  if (provider === "deepseek" || modelId.includes("deepseek-r")) {
-    return ["off", "low", "high"];
-  }
-  // Anthropic extended thinking：budget tiers
-  if (provider === "anthropic" || modelId.includes("claude")) {
-    return ["off", "low", "medium", "high"];
-  }
-  // OpenAI 推理系列（o1/o3/o4/gpt-5）：支持 minimal effort
-  if (
-    provider === "openai"
-    || /^(o1|o3|o4)(-|$)/.test(modelId)
-    || modelId.includes("gpt-5")
-  ) {
-    return ["off", "minimal", "low", "medium", "high"];
-  }
-  // 其他 reasoning 模型：通用默认集
-  return ["off", "low", "medium", "high"];
+ thinkingLevel?: string | null;
+ temperature?: number | null;
+ maxTokens?: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,35 +78,40 @@ export function availableReasoningLevels(
  * 用户 temperature 只覆盖 temperature，不影响其他字段。
  */
 export function mergeRuntimeConfig(
-  entry: ModelCatalogEntry,
-  overrides?: RuntimeConfigOverrides | null,
+ entry: ModelCatalogEntry,
+ overrides?: RuntimeConfigOverrides | null,
 ): ModelRuntimeConfig {
-  const levels = availableReasoningLevels(entry);
-  const supported = levels.length > 0;
-  const requestedLevel = overrides?.thinkingLevel;
-  const level = supported && requestedLevel && isReasoningLevel(requestedLevel) && levels.includes(requestedLevel)
-    ? requestedLevel
-    : undefined;
+ const levels = availableReasoningLevels(entry);
+ const supported = levels.length > 0;
+ const requestedLevel = overrides?.thinkingLevel;
+ const level =
+  supported &&
+  requestedLevel &&
+  isReasoningLevel(requestedLevel) &&
+  levels.includes(requestedLevel)
+   ? requestedLevel
+   : undefined;
 
-  const config: ModelRuntimeConfig = {
-    provider: entry.provider ?? "",
-    modelId: entry.modelName,
-    modelRef: entry.modelRef,
-    apiFormat: entry.apiFormat ?? "openai-chat",
-    capabilities: entry.capabilities,
-    maxTokens: overrides?.maxTokens ?? entry.maxTokens,
+ const config: ModelRuntimeConfig = {
+  provider: entry.provider ?? "",
+  modelId: entry.modelName,
+  modelRef: entry.modelRef,
+  apiFormat: entry.apiFormat ?? "openai-chat",
+  capabilities: entry.capabilities,
+  maxTokens: overrides?.maxTokens ?? entry.maxTokens,
+ };
+
+ if (supported) {
+  config.reasoning = {
+   enabled: level !== "off",
+   ...(level ? { level } : {}),
   };
+ }
+ if (overrides?.temperature != null) config.temperature = overrides.temperature;
+ if (entry.contextWindow !== undefined)
+  config.contextWindow = entry.contextWindow;
 
-  if (supported) {
-    config.reasoning = {
-      enabled: level !== "off",
-      ...(level ? { level } : {}),
-    };
-  }
-  if (overrides?.temperature != null) config.temperature = overrides.temperature;
-  if (entry.contextWindow !== undefined) config.contextWindow = entry.contextWindow;
-
-  return config;
+ return config;
 }
 
 // ---------------------------------------------------------------------------
@@ -169,24 +129,25 @@ export function mergeRuntimeConfig(
  * 模型不在 User Scope 时抛错，调用方应捕获并降级为默认模型。
  */
 export async function resolveModelRuntimeConfig(
-  userId: string | undefined,
-  modelRef: string,
+ userId: string | undefined,
+ modelRef: string,
 ): Promise<ModelRuntimeConfig> {
-  const models = await loadUserModelsWithCache(
-    userId ?? "anonymous",
-    () => getEnabledModels(userId),
-  );
-  const entry = models.find((model) => model.modelRef === modelRef);
-  if (!entry) {
-    throw new Error(`Model not found in user scope: "${modelRef}"`);
-  }
+ const models = await loadUserModelsWithCache(userId ?? "anonymous", () =>
+  getEnabledModels(userId),
+ );
+ const entry = models.find((model) => model.modelRef === modelRef);
+ if (!entry) {
+  throw new Error(`Model not found in user scope: "${modelRef}"`);
+ }
 
-  const colonIndex = modelRef.indexOf(":");
-  const provider = colonIndex >= 0 ? modelRef.slice(0, colonIndex) : "";
-  const modelId = colonIndex >= 0 ? modelRef.slice(colonIndex + 1) : modelRef;
+ const colonIndex = modelRef.indexOf(":");
+ const provider = colonIndex >= 0 ? modelRef.slice(0, colonIndex) : "";
+ const modelId = colonIndex >= 0 ? modelRef.slice(colonIndex + 1) : modelRef;
 
-  const preference = userId ? await getModelPreference(userId, provider, modelId) : null;
-  return mergeRuntimeConfig(entry, preference);
+ const preference = userId
+  ? await getModelPreference(userId, provider, modelId)
+  : null;
+ return mergeRuntimeConfig(entry, preference);
 }
 
 // ---------------------------------------------------------------------------
@@ -194,22 +155,24 @@ export async function resolveModelRuntimeConfig(
 // ---------------------------------------------------------------------------
 
 /** Anthropic extended thinking 的 budgetTokens 映射。 */
-export const ANTHROPIC_THINKING_BUDGETS: Partial<Record<ReasoningLevel, number>> = {
-  minimal: 1024,
-  low: 2048,
-  medium: 8192,
-  high: 16384,
-  xhigh: 32768,
+export const ANTHROPIC_THINKING_BUDGETS: Partial<
+ Record<ReasoningLevel, number>
+> = {
+ minimal: 1024,
+ low: 2048,
+ medium: 8192,
+ high: 16384,
+ xhigh: 32768,
 };
 
 /** OpenAI reasoningEffort 映射（minimal/low/medium/high；xhigh 归并到 high）。 */
 export function reasoningLevelToOpenAiEffort(
-  level: ReasoningLevel,
+ level: ReasoningLevel,
 ): "minimal" | "low" | "medium" | "high" {
-  if (level === "minimal") return "minimal";
-  if (level === "low") return "low";
-  if (level === "medium") return "medium";
-  return "high";
+ if (level === "minimal") return "minimal";
+ if (level === "low") return "low";
+ if (level === "medium") return "medium";
+ return "high";
 }
 
 /** provider-specific 选项的结构化类型（与 AI SDK providerOptions 形状兼容，调用点断言）。 */
@@ -228,41 +191,54 @@ export type ReasoningProviderOptions = Record<string, Record<string, unknown>>;
  *   下注入会被拒绝，待流式链路就绪后扩展。
  */
 export function buildReasoningProviderOptions(
-  config: Pick<ModelRuntimeConfig, "provider" | "modelId" | "apiFormat" | "reasoning">,
+ config: Pick<
+  ModelRuntimeConfig,
+  "provider" | "modelId" | "apiFormat" | "reasoning"
+ >,
 ): ReasoningProviderOptions | undefined {
-  const reasoning = config.reasoning;
-  if (!reasoning || !reasoning.enabled || !reasoning.level || reasoning.level === "off") {
-    return undefined;
-  }
-
-  const provider = config.provider.toLowerCase();
-
-  if (provider === "anthropic" || config.apiFormat === "anthropic") {
-    const budgetTokens = ANTHROPIC_THINKING_BUDGETS[reasoning.level] ?? ANTHROPIC_THINKING_BUDGETS.medium!;
-    return {
-      anthropic: {
-        thinking: { type: "enabled", budgetTokens },
-      },
-    };
-  }
-
-  if (provider === "openai") {
-    return {
-      openai: {
-        reasoningEffort: reasoningLevelToOpenAiEffort(reasoning.level),
-      },
-    };
-  }
-
-  // DeepSeek：thinking.type 开关（deepseek-chat 默认关闭、deepseek-reasoner 默认开启，
-  // 显式 enabled 保证用户设置生效）；level 强度由模型自身决定，不传无效字段。
-  if (provider === "deepseek" || config.modelId.toLowerCase().includes("deepseek")) {
-    return {
-      deepseek: {
-        thinking: { type: "enabled" },
-      },
-    };
-  }
-
+ const reasoning = config.reasoning;
+ if (
+  !reasoning ||
+  !reasoning.enabled ||
+  !reasoning.level ||
+  reasoning.level === "off"
+ ) {
   return undefined;
+ }
+
+ const provider = config.provider.toLowerCase();
+
+ if (provider === "anthropic" || config.apiFormat === "anthropic") {
+  const budgetTokens =
+   ANTHROPIC_THINKING_BUDGETS[reasoning.level] ??
+   ANTHROPIC_THINKING_BUDGETS.medium!;
+  return {
+   anthropic: {
+    thinking: { type: "enabled", budgetTokens },
+   },
+  };
+ }
+
+ if (provider === "openai") {
+  return {
+   openai: {
+    reasoningEffort: reasoningLevelToOpenAiEffort(reasoning.level),
+   },
+  };
+ }
+
+ // DeepSeek：thinking.type 开关（deepseek-chat 默认关闭、deepseek-reasoner 默认开启，
+ // 显式 enabled 保证用户设置生效）；level 强度由模型自身决定，不传无效字段。
+ if (
+  provider === "deepseek" ||
+  config.modelId.toLowerCase().includes("deepseek")
+ ) {
+  return {
+   deepseek: {
+    thinking: { type: "enabled" },
+   },
+  };
+ }
+
+ return undefined;
 }

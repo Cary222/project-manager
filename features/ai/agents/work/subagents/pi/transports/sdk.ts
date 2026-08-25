@@ -16,7 +16,8 @@
 import { createAgentSession, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AgentSession, CreateAgentSessionOptions, CreateModelRuntimeOptions } from "@earendil-works/pi-coding-agent";
 import { prisma } from "@/shared/db/client";
-import { resolveCredentialWithFallback, getUserProviderRecords } from "@/features/ai/llm/credentials/api-key-store";
+import { resolveCredentialWithFallback, getUserProviderRecords, type CredentialRecord } from "@/features/ai/llm/credentials/api-key-store";
+import { getLocalModels } from "@/lib/unified-model-registry";
 import { synthesizeSessionModelsConfig, type SessionModelsConfigHandle } from "@/features/ai/llm/pi-session-config";
 import { withRetry, classifyError, ErrorType } from "../error-recovery";
 import type {
@@ -216,10 +217,24 @@ export class PiSdkRuntime implements PiRuntime {
         baseDelay: 500,
       }
     );
-    
+
     if (!cred) {
+      // DB 无凭证时回落 models.json：local provider 的 apiKey 存在
+      // ~/.pi/agent/models.json（Pi runtime 直接读取）。存在即视为可用。
+      const providerName = provider || "deepseek";
+      try {
+        const local = await getLocalModels();
+        if (local.providers?.[providerName]?.apiKey) {
+          return; // 可用，真正注入由 createPiSession() 完成
+        }
+      } catch (err) {
+        console.warn(
+          "[PiSdkRuntime] models.json credential fallback failed:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
       throw new Error(
-        `No API key found for provider "${provider || "deepseek"}". ` +
+        `No API key found for provider "${providerName}". ` +
         `Please configure your API key in Settings.`
       );
     }
@@ -286,7 +301,7 @@ export class PiSdkRuntime implements PiRuntime {
         // 优先顺序：input.provider → 用户的第一个 provider → SYSTEM fallback
         // 使用 api-key-store.ts 的三级降级链路（SYSTEM → USER → ENV）
         let providerName = input.provider;
-        let cred = null;
+        let cred: CredentialRecord | null = null;
 
         if (providerName) {
           // 用户指定了 provider，走三级降级
@@ -300,9 +315,35 @@ export class PiSdkRuntime implements PiRuntime {
           }
         }
 
-        // resolveCredentialWithFallback 已覆盖 SYSTEM fallback，无需额外处理
+        // resolveCredentialWithFallback 已覆盖 SYSTEM fallback，无需额外处理。
+        // cred 为 null 时回落 models.json：local provider 的 apiKey 存在于
+        // ~/.pi/agent/models.json（Pi runtime 直接读取），同样可运行。
         if (!cred || !providerName) {
-          throw new Error(`No credentials available for user ${userId}. Please configure an API key in settings.`);
+          if (providerName) {
+            try {
+              const local = await getLocalModels();
+              const localKey = local.providers?.[providerName]?.apiKey;
+              if (localKey) {
+                console.log(`[PiSdkRuntime] Falling back to models.json apiKey for provider: ${providerName}`);
+                cred = {
+                  provider: providerName,
+                  baseURL: "",
+                  apiKey: localKey,
+                  transport: "direct",
+                  apiFormat: "openai-chat",
+                  ownerType: "USER",
+                };
+              }
+            } catch (err) {
+              console.warn(
+                "[PiSdkRuntime] models.json credential fallback failed:",
+                err instanceof Error ? err.message : String(err),
+              );
+            }
+          }
+          if (!cred || !providerName) {
+            throw new Error(`No credentials available for user ${userId}. Please configure an API key in settings.`);
+          }
         }
         
         console.log(`[PiSdkRuntime] Using credential from ${cred.ownerType} provider: ${providerName}`);

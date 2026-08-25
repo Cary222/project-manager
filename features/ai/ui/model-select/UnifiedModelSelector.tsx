@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { useSession } from "next-auth/react";
 import type { ModelCatalogEntry } from "@/features/ai/llm/providers/types";
-import { availableReasoningLevels, type ReasoningLevel } from "@/features/ai/llm/model-runtime-config";
+import { availableReasoningLevels, type ReasoningLevel } from "@/features/ai/llm/model-reasoning";
 import { CapabilityBadges, ContextWindowBadge, type CapabilityBadgeKind } from "@/features/ai/ui/model-settings/CapabilityBadges";
 import { ProviderIcon } from "@/features/ai/ui/model-settings/provider-icons";
 import { getProviderDisplayName } from "./model-labels";
