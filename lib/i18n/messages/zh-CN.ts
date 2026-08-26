@@ -180,6 +180,8 @@ export const zhCNLocale: LocalePlugin = {
     "chat.collapseProcess": "收起处理详情",
     "chat.expandProcess": "展开处理详情",
     "chat.filesWritten": "改动的文件",
+    "changes.panelTitle": "本对话变更",
+    "changes.resolved": "已解决（无待提交的 git 变更）",
     "chat.openWrittenFile": "打开 {name}",
     "chat.loadEarlier": "向上滚动以加载更早的消息（隐藏 {count} 条）",
     "chat.extensionRequest": "扩展请求",

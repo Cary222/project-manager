@@ -11,6 +11,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useGlobalKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
+import { ConversationChangesPanel } from "./ConversationChangesPanel";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { openFileTab, saveFileViewerState } from "./file-tab-state";
@@ -3516,6 +3517,13 @@ function AppShellContent() {
           }
         >
           {/* Right panel tab bar */}
+          <ConversationChangesPanel
+            sessionId={selectedSession?.id ?? null}
+            cwd={activeCwd ?? null}
+            activeTabId={activeFileTabId ?? ""}
+            refreshKey={explorerRefreshKey}
+            onOpenFile={handleOpenFile}
+          />
           <div
             style={{
               display: "flex",
