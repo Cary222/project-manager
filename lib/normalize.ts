@@ -1,4 +1,4 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, AssistantMessage, ToolCallContent } from "./types";
 
 function isObject(val: unknown): val is Record<string, unknown> {
   return typeof val === "object" && val !== null && !Array.isArray(val);
@@ -19,13 +19,6 @@ function streamingRawInput(block: Record<string, unknown>): string | undefined {
     : undefined;
 }
 
-interface ToolCallContent {
-  type: "toolCall";
-  toolCallId: string;
-  toolName: string;
-  input: Record<string, unknown>;
-}
-
 function normalizeToolCallBlock(
   block: unknown,
   options: { includeStreamingRawInput?: boolean } = {},
@@ -41,15 +34,18 @@ function normalizeToolCallBlock(
         ? block.arguments as Record<string, unknown>
         : {}),
   };
-  return normalized;
+  const rawInput = options.includeStreamingRawInput ? streamingRawInput(block) : undefined;
+  return rawInput === undefined ? normalized : { ...normalized, rawInput };
 }
 
 function normalizeAssistantToolCalls(
   msg: AgentMessage,
   options: { includeStreamingRawInput?: boolean } = {},
 ): AgentMessage {
+  // Non-assistant roles (user, toolResult, bashExecution, custom) are returned
+  // unchanged — only assistant messages go through tool-call field normalization.
   if (msg.role !== "assistant") return msg;
-  const content = (msg as { content: unknown[] }).content;
+  const content = (msg as AssistantMessage).content;
   if (!Array.isArray(content)) return msg;
   const normalized = content.map((block) => {
     const result = normalizeToolCallBlock(block, options);

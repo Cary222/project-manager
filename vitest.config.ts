@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    exclude: ["e2e/**", "node_modules/**", "lib/i18n/*.test.mjs"],
+    exclude: ["e2e/**", "node_modules/**", "**/*.test.mjs"],
   },
   resolve: {
     alias: {

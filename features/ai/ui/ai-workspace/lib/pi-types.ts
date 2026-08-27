@@ -6,7 +6,12 @@ import type {
   SlashCommandInfo,
   Theme,
 } from "@earendil-works/pi-coding-agent";
-import type { AssistantMessage } from "./types";
+import type {
+  AgentLoopTurnUpdate,
+  AgentMessage as PiAgentMessage,
+  PrepareNextTurnContext,
+} from "@earendil-works/pi-agent-core";
+import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 
 export interface ContextUsage {
   percent: number | null;
@@ -22,6 +27,9 @@ export interface ModelLike {
 export interface ToolInfo {
   name: string;
   description: string;
+  parameters?: unknown;
+  promptGuidelines?: string[];
+  sourceInfo?: unknown;
 }
 
 export interface NavigateTreeResult {
@@ -66,6 +74,7 @@ interface SkillLike {
 
 interface ResourceLoaderLike {
   getSkills(): { skills: SkillLike[] };
+  getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> };
 }
 
 interface ExtensionRunnerLike {
@@ -136,8 +145,12 @@ export interface AgentSessionLike {
     state?: {
       systemPrompt?: string;
       thinkingLevel?: string;
-      streamingMessage?: AssistantMessage;
+      streamingMessage?: PiAgentMessage;
     };
+    prepareNextTurnWithContext?: (
+      context: PrepareNextTurnContext,
+      signal?: AbortSignal,
+    ) => Promise<AgentLoopTurnUpdate | undefined> | AgentLoopTurnUpdate | undefined;
   };
   readonly extensionRunner: ExtensionRunnerLike;
   readonly promptTemplates: readonly PromptTemplateLike[];
@@ -152,6 +165,15 @@ export interface AgentSessionLike {
     streamingBehavior?: "steer" | "followUp";
     source?: "interactive" | "rpc";
     preflightResult?: (success: boolean) => void;
+  }): Promise<void>;
+  sendCustomMessage<T = unknown>(message: {
+    customType: string;
+    content: string | (TextContent | ImageContent)[];
+    display: boolean;
+    details?: T;
+  }, options?: {
+    triggerTurn?: boolean;
+    deliverAs?: "steer" | "followUp" | "nextTurn";
   }): Promise<void>;
   abort(): Promise<void>;
   executeBash(command: string, onChunk?: (chunk: string) => void, options?: {
@@ -180,4 +202,98 @@ export interface AgentSessionLike {
   setActiveToolsByName(names: string[]): void;
   abortCompaction(): void;
   getContextUsage(): ContextUsage | undefined;
+}
+
+
+// ─── API route helpers ─────────────────────────────────────────────────────────
+
+export interface GetSessionsIndexResult {
+  path: string;
+  id: string;
+  cwd: string;
+  name?: string;
+  created: string;
+  modified: string;
+  messageCount: number;
+  firstMessage: string;
+  parentSessionId?: string;
+  transient?: boolean;
+  projectRoot?: string;
+  projectKey?: string;
+  worktreeBranch?: string;
+}
+
+export interface GetSessionDataResult {
+  sessionId: string;
+  filePath: string;
+  totalActiveMs: number;
+  tree: unknown[];
+  leafId: string | null;
+  context: {
+    messages: unknown[];
+    entryIds: string[];
+    thinkingLevel: string;
+    model: { provider: string; modelId: string } | null;
+  };
+}
+
+/** Returns IDs of sessions currently running in-process. */
+export function getRunningSessionIds(): string[] {
+  // session-registry.ts is the stable shared module; rpc-manager.ts and pi-types.ts
+  // both depend on it, breaking the cycle that prevented a direct import.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getRunningRpcSessionIds } = require("@/lib/session-registry");
+  return getRunningRpcSessionIds();
+}
+
+/** Returns all session summaries (disk-backed + transient), enriched with project info. */
+export async function getSessionsIndex(options?: {
+  force?: boolean;
+}): Promise<GetSessionsIndexResult[]> {
+  const { listAllSessions } = await import("@/lib/session-reader");
+  return listAllSessions(options) as Promise<GetSessionsIndexResult[]>;
+}
+
+/** Loads a single session's full data from its JSONL file. Returns null if not found. */
+export async function getSessionData(
+  sessionId: string,
+  options: { deferThinking?: boolean; deferMedia?: boolean } = {},
+): Promise<GetSessionDataResult | null> {
+  const { resolveSessionPath, getSessionEntries, buildSessionContext } =
+    await import("@/lib/session-reader");
+  const { computeSessionTotalActiveMs } = await import("@/lib/session-timing");
+  const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+
+  const filePath = await resolveSessionPath(sessionId);
+  if (!filePath) return null;
+
+  const manager = SessionManager.open(filePath);
+  const entries = await getSessionEntries(filePath);
+  const ctx = await buildSessionContext(entries, undefined, {
+    deferThinking: options.deferThinking,
+    deferToolResultImages: options.deferMedia,
+  });
+  const totalActiveMs = computeSessionTotalActiveMs(
+    entries as readonly {
+      type: string;
+      timestamp: string;
+      message?: { role?: string };
+    }[],
+  );
+
+  void manager;
+
+  return {
+    sessionId,
+    filePath,
+    totalActiveMs,
+    tree: [],
+    leafId: null,
+    context: {
+      messages: ctx.messages,
+      entryIds: ctx.entryIds,
+      thinkingLevel: ctx.thinkingLevel ?? "auto",
+      model: ctx.model ?? null,
+    },
+  };
 }

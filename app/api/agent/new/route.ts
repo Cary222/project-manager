@@ -1,59 +1,114 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { existsSync } from "fs";
 import { randomUUID } from "crypto";
-import { startRpcSession } from "@/lib/rpc-manager";
+import { requireSession } from "@/shared/lib/permissions";
+import { allowFileRoot } from "@/lib/file-access";
 import { invalidateSessionListCache } from "@/lib/session-reader";
-import type { RpcSessionStartOptions } from "@/lib/rpc-manager";
+import { startRpcSession } from "@/lib/rpc-manager";
 
-export async function POST(request: NextRequest) {
+const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+function parseThinkingLevel(value: unknown): ThinkingLevel | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "string" && THINKING_LEVELS.has(value as ThinkingLevel)) {
+    return value as ThinkingLevel;
+  }
+  throw new Error(`Invalid thinking level: ${String(value)}`);
+}
+
+// POST /api/agent/new  body: { cwd: string; type: string; message?: string; ... }
+// Spawns a brand-new pi session. Most calls immediately send the first command;
+// type:"ensure_session" only creates the runtime so clients can query commands.
+// Returns pi's real session id plus the model/thinking state selected at startup.
+export async function POST(req: Request) {
   try {
-    const body = await request.json() as {
-      cwd?: string;
-      toolNames?: string[];
-      // 与 pi-web / useAgentSession.ensureNewSession 对齐：扁平字段
+    await requireSession();
+  } catch {
+    return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+  }
+
+  let commandType: string | undefined;
+  let promptAccepted = false;
+  try {
+    const body = await req.json() as { cwd?: string; [key: string]: unknown };
+    const { cwd, ...command } = body;
+    commandType = typeof command.type === "string" ? command.type : undefined;
+
+    if (!cwd || typeof cwd !== "string") {
+      return NextResponse.json({
+        error: "cwd is required",
+        ...(commandType === "prompt"
+          ? { code: "prompt_rejected", accepted: false }
+          : {}),
+      }, { status: 400 });
+    }
+    if (!existsSync(cwd)) {
+      return NextResponse.json({
+        error: `Directory does not exist: ${cwd}`,
+        ...(commandType === "prompt"
+          ? { code: "prompt_rejected", accepted: false }
+          : {}),
+      }, { status: 400 });
+    }
+
+    const { provider, modelId, toolNames, thinkingLevel, ...promptCommand } = command as {
       provider?: string;
       modelId?: string;
+      toolNames?: string[];
+      thinkingLevel?: unknown;
+      [key: string]: unknown;
+    };
+    if ((provider && !modelId) || (!provider && modelId)) {
+      throw new Error("provider and modelId must be provided together");
+    }
+    const explicitThinkingLevel = parseThinkingLevel(thinkingLevel);
+
+    const tempKey = `__new__${randomUUID()}`;
+    const { session, realSessionId } = await startRpcSession(tempKey, "", cwd, {
+      ...(toolNames ? { toolNames } : {}),
+      ...(provider && modelId ? { initialModel: { provider, modelId } } : {}),
+      ...(explicitThinkingLevel ? { thinkingLevel: explicitThinkingLevel } : {}),
+    });
+
+    allowFileRoot(cwd);
+    invalidateSessionListCache();
+
+    const state = await session.send({ type: "get_state" }) as {
+      model?: { id: string; provider: string };
       thinkingLevel?: string;
     };
 
-    if (!body.cwd) {
-      return NextResponse.json(
-        { error: "cwd is required", code: "missing_cwd" },
-        { status: 400 },
-      );
+    if (promptCommand.type === "ensure_session") {
+      return NextResponse.json({
+        success: true,
+        sessionId: realSessionId,
+        data: null,
+        model: state.model
+          ? { provider: state.model.provider, modelId: state.model.id }
+          : null,
+        thinkingLevel: state.thinkingLevel,
+      });
     }
 
-    const initialModel =
-      body.provider && body.modelId
-        ? { provider: body.provider, modelId: body.modelId }
-        : undefined;
-    const sessionId = randomUUID();
-    const options: RpcSessionStartOptions = {
-      toolNames: body.toolNames,
-      initialModel,
-      thinkingLevel: body.thinkingLevel as RpcSessionStartOptions["thinkingLevel"],
-    };
-
-    const { session, realSessionId } = await startRpcSession(
-      sessionId,
-      "", // empty sessionFile for new session
-      body.cwd,
-      options,
-    );
-    // 与 pi-web 对齐：新会话立即可见于会话列表，不等 30s TTL 缓存过期
-    invalidateSessionListCache();
+    const result = await session.send(promptCommand);
+    promptAccepted = promptCommand.type === "prompt";
 
     return NextResponse.json({
       success: true,
       sessionId: realSessionId,
-      sessionFile: session.sessionFile,
+      data: result,
+      model: state.model
+        ? { provider: state.model.provider, modelId: state.model.id }
+        : null,
+      thinkingLevel: state.thinkingLevel,
     });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "unknown";
-    console.error("[/api/agent/new] Error:", message);
-
-    return NextResponse.json(
-      { error: message, code: "create_session_error" },
-      { status: 500 },
-    );
+  } catch (error) {
+    return NextResponse.json({
+      error: error instanceof Error ? error.message : String(error),
+      ...(commandType === "prompt" && !promptAccepted
+        ? { code: "prompt_rejected", accepted: false }
+        : {}),
+    }, { status: 500 });
   }
 }

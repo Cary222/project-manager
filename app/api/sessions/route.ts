@@ -1,25 +1,41 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { requireSession } from "@/shared/lib/permissions";
-import { getSessionsIndex, getRunningSessionIds } from "@/lib/pi-types";
+import {
+  attachSessionProjectInfo,
+  listAllSessions,
+  mergeSessionLists,
+} from "@/lib/session-reader";
+import {
+  getCompletionNotificationSuppressedRpcSessionIds,
+  getRpcSessionInfos,
+  getRunningRpcSessionIds,
+} from "@/lib/rpc-manager";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
+export async function GET(req: Request) {
   try {
-    const session = await requireSession();
-    // 与 pi-web 对齐：支持 ?force=1 跳过会话列表 TTL 缓存
-    const force = new URL(request.url).searchParams.get("force") === "1";
-    const sessions = await getSessionsIndex({ force });
-    const runningSessionIds = getRunningSessionIds();
+    await requireSession();
+    const force = new URL(req.url).searchParams.get("force") === "1";
+    const [persistedSessions, runtimeSessions] = await Promise.all([
+      listAllSessions({ force }),
+      attachSessionProjectInfo(getRpcSessionInfos()),
+    ]);
+    const sessions = mergeSessionLists(persistedSessions, runtimeSessions);
     return NextResponse.json(
-      { sessions, runningSessionIds },
+      {
+        sessions,
+        runningSessionIds: getRunningRpcSessionIds(),
+        completionNotificationSuppressedSessionIds: getCompletionNotificationSuppressedRpcSessionIds(),
+      },
       { headers: { "Cache-Control": "no-store" } },
     );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "unknown";
-    const stack = err instanceof Error ? err.stack : "";
-    console.error("[/api/sessions] Error:", msg, stack);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
     const status = msg === "UNAUTHORIZED" ? 401 : 500;
-    return NextResponse.json({ error: msg, stack }, { status });
+    return NextResponse.json(
+      { error: msg },
+      { status, headers: { "Cache-Control": "no-store" } },
+    );
   }
 }

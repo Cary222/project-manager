@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { stat } from "fs/promises";
 import { resolve } from "path";
@@ -99,11 +100,21 @@ async function loadModels(cwd: string, userId?: string): Promise<ModelsData> {
   // Sort model list
   modelList.sort(compareModelEntries);
 
-  // Default to first model if available
-  const defaultModel =
-    modelList.length > 0
-      ? { provider: modelList[0].provider, modelId: modelList[0].id }
-      : null;
+  // 与 pi-web 对齐：默认模型读 pi settings（用户在会话里切换模型时，
+  // AgentSession.setModel 会持久化为新的默认），而不是简单取列表第一个。
+  const settings = SettingsManager.create(cwd, await getAgentDir());
+  const defaultProvider = settings.getDefaultProvider();
+  const defaultModelId = settings.getDefaultModel();
+  const savedDefault =
+    defaultProvider && defaultModelId
+      ? modelList.find(
+          (m) => m.provider === defaultProvider && m.id === defaultModelId,
+        )
+      : undefined;
+  const chosen = savedDefault ?? modelList[0];
+  const defaultModel = chosen
+    ? { provider: chosen.provider, modelId: chosen.id }
+    : null;
 
   const runtimeAny = runtime as { getError?: () => string | undefined };
   const modelError = runtimeAny.getError?.() ?? undefined;

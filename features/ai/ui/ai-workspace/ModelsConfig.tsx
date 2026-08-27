@@ -418,7 +418,7 @@ function ApiKeyDetail({
       await onAfterRemove(provider.id);
     } catch { /* 占位清理失败不影响断开连接 */ }
     onRefresh();
-    onModelsChanged();
+    onModelsChanged?.();
   }, [provider.id, onRefresh, onModelsChanged, onAfterRemove]);
 
   return <CredentialForm provider={provider} onSave={handleSave} onRemove={handleRemove} />;
@@ -426,7 +426,7 @@ function ApiKeyDetail({
 
 // ── Main component（薄壳）──────────────────────────────────────────────────────
 
-export function ModelsConfig({ onClose, onModelsChanged }: { onClose: () => void; onModelsChanged: () => void }) {
+export function ModelsConfig({ onClose, onModelsChanged, embedded }: { onClose: () => void; onModelsChanged?: () => void; embedded?: boolean }) {
   const isMobile = useIsMobile();
   const { t } = useI18n();
   const adapter = usePiWorkspaceAdapter();
@@ -464,7 +464,7 @@ export function ModelsConfig({ onClose, onModelsChanged }: { onClose: () => void
     syncManagedProviderToModelsJson(providerId);
     loadOAuthProviders();
     loadApiKeyProviders();
-    onModelsChanged();
+    onModelsChanged?.();
   }, [loadOAuthProviders, loadApiKeyProviders, onModelsChanged]);
 
   // 断开连接成功后清理 models.json 里的占位条目，并触发 ModelSettingsPanel 重新加载 config
@@ -486,17 +486,18 @@ export function ModelsConfig({ onClose, onModelsChanged }: { onClose: () => void
         adapter={adapter}
         onClose={onClose}
         isMobile={isMobile}
+        embedded={embedded}
         title={t("common.models")}
-        subtitle={<code style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>~/.pi/agent/models.json</code>}
+        subtitle={embedded ? undefined : <code style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>~/.pi/agent/models.json</code>}
         reloadKey={reloadKey}
         sections={{
           oauth: {
             providers: oauthProviders,
-            renderDetail: (p) => <OAuthDetail key={p.id} provider={p} onRefresh={refreshAuthProviders} onAuthSuccess={() => handleAuthSuccess(p.id)} onModelsChanged={onModelsChanged} />,
+            renderDetail: (p) => <OAuthDetail key={p.id} provider={p} onRefresh={refreshAuthProviders} onAuthSuccess={() => handleAuthSuccess(p.id)} onModelsChanged={() => onModelsChanged?.()} />,
           },
           apikey: {
             providers: apiKeyProviders,
-            renderDetail: (p) => <ApiKeyDetail key={p.id} provider={p} onRefresh={refreshAuthProviders} onSaveSuccess={() => handleAuthSuccess(p.id)} onModelsChanged={onModelsChanged} onAfterRemove={handleAfterRemove} />,
+            renderDetail: (p) => <ApiKeyDetail key={p.id} provider={p} onRefresh={refreshAuthProviders} onSaveSuccess={() => handleAuthSuccess(p.id)} onModelsChanged={() => onModelsChanged?.()} onAfterRemove={handleAfterRemove} />,
           },
         }}
       />

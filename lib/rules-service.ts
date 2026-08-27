@@ -31,7 +31,7 @@ function scanRulesDir(dir: string, scope: RuleScope): RuleInfo[] {
               : undefined,
           alwaysApply:
             data?.alwaysApply === true || data?.alwaysApply === "true",
-          globs: (data?.globs as string | string[] | undefined) ?? undefined,
+          globs: Array.isArray(data?.globs) ? data.globs : typeof data?.globs === "string" ? [data.globs] : undefined,
           disableModelInvocation:
             data?.["disable-model-invocation"] === true ||
             data?.["disable-model-invocation"] === "true",

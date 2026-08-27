@@ -4,7 +4,12 @@ import { Component, Suspense, type CSSProperties, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppShell as PiWebAppShell } from "@/features/ai/ui/ai-workspace/AppShell";
 import { AppShell as SiteAppShell } from "@/shared/ui/AppShell";
+import {
+  I18nProvider,
+} from "@/features/ai/ui/ai-workspace/hooks/useI18n";
+import type { Locale } from "@/features/ai/ui/ai-workspace/lib/i18n/types";
 import "@/features/ai/ui/ai-workspace/styles/pi-web.css";
+import "@/features/ai/ui/ai-workspace/styles/settings.css";
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -88,12 +93,18 @@ function AiWorkspaceInner() {
   );
 }
 
-export function AiWorkspaceClient() {
+export function AiWorkspaceClient({
+  initialLocale,
+}: {
+  initialLocale?: Locale;
+}) {
   return (
     <AiWorkspaceErrorBoundary>
-      <Suspense fallback={<AiWorkspaceFallback />}>
-        <AiWorkspaceInner />
-      </Suspense>
+      <I18nProvider initialLocale={initialLocale}>
+        <Suspense fallback={<AiWorkspaceFallback />}>
+          <AiWorkspaceInner />
+        </Suspense>
+      </I18nProvider>
     </AiWorkspaceErrorBoundary>
   );
 }

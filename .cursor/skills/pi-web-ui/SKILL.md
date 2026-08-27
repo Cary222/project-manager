@@ -2,7 +2,7 @@
 
 > AI 对话 Tab UI 重构的设计参考库
 > 来源: [github.com/agegr/pi-web](https://github.com/agegr/pi-web)
-> 本地克隆: `~/workstation/pi-web-ref/`
+> 本地克隆: `/Volumes/WorkStation/pi-web-ref/`
 
 ## 触发词（自动加载）
 
@@ -16,7 +16,7 @@
 ## 源码结构速查
 
 ```
-~/workstation/pi-web-ref/
+/Volumes/WorkStation/pi-web-ref/
 ├── components/              # React UI 组件
 │   ├── AppShell.tsx         # 主应用壳，布局容器
 │   ├── ChatWindow.tsx       # 聊天消息窗口
@@ -64,7 +64,7 @@
 
 ### 1. AppShell — 主布局容器
 
-**路径**: `~/workstation/pi-web-ref/components/AppShell.tsx`
+**路径**: `/Volumes/WorkStation/pi-web-ref/components/AppShell.tsx`
 
 ```tsx
 // AppShell.tsx 核心布局结构
@@ -77,7 +77,7 @@
 
 ### 2. ChatWindow — 聊天消息窗口
 
-**路径**: `~/workstation/pi-web-ref/components/ChatWindow.tsx`
+**路径**: `/Volumes/WorkStation/pi-web-ref/components/ChatWindow.tsx`
 
 ```tsx
 // ChatWindow.tsx 核心结构
@@ -88,7 +88,7 @@
 
 ### 3. ChatInput — 输入框组件
 
-**路径**: `~/workstation/pi-web-ref/components/ChatInput.tsx`
+**路径**: `/Volumes/WorkStation/pi-web-ref/components/ChatInput.tsx`
 
 ```tsx
 // ChatInput.tsx 核心功能
@@ -100,7 +100,7 @@
 
 ### 4. SessionSidebar — 会话侧边栏
 
-**路径**: `~/workstation/pi-web-ref/components/SessionSidebar.tsx`
+**路径**: `/Volumes/WorkStation/pi-web-ref/components/SessionSidebar.tsx`
 
 ```tsx
 // SessionSidebar.tsx 核心功能

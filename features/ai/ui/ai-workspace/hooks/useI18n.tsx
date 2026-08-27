@@ -1,12 +1,33 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { getLocalePlugin, getSupportedLocales, resolveBrowserLocale } from "@/lib/i18n/registry";
-import { translateMessage } from "@/lib/i18n/format";
-import type { Locale, LocalePlugin, TranslationParams } from "@/lib/i18n/types";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+} from "react";
+import {
+  getLocalePlugin,
+  getSupportedLocales,
+} from "../lib/i18n/registry";
+import { translateMessage } from "../lib/i18n/format";
+import type { Locale, LocalePlugin, TranslationParams } from "../lib/i18n/types";
 
 const LOCALE_STORAGE_KEY = "pi-locale";
+const LOCALE_COOKIE_NAME = "pi-locale";
+const LOCALE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
 const defaultLocale: Locale = "en";
+
+function writeLocaleCookie(next: Locale) {
+  // SSR 无法写入 cookie，但 cookie 写入发生在用户点切换之后（已完成 hydrate），
+  // 仅影响下次访问的 SSR 渲染——不会触发本次 hydration mismatch。
+  try {
+    document.cookie = `${LOCALE_COOKIE_NAME}=${next}; Path=/; Max-Age=${LOCALE_COOKIE_MAX_AGE}; SameSite=Lax`;
+  } catch {
+    // 隐私模式或 cookie 被禁用时静默忽略，下次访问会退化到 defaultLocale。
+  }
+}
 
 interface I18nContextValue {
   locale: Locale;
@@ -18,42 +39,41 @@ interface I18nContextValue {
 const I18nContext = createContext<I18nContextValue | null>(null);
 
 function getMessages(): Record<string, Record<string, string>> {
-  return Object.fromEntries(getSupportedLocales().flatMap((id) => {
-    const plugin = getLocalePlugin(id);
-    return plugin ? [[id, plugin.messages]] : [];
-  }));
-}
-
-function readInitialLocale(): Locale {
-  try {
-    const stored = window.localStorage.getItem(LOCALE_STORAGE_KEY);
-    if (stored === "en" || stored === "zh-CN") return stored;
-  } catch {
-    // 隐私模式或存储不可用时继续使用浏览器语言。
-  }
-  return resolveBrowserLocale(window.navigator.languages.length ? window.navigator.languages : [window.navigator.language]);
+  return Object.fromEntries(
+    getSupportedLocales().flatMap((id) => {
+      const plugin = getLocalePlugin(id);
+      return plugin ? [[id, plugin.messages]] : [];
+    }),
+  );
 }
 
 /**
- * 提供 ai-workspace（小星：star）的界面语言状态和翻译能力。
- * @param props React 子节点
+ * 提供 ai-workspace 的界面语言状态和翻译能力。
+ *
+ * `initialLocale` 应由 server 组件通过 cookie（或 Accept-Language fallback）
+ * 计算后传入，使 SSR 和 client 首次渲染拿到同一个 locale——彻底避免 hydration
+ * mismatch（之前依赖 localStorage 在 mount 时切换，会导致 server HTML 与
+ * client DOM 不一致，特别是按钮 title / aria-label 等属性）。
+ *
+ * @param props React 子节点和初始 locale
  * @returns 包含语言上下文的 React 节点
  */
-export function I18nProvider({ children }: { children: React.ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(defaultLocale);
-  const [hydrated, setHydrated] = useState(false);
+export function I18nProvider({
+  children,
+  initialLocale,
+}: {
+  children: React.ReactNode;
+  initialLocale?: Locale;
+}) {
+  const [locale, setLocaleState] = useState<Locale>(initialLocale ?? defaultLocale);
   const supportedLocales = useMemo(
-    () => getSupportedLocales().map((id) => getLocalePlugin(id)).filter((plugin): plugin is LocalePlugin => Boolean(plugin)),
+    () =>
+      getSupportedLocales()
+        .map((id) => getLocalePlugin(id))
+        .filter((plugin): plugin is LocalePlugin => Boolean(plugin)),
     [],
   );
   const messages = useMemo(() => getMessages(), []);
-
-  useEffect(() => {
-    const next = readInitialLocale();
-    setLocaleState(next);
-    document.documentElement.lang = next;
-    setHydrated(true);
-  }, []);
 
   const setLocale = useCallback((next: Locale) => {
     if (!getLocalePlugin(next)) return;
@@ -64,10 +84,18 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // 存储失败不影响当前页面内的语言切换。
     }
+    writeLocaleCookie(next);
   }, []);
 
-  const t = useCallback((key: string, params?: TranslationParams) => translateMessage(locale, key, messages, params), [locale, messages]);
-  const value = useMemo(() => ({ locale: hydrated ? locale : defaultLocale, setLocale, t, supportedLocales }), [hydrated, locale, setLocale, t, supportedLocales]);
+  const t = useCallback(
+    (key: string, params?: TranslationParams) =>
+      translateMessage(locale, key, messages, params),
+    [locale, messages],
+  );
+  const value = useMemo(
+    () => ({ locale, setLocale, t, supportedLocales }),
+    [locale, setLocale, t, supportedLocales],
+  );
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }

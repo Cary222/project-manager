@@ -42,6 +42,9 @@ export interface ModelsJson {
 export interface DiscoveredModel {
   id: string;
   name?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
 }
 
 export type ModelTestState =

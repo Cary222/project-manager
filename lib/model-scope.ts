@@ -86,11 +86,12 @@
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import {
+  resolveModelScopeWithDiagnostics,
+  type ModelRuntime,
+  type ScopedModel,
+} from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
-
-type ModelRuntime = any;
-type ScopedModel = any;
-
 const THINKING_LEVEL_SUFFIXES = new Set<ThinkingLevel>([
   "off",
   "minimal",

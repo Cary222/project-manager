@@ -39,6 +39,7 @@ export function ModelSettingsPanel({
   subtitle,
   isMobile = false,
   reloadKey = 0,
+  embedded = false,
 }: {
   adapter: ModelSettingsAdapter;
   onClose: () => void;
@@ -50,6 +51,8 @@ export function ModelSettingsPanel({
   isMobile?: boolean;
   /** 递增触发 adapter.load() 重新加载（用于断开连接后清理占位 provider） */
   reloadKey?: number;
+  /** 嵌入到父容器中，不渲染固定遮罩弹窗。 */
+  embedded?: boolean;
 }) {
   const t = useModelSettingsI18n();
   const [config, setConfig] = useState<ModelsJson>({ providers: {} });
@@ -151,7 +154,20 @@ export function ModelSettingsPanel({
       for (const discoveredModel of discovered) {
         if (existingIds.has(discoveredModel.id)) continue;
         existingIds.add(discoveredModel.id);
-        models.push({ id: discoveredModel.id, name: discoveredModel.name });
+        const newModel: ModelEntry = {
+          id: discoveredModel.id,
+          name: discoveredModel.name,
+        };
+        if (discoveredModel.contextWindow !== undefined) {
+          newModel.contextWindow = discoveredModel.contextWindow;
+        }
+        if (discoveredModel.maxTokens !== undefined) {
+          newModel.maxTokens = discoveredModel.maxTokens;
+        }
+        if (discoveredModel.reasoning !== undefined) {
+          newModel.reasoning = discoveredModel.reasoning;
+        }
+        models.push(newModel);
       }
       return { ...prev, providers: { ...(prev.providers ?? {}), [providerName]: { ...provider, models } } };
     });
@@ -253,42 +269,50 @@ export function ModelSettingsPanel({
     );
   })();
 
+  const panelWidth = isMobile ? "calc(100vw - 16px)" : embedded ? "100%" : 860;
+  const panelHeight = isMobile ? "calc(100dvh - 16px)" : embedded ? "100%" : "78vh";
+  const panelMaxWidth = embedded ? "100%" : "calc(100vw - 16px)";
+  const panelMaxHeight = isMobile ? "calc(100dvh - 16px)" : embedded ? "100%" : "calc(100dvh - 16px)";
+
   return (
     <ModelSettingsAdapterProvider adapter={adapter}>
       <div
         style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 1000,
-          background: "rgba(0,0,0,0.35)",
+          position: embedded ? "relative" : "fixed",
+          inset: embedded ? undefined : 0,
+          zIndex: embedded ? undefined : 1000,
+          background: embedded ? undefined : "rgba(0,0,0,0.35)",
           display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
+          alignItems: embedded ? undefined : "center",
+          justifyContent: embedded ? undefined : "center",
+          width: embedded ? "100%" : "100%",
+          height: embedded ? "100%" : "100%",
         }}
-        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+        onClick={embedded ? undefined : (e) => { if (e.target === e.currentTarget) onClose(); }}
       >
         <div style={{
-          width: isMobile ? "calc(100vw - 16px)" : 860,
-          maxWidth: "calc(100vw - 16px)",
-          height: isMobile ? "calc(100dvh - 16px)" : "78vh",
-          maxHeight: "calc(100dvh - 16px)",
+          width: panelWidth,
+          maxWidth: panelMaxWidth,
+          height: panelHeight,
+          maxHeight: panelMaxHeight,
           background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
+          border: embedded ? "none" : "1px solid var(--border)",
+          borderRadius: embedded ? 0 : 10,
           display: "flex",
           flexDirection: "column",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+          boxShadow: embedded ? "none" : "0 8px 32px rgba(0,0,0,0.18)",
           overflow: "hidden",
+          flex: embedded ? 1 : undefined,
         }}>
-          {/* Header */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-              <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{title}</span>
-              {subtitle}
+          {!embedded && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{title}</span>
+                {subtitle}
+              </div>
+              <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
             </div>
-            <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
-          </div>
-
+          )}
           {/* Body */}
           <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>
 
@@ -428,11 +452,13 @@ export function ModelSettingsPanel({
           </div>
 
           {/* Footer */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, padding: "10px 18px", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, padding: "10px 18px", borderTop: embedded ? "none" : "1px solid var(--border)", flexShrink: 0 }}>
             {saveError && <span style={{ fontSize: 12, color: "#f87171", flex: 1 }}>{saveError}</span>}
-            <button onClick={onClose} style={{ padding: "6px 14px", background: "none", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", fontSize: 13 }}>
-              {t("i18n.cancel")}
-            </button>
+            {!embedded && (
+              <button onClick={onClose} style={{ padding: "6px 14px", background: "none", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", fontSize: 13 }}>
+                {t("i18n.cancel")}
+              </button>
+            )}
             <button onClick={() => void handleSave()} disabled={saving || savedOk} style={{
               position: "relative",
               padding: "6px 16px",

@@ -1,4 +1,18 @@
 import type { ResourceDiagnostic } from "@earendil-works/pi-coding-agent";
+import type { SubagentProfile } from "./subagents";
+
+export interface SubagentProfilesResponse {
+  profiles: SubagentProfile[];
+}
+
+export interface SubagentSettingsResponse {
+  enabled: boolean;
+}
+
+export interface ShellToolSettingsResponse {
+  isWindows: boolean;
+  powerShellEnabled: boolean;
+}
 
 export interface SkillSearchResult {
   package: string;
@@ -54,23 +68,6 @@ export interface SkillsResponse {
   projectResourcesLoaded: boolean;
 }
 
-export type RuleScope = "project" | "global";
-
-export interface RuleInfo {
-  scope: RuleScope;
-  path: string;
-  name: string;
-  description?: string;
-  alwaysApply?: boolean;
-  globs?: string | string[];
-  disableModelInvocation?: boolean;
-  content: string;
-}
-
-export interface RulesResponse {
-  rules: RuleInfo[];
-}
-
 export interface ProjectTrustStatus {
   requiresTrust: boolean;
   trusted: boolean;
@@ -81,6 +78,10 @@ export interface AppUpdateResponse {
   latestVersion: string;
   updateAvailable: boolean;
   releaseUrl: string;
+}
+
+export interface PushConfigResponse {
+  publicKey: string;
 }
 
 export type PluginScope = "global" | "project";
@@ -126,4 +127,22 @@ export interface PluginsResponse {
   totals: PluginResourceCounts;
   diagnostics: PluginDiagnostic[];
   projectResourcesLoaded: boolean;
+}
+
+export type RuleScope = "global" | "project";
+
+export interface RuleInfo {
+  path: string;
+  name: string;
+  scope: RuleScope;
+  description?: string;
+  globs?: string[];
+  alwaysApply?: boolean;
+  content: string;
+  disabled?: boolean;
+  disableModelInvocation?: boolean;
+}
+
+export interface RulesResponse {
+  rules: RuleInfo[];
 }

@@ -170,6 +170,16 @@ function normalizeProvider(value: string): string {
   return value.trim().toLocaleLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+export function stripProviderPrefix(modelId: string): string {
+  const trimmed = modelId.trim();
+  const noModels = trimmed.replace(/^models\//i, "");
+  const slashIndex = noModels.lastIndexOf("/");
+  if (slashIndex !== -1) {
+    return noModels.slice(slashIndex + 1);
+  }
+  return noModels;
+}
+
 function normalizeModelId(value: string): string {
   return value.trim().toLocaleLowerCase().replace(/^models\//, "");
 }
@@ -206,11 +216,14 @@ function baseUrlMatches(entry: ModelCatalogEntry, baseUrl: string): boolean {
 function exactModelMatches(entry: ModelCatalogEntry, query: string): boolean {
   const normalizedQuery = normalizeModelId(query);
   if (!normalizedQuery) return false;
+  const strippedQuery = stripProviderPrefix(normalizedQuery);
   const normalizedId = normalizeModelId(entry.id);
   const normalizedFullId = `${entry.providerId.toLocaleLowerCase()}/${normalizedId}`;
-  return normalizedId === normalizedQuery || normalizedFullId === normalizedQuery;
+  return normalizedId === normalizedQuery
+    || normalizedId === strippedQuery
+    || normalizedFullId === normalizedQuery
+    || normalizedFullId === strippedQuery;
 }
-
 function validPrice(entry: ModelCatalogEntry): entry is ModelCatalogEntry & {
   cost: ModelCatalogCost & { input: number; output: number };
 } {
@@ -530,4 +543,186 @@ export async function loadModelsDevCatalog(): Promise<ModelCatalogEntry[]> {
     if (cache.entries.length > 0) return cache.entries;
     throw error;
   }
+}
+
+// ── Context Window Heuristics & Multi-Tier Resolution ────────────────
+
+/**
+ * Heuristic context window deduction based on model family and version.
+ * Covers Gemini, Claude, DeepSeek, Qwen, GPT/o-series, GLM, Kimi/Moonshot, MiniMax, Llama, Mistral, etc.
+ */
+export function inferModelContextWindowByHeuristics(modelId: string): number | undefined {
+  const stripped = stripProviderPrefix(modelId).toLowerCase();
+
+  // 1. Google Gemini family
+  if (stripped.includes("gemini")) {
+    // 2M context models (Pro 1.5/2.0)
+    if (/gemini-(?:1\.5|2\.[0-9])-pro/i.test(stripped)) {
+      return 2_097_152;
+    }
+    // 1M context models (Flash, Flash-Lite, 2.5, 3.x, etc.)
+    return 1_048_576;
+  }
+
+  // 2. Anthropic Claude family
+  if (stripped.includes("claude")) {
+    if (stripped.includes("1m") || stripped.includes("1000k")) {
+      return 1_000_000;
+    }
+    // Claude 3 / 3.5 / 3.7 / 4 default is 200k
+    return 200_000;
+  }
+
+  // 3. DeepSeek family
+  if (stripped.includes("deepseek")) {
+    if (/deepseek-(?:v4|4)/i.test(stripped)) {
+      return 1_048_576;
+    }
+    // DeepSeek V3 / R1 / Chat / Reasoner is 163,840 (160k) or 131,072
+    if (stripped.includes("r1") || stripped.includes("v3") || stripped.includes("chat") || stripped.includes("reasoner")) {
+      return 163_840;
+    }
+    return 131_072;
+  }
+
+  // 4. Qwen family
+  if (stripped.includes("qwen") || stripped.includes("qwq")) {
+    if (/qwen(?:-?3|3\.0|-?2\.5-max|-?2\.5-plus|-?2\.5-turbo)/i.test(stripped) || stripped.includes("1m")) {
+      return 1_048_576;
+    }
+    // Qwen 2.5 / QwQ standard is 131,072
+    return 131_072;
+  }
+
+  // 5. OpenAI GPT / o1 / o3 / o4 family
+  if (stripped.startsWith("gpt-") || stripped.startsWith("o1") || stripped.startsWith("o3") || stripped.startsWith("o4") || stripped.startsWith("chatgpt")) {
+    if (/gpt-5|gpt-4\.1/i.test(stripped) || stripped.includes("1m")) {
+      return 1_048_576;
+    }
+    if (/gpt-4o|gpt-4-turbo|o1|o3|o4/i.test(stripped)) {
+      return 200_000;
+    }
+    if (/gpt-4/i.test(stripped)) {
+      return 128_000;
+    }
+    return 128_000;
+  }
+
+  // 6. Zhipu GLM family
+  if (stripped.includes("glm")) {
+    if (/glm-(?:5|zero)/i.test(stripped)) {
+      return 1_048_576;
+    }
+    if (/glm-4-long|glm-long/i.test(stripped) || stripped.includes("1m")) {
+      return 1_048_576;
+    }
+    if (/glm-4-plus|glm-4-0520/i.test(stripped)) {
+      return 204_800;
+    }
+    return 131_072;
+  }
+
+  // 7. Moonshot / Kimi family
+  if (stripped.includes("kimi") || stripped.includes("moonshot")) {
+    if (stripped.includes("1m") || stripped.includes("k3")) {
+      return 1_048_576;
+    }
+    if (stripped.includes("k2") || stripped.includes("256k") || stripped.includes("262k")) {
+      return 262_144;
+    }
+    if (stripped.includes("128k")) {
+      return 128_000;
+    }
+    if (stripped.includes("32k")) {
+      return 32_768;
+    }
+    if (stripped.includes("8k")) {
+      return 8_192;
+    }
+    return 262_144;
+  }
+
+  // 8. MiniMax family
+  if (stripped.includes("minimax") || stripped.includes("abab")) {
+    if (stripped.includes("m3") || stripped.includes("1m")) {
+      return 1_048_576;
+    }
+    if (stripped.includes("m2") || stripped.includes("200k")) {
+      return 204_800;
+    }
+    return 204_800;
+  }
+
+  // 9. Meta Llama family
+  if (stripped.includes("llama-3") || stripped.includes("llama3")) {
+    return 131_072;
+  }
+
+  // 10. Mistral / Codestral family
+  if (stripped.includes("mistral") || stripped.includes("codestral") || stripped.includes("pixtral")) {
+    if (stripped.includes("large") || stripped.includes("2407") || stripped.includes("2411")) {
+      return 131_072;
+    }
+    if (stripped.includes("codestral")) {
+      return 262_144;
+    }
+    return 131_072;
+  }
+
+  // 11. Custom / Proxy special aliases (e.g. ox-alpha, agnes)
+  if (stripped.includes("ox-alpha") || stripped.includes("agnes")) {
+    return 1_048_576;
+  }
+
+  return undefined;
+}
+
+/**
+ * 4-Tier Model Context Window Resolver:
+ * Tier 1: User / Provider declared contextWindow (if explicit, > 0, and not default 128k unless intentional)
+ * Tier 2: models.dev Catalog exact / recommendation match
+ * Tier 3: Model family regex heuristics (Gemini 1M/2M, Claude 200k, DeepSeek 160k/1M, Qwen 131k/1M, etc.)
+ * Tier 4: Fallback default (128,000)
+ */
+export function resolveModelContextWindow(options: {
+  modelId: string;
+  providerHint?: string;
+  declaredContextWindow?: number;
+  catalogEntries?: readonly ModelCatalogEntry[];
+}): number {
+  const { modelId, providerHint, declaredContextWindow, catalogEntries } = options;
+
+  // Tier 1: If declared contextWindow is explicitly configured (and not the 128000 default when heuristics suggest otherwise)
+  if (
+    typeof declaredContextWindow === "number" &&
+    Number.isFinite(declaredContextWindow) &&
+    declaredContextWindow > 0 &&
+    declaredContextWindow !== 128_000
+  ) {
+    return declaredContextWindow;
+  }
+
+  // Tier 2: Check catalog entries if provided
+  if (catalogEntries && catalogEntries.length > 0) {
+    const stripped = stripProviderPrefix(modelId);
+    const recommendation = recommendModelCatalogPreset(catalogEntries, stripped, providerHint);
+    if (recommendation.preset.contextWindow && recommendation.preset.contextWindow > 0) {
+      return recommendation.preset.contextWindow;
+    }
+    if (stripped !== modelId) {
+      const origRecommendation = recommendModelCatalogPreset(catalogEntries, modelId, providerHint);
+      if (origRecommendation.preset.contextWindow && origRecommendation.preset.contextWindow > 0) {
+        return origRecommendation.preset.contextWindow;
+      }
+    }
+  }
+
+  // Tier 3: Heuristic deduction based on model family
+  const heuristicWindow = inferModelContextWindowByHeuristics(modelId);
+  if (heuristicWindow && heuristicWindow > 0) {
+    return heuristicWindow;
+  }
+
+  // Tier 4: Default fallback
+  return declaredContextWindow && declaredContextWindow > 0 ? declaredContextWindow : 128_000;
 }

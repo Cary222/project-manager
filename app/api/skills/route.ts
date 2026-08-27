@@ -1,58 +1,64 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { existsSync, readFileSync, writeFileSync } from "fs";
+import { homedir } from "os";
+import path from "path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { requireSession } from "@/shared/lib/permissions";
 import { loadSkillsWithInstallInfo } from "@/lib/skills-service";
+import { setDisableModelInvocation } from "@/lib/skill-frontmatter";
+import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
+// GET /api/skills?cwd=<path>
+export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(request.url);
-    const cwd = searchParams.get("cwd") ?? "";
-    const data = await loadSkillsWithInstallInfo(cwd);
-    return NextResponse.json(data);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "unknown";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    await requireSession();
+  } catch {
+    return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(req.url);
+  const cwd = searchParams.get("cwd");
+  if (!cwd) return NextResponse.json({ error: "cwd required" }, { status: 400 });
+
+  try {
+    const allowedRoots = await getAllowedFileRoots();
+    if (!isExistingFilePathAllowed(cwd, allowedRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+    return NextResponse.json(await loadSkillsWithInstallInfo(cwd));
+  } catch (e) {
+    return NextResponse.json({ error: String(e) }, { status: 500 });
   }
 }
 
-export async function PATCH(request: NextRequest) {
+// PATCH /api/skills — toggle disable-model-invocation on a SKILL.md file
+export async function PATCH(req: Request) {
   try {
-    const body = await request.json() as {
-      filePath: string;
-      disableModelInvocation?: boolean;
-    };
+    await requireSession();
+  } catch {
+    return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+  }
+
+  try {
+    const body = await req.json() as { filePath: string; disableModelInvocation: boolean };
     const { filePath, disableModelInvocation } = body;
-
-    if (!filePath) {
-      return NextResponse.json({ error: "filePath is required" }, { status: 400 });
+    if (!filePath) return NextResponse.json({ error: "filePath required" }, { status: 400 });
+    if (!existsSync(filePath)) return NextResponse.json({ error: "file not found" }, { status: 404 });
+    const allowedRoots = new Set(await getAllowedFileRoots());
+    allowedRoots.add(getAgentDir());
+    const globalSkillsDir = path.join(homedir(), ".agents", "skills");
+    if (existsSync(globalSkillsDir)) allowedRoots.add(globalSkillsDir);
+    if (!isExistingFilePathAllowed(filePath, allowedRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 
-    if (typeof disableModelInvocation !== "boolean") {
-      return NextResponse.json({ error: "disableModelInvocation must be a boolean" }, { status: 400 });
-    }
-
-    await updateSkillDisableFlag(filePath, disableModelInvocation);
+    const content = readFileSync(filePath, "utf8");
+    const updated = setDisableModelInvocation(content, disableModelInvocation);
+    writeFileSync(filePath, updated, "utf8");
     return NextResponse.json({ success: true });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "unknown";
-    return NextResponse.json({ error: msg }, { status: 500 });
+  } catch (e) {
+    return NextResponse.json({ error: String(e) }, { status: 500 });
   }
-}
-
-async function updateSkillDisableFlag(filePath: string, disable: boolean): Promise<void> {
-  const { readFileSync, writeFileSync } = await import("fs");
-  const { parseFrontmatter, formatFrontmatterValue } = await import("@/lib/frontmatter");
-  const { dirname } = await import("path");
-
-  const content = readFileSync(filePath, "utf8");
-  const { data, rest } = parseFrontmatter(content);
-
-  const updatedData = { ...data, "disable-model-invocation": disable };
-  const yamlLines = Object.entries(updatedData).map(([key, value]) => {
-    const formatted = formatFrontmatterValue(value);
-    return `${key}: ${formatted}`;
-  });
-  const yamlBlock = `---\n${yamlLines.join("\n")}\n---`;
-
-  writeFileSync(filePath, `${yamlBlock}\n${rest}`, "utf8");
 }

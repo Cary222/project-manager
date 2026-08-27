@@ -26,7 +26,9 @@ function emit(): void {
 
 function getSystemTheme(): ResolvedTheme {
   if (typeof window === "undefined") return "light";
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
 }
 
 function readStoredPreference(): ThemePreference {
@@ -59,7 +61,11 @@ function ensureState(): ThemeState {
   return state;
 }
 
-function setThemeState(preference: ThemePreference, theme: ResolvedTheme, persist: boolean): void {
+function setThemeState(
+  preference: ThemePreference,
+  theme: ResolvedTheme,
+  persist: boolean,
+): void {
   applyDomTheme(theme);
   if (persist) {
     try {
@@ -81,7 +87,12 @@ function syncAutoThemeFromSystem(): void {
 }
 
 function ensureSystemListener(): void {
-  if (systemListening || typeof window === "undefined" || !window.matchMedia) return;
+  if (
+    systemListening ||
+    typeof window === "undefined" ||
+    !window.matchMedia
+  )
+    return;
 
   const mql = window.matchMedia("(prefers-color-scheme: dark)");
   mql.addEventListener("change", syncAutoThemeFromSystem);
@@ -117,57 +128,76 @@ function nextPreference(preference: ThemePreference): ThemePreference {
 }
 
 export function useTheme() {
-  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const snapshot = useSyncExternalStore(
+    subscribe,
+    getSnapshot,
+    getServerSnapshot,
+  );
 
-  const toggleTheme = useCallback((origin?: ToggleOrigin) => {
-    const current = ensureState();
-    const nextPref = nextPreference(current.preference);
-    const nextTheme = resolveTheme(nextPref);
+  const setThemePreference = useCallback(
+    (nextPreference: ThemePreference, origin?: ToggleOrigin) => {
+      const current = ensureState();
+      if (current.preference === nextPreference) return;
+      const nextTheme = resolveTheme(nextPreference);
 
-    const apply = () => {
-      setThemeState(nextPref, nextTheme, true);
-    };
+      const apply = () => {
+        setThemeState(nextPreference, nextTheme, true);
+      };
 
-    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    const supportsVT = typeof document.startViewTransition === "function";
+      const reduceMotion = window.matchMedia?.(
+        "(prefers-reduced-motion: reduce)",
+      ).matches;
+      const supportsVT = typeof document.startViewTransition === "function";
 
-    if (!supportsVT || reduceMotion) {
-      apply();
-      return;
-    }
+      if (!supportsVT || reduceMotion) {
+        apply();
+        return;
+      }
 
-    const x = origin?.x ?? window.innerWidth / 2;
-    const y = origin?.y ?? window.innerHeight / 2;
-    const endRadius = Math.hypot(
-      Math.max(x, window.innerWidth - x),
-      Math.max(y, window.innerHeight - y),
-    );
+      const x = origin?.x ?? window.innerWidth / 2;
+      const y = origin?.y ?? window.innerHeight / 2;
+      const endRadius = Math.hypot(
+        Math.max(x, window.innerWidth - x),
+        Math.max(y, window.innerHeight - y),
+      );
 
-    const transition = document.startViewTransition(apply);
-    transition.ready
-      .then(() => {
-        document.documentElement.animate(
-          {
-            clipPath: [
-              `circle(0px at ${x}px ${y}px)`,
-              `circle(${endRadius}px at ${x}px ${y}px)`,
-            ],
-          },
-          {
-            duration: 450,
-            easing: "cubic-bezier(0.22, 0.61, 0.36, 1)",
-            pseudoElement: "::view-transition-new(root)",
-          },
-        );
-      })
-      .catch(() => {
-        // transition cancelled — ignore
-      });
-  }, []);
+      const transition = document.startViewTransition(apply);
+      transition.ready
+        .then(() => {
+          if (document.startViewTransition === undefined) return;
+          document.documentElement.animate(
+            {
+              clipPath: [
+                `circle(0px at ${x}px ${y}px)`,
+                `circle(${endRadius}px at ${x}px ${y}px)`,
+              ],
+            },
+            {
+              duration: 450,
+              easing: "cubic-bezier(0.22, 0.61, 0.36, 1)",
+              pseudoElement: "::view-transition-new(root)",
+            },
+          );
+        })
+        .catch(() => {
+          // transition cancelled — ignore
+        });
+    },
+    [],
+  );
+
+  const toggleTheme = useCallback(
+    (origin?: ToggleOrigin) => {
+      const current = ensureState();
+      setThemePreference(nextPreference(current.preference), origin);
+    },
+    [setThemePreference],
+  );
 
   return {
     theme: snapshot.theme,
     preference: snapshot.preference,
+    setThemePreference,
     toggleTheme,
     isDark: snapshot.theme === "dark",
   };

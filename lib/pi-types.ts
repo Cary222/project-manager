@@ -6,7 +6,12 @@ import type {
   SlashCommandInfo,
   Theme,
 } from "@earendil-works/pi-coding-agent";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type {
+  AgentLoopTurnUpdate,
+  AgentMessage as PiAgentMessage,
+  PrepareNextTurnContext,
+} from "@earendil-works/pi-agent-core";
+import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 
 export interface ContextUsage {
   percent: number | null;
@@ -22,6 +27,9 @@ export interface ModelLike {
 export interface ToolInfo {
   name: string;
   description: string;
+  parameters?: unknown;
+  promptGuidelines?: string[];
+  sourceInfo?: unknown;
 }
 
 export interface NavigateTreeResult {
@@ -66,6 +74,7 @@ interface SkillLike {
 
 interface ResourceLoaderLike {
   getSkills(): { skills: SkillLike[] };
+  getAgentsFiles(): { agentsFiles: Array<{ path: string; content: string }> };
 }
 
 interface ExtensionRunnerLike {
@@ -75,10 +84,7 @@ interface ExtensionRunnerLike {
     sourceInfo: SlashCommandInfo["sourceInfo"];
   }>;
   emit?(event: { type: "session_shutdown"; reason: "quit" }): Promise<unknown>;
-  setUIContext?(
-    uiContext?: unknown,
-    mode?: "tui" | "rpc" | "json" | "print",
-  ): void;
+  setUIContext?(uiContext?: unknown, mode?: "tui" | "rpc" | "json" | "print"): void;
 }
 
 type DialogOptionsLike = {
@@ -91,41 +97,18 @@ type WidgetOptionsLike = {
 };
 
 export interface ExtensionUiContextLike {
-  select(
-    title: string,
-    options: string[],
-    opts?: DialogOptionsLike,
-  ): Promise<string | undefined>;
-  confirm(
-    title: string,
-    message: string,
-    opts?: DialogOptionsLike,
-  ): Promise<boolean>;
-  input(
-    title: string,
-    placeholder?: string,
-    opts?: DialogOptionsLike,
-  ): Promise<string | undefined>;
-  editor(
-    title: string,
-    prefill?: string,
-    opts?: DialogOptionsLike,
-  ): Promise<string | undefined>;
+  select(title: string, options: string[], opts?: DialogOptionsLike): Promise<string | undefined>;
+  confirm(title: string, message: string, opts?: DialogOptionsLike): Promise<boolean>;
+  input(title: string, placeholder?: string, opts?: DialogOptionsLike): Promise<string | undefined>;
+  editor(title: string, prefill?: string, opts?: DialogOptionsLike): Promise<string | undefined>;
   notify(message: string, type?: "info" | "warning" | "error"): void;
   onTerminalInput(): () => void;
   setStatus(key: string, text: string | undefined): void;
   setWorkingMessage(message?: string): void;
   setWorkingVisible(visible: boolean): void;
-  setWorkingIndicator(options?: {
-    frames?: string[];
-    intervalMs?: number;
-  }): void;
+  setWorkingIndicator(options?: { frames?: string[]; intervalMs?: number }): void;
   setHiddenThinkingLabel(label?: string): void;
-  setWidget(
-    key: string,
-    content: string[] | ((...args: never[]) => unknown) | undefined,
-    options?: WidgetOptionsLike,
-  ): void;
+  setWidget(key: string, content: string[] | ((...args: never[]) => unknown) | undefined, options?: WidgetOptionsLike): void;
   setFooter(factory: unknown): void;
   setHeader(factory: unknown): void;
   setTitle(title: string): void;
@@ -162,8 +145,12 @@ export interface AgentSessionLike {
     state?: {
       systemPrompt?: string;
       thinkingLevel?: string;
-      streamingMessage?: AgentMessage;
+      streamingMessage?: PiAgentMessage;
     };
+    prepareNextTurnWithContext?: (
+      context: PrepareNextTurnContext,
+      signal?: AbortSignal,
+    ) => Promise<AgentLoopTurnUpdate | undefined> | AgentLoopTurnUpdate | undefined;
   };
   readonly extensionRunner: ExtensionRunnerLike;
   readonly promptTemplates: readonly PromptTemplateLike[];
@@ -171,41 +158,32 @@ export interface AgentSessionLike {
 
   readonly bindExtensions?: unknown;
   dispose(): void;
-  reload(options?: {
-    beforeSessionStart?: () => void | Promise<void>;
-  }): Promise<void>;
+  reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void>;
   subscribe(listener: (event: AgentSessionEvent) => void): () => void;
-  prompt(
-    text: string,
-    options?: {
-      images?: Array<{ type: "image"; data: string; mimeType: string }>;
-      streamingBehavior?: "steer" | "followUp";
-      source?: "interactive" | "rpc";
-      preflightResult?: (success: boolean) => void;
-    },
-  ): Promise<void>;
+  prompt(text: string, options?: {
+    images?: Array<{ type: "image"; data: string; mimeType: string }>;
+    streamingBehavior?: "steer" | "followUp";
+    source?: "interactive" | "rpc";
+    preflightResult?: (success: boolean) => void;
+  }): Promise<void>;
+  sendCustomMessage<T = unknown>(message: {
+    customType: string;
+    content: string | (TextContent | ImageContent)[];
+    display: boolean;
+    details?: T;
+  }, options?: {
+    triggerTurn?: boolean;
+    deliverAs?: "steer" | "followUp" | "nextTurn";
+  }): Promise<void>;
   abort(): Promise<void>;
-  executeBash(
-    command: string,
-    onChunk?: (chunk: string) => void,
-    options?: {
-      excludeFromContext?: boolean;
-      operations?: BashOperations;
-    },
-  ): Promise<{
-    output: string;
-    exitCode?: number;
-    cancelled?: boolean;
-    truncated?: boolean;
-    fullOutputPath?: string;
-  }>;
+  executeBash(command: string, onChunk?: (chunk: string) => void, options?: {
+    excludeFromContext?: boolean;
+    operations?: BashOperations;
+  }): Promise<{ output: string; exitCode?: number; cancelled?: boolean; truncated?: boolean; fullOutputPath?: string }>;
   abortBash(): void;
   readonly isBashRunning: boolean;
   setModel(model: ModelLike): Promise<void>;
-  navigateTree(
-    targetId: string,
-    options?: { summarize?: boolean },
-  ): Promise<NavigateTreeResult>;
+  navigateTree(targetId: string, options?: { summarize?: boolean }): Promise<NavigateTreeResult>;
   setThinkingLevel(level: string): void;
   compact(customInstructions?: string): Promise<unknown>;
   setSessionName(name: string): void;
@@ -213,14 +191,8 @@ export interface AgentSessionLike {
   getLastAssistantText(): string | undefined;
   setAutoCompactionEnabled(enabled: boolean): void;
   setAutoRetryEnabled(enabled: boolean): void;
-  steer(
-    text: string,
-    images?: Array<{ type: "image"; data: string; mimeType: string }>,
-  ): Promise<void>;
-  followUp(
-    text: string,
-    images?: Array<{ type: "image"; data: string; mimeType: string }>,
-  ): Promise<void>;
+  steer(text: string, images?: Array<{ type: "image"; data: string; mimeType: string }>): Promise<void>;
+  followUp(text: string, images?: Array<{ type: "image"; data: string; mimeType: string }>): Promise<void>;
   readonly pendingMessageCount: number;
   getSteeringMessages(): readonly string[];
   getFollowUpMessages(): readonly string[];
@@ -231,6 +203,7 @@ export interface AgentSessionLike {
   abortCompaction(): void;
   getContextUsage(): ContextUsage | undefined;
 }
+
 
 // ─── API route helpers ─────────────────────────────────────────────────────────
 

@@ -1,22 +1,6 @@
-/**
- * /api/auth/api-key/[provider] — Provider API Key 管理（GET / POST / DELETE）
- *
- * 行为：
- *   - GET    返回 provider 的 auth 状态（绝不返回真实 key）
- *   - POST   保存 API key 到 auth.json（经 provider-credential-store 的锁保护）
- *   - DELETE 删除存储的 API key（按类型精确匹配，避免误删 OAuth 凭证）
- *
- * 与 pi-web-ref 的差异：
- *   - 1. ModelRuntime 单例化（lib/model-discovery.ts 的 getModelRuntime）
- *        不再每次 ModelRuntime.create()；凭证变更后 resetModelRuntime() 强制重读 models.json
- *   - 2. POST/DELETE 后同时调用 invalidateUnifiedModelsCache()（unified-models-cache）
- *        这是 pi-web-ref 没有的，ProjectHub 跨端点（/api/ai/models/registry + /api/models）
- *        共享缓存，必须一并失效。
- *   - 3. POST 的 apiKeyAuth.login() 调用方式完全一致
- *        （保留 pi-web-ref 的"prompt → api-key → trim key"逻辑，确保与 Pi SDK 兼容）
- */
 import type { Credential } from "@earendil-works/pi-ai";
 import { NextResponse } from "next/server";
+import { requireSession } from "@/shared/lib/permissions";
 import { invalidateModelsCache } from "@/lib/models-cache";
 import { getModelRuntime, resetModelRuntime } from "@/lib/model-discovery";
 import { removeStoredCredentialIfType, storeProviderCredential } from "@/lib/provider-credential-store";
@@ -28,6 +12,12 @@ type Params = { params: Promise<{ provider: string }> };
 
 // GET /api/auth/api-key/[provider] — returns auth status (never returns the actual key)
 export async function GET(_req: Request, { params }: Params) {
+  try {
+    await requireSession();
+  } catch {
+    return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+  }
+
   const { provider } = await params;
   const modelRuntime = await getModelRuntime();
   const status = modelRuntime.getProviderAuthStatus(provider);
@@ -38,6 +28,12 @@ export async function GET(_req: Request, { params }: Params) {
 
 // POST /api/auth/api-key/[provider]  body: { apiKey: string }
 export async function POST(req: Request, { params }: Params) {
+  try {
+    await requireSession();
+  } catch {
+    return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+  }
+
   const { provider } = await params;
   try {
     const { apiKey } = (await req.json()) as { apiKey?: string };
@@ -66,9 +62,6 @@ export async function POST(req: Request, { params }: Params) {
         throw new Error(`${provider} requires additional authentication settings`);
       },
     });
-    // ModelRuntime.login() persists the credential and then performs an
-    // unbounded network catalog refresh. Store the returned credential
-    // directly so a slow catalog cannot leave the save request hanging.
     await storeProviderCredential(provider, credential);
     invalidateModelsCache();
     invalidateUnifiedModelsCache();
@@ -81,6 +74,12 @@ export async function POST(req: Request, { params }: Params) {
 
 // DELETE /api/auth/api-key/[provider] — removes stored API key
 export async function DELETE(_req: Request, { params }: Params) {
+  try {
+    await requireSession();
+  } catch {
+    return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+  }
+
   const { provider } = await params;
   try {
     const removal = await removeStoredCredentialIfType(provider, "api_key");

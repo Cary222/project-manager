@@ -75,6 +75,9 @@ import { getModelsConfigPath } from "./models-config-store";
 export interface DiscoveredModel {
   id: string;
   name?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -83,6 +86,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function cleanString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function cleanNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return undefined;
 }
 
 function modelFromValue(value: unknown): DiscoveredModel | null {
@@ -99,7 +115,36 @@ function modelFromValue(value: unknown): DiscoveredModel | null {
   const name = cleanString(value.display_name)
     ?? cleanString(value.displayName)
     ?? (cleanString(value.id) || cleanString(value.model) ? cleanString(value.name) : undefined);
-  return name && name !== id ? { id, name } : { id };
+
+  const contextWindow = cleanNumber(value.context_length)
+    ?? cleanNumber(value.context_window)
+    ?? cleanNumber(value.inputTokenLimit)
+    ?? cleanNumber(value.max_context_tokens)
+    ?? cleanNumber(value.max_model_len)
+    ?? cleanNumber(value.max_prompt_tokens)
+    ?? cleanNumber(value.context_size)
+    ?? (isRecord(value.pricing) ? cleanNumber(value.pricing.context_length) : undefined)
+    ?? (isRecord(value.architecture) ? cleanNumber(value.architecture.context_length) : undefined);
+
+  const maxTokens = cleanNumber(value.outputTokenLimit)
+    ?? cleanNumber(value.max_tokens)
+    ?? cleanNumber(value.max_output_tokens)
+    ?? cleanNumber(value.max_completion_tokens);
+
+  const reasoning = typeof value.reasoning === "boolean"
+    ? value.reasoning
+    : typeof value.supports_reasoning === "boolean"
+      ? value.supports_reasoning
+      : typeof value.thinking === "boolean"
+        ? value.thinking
+        : undefined;
+
+  const model: DiscoveredModel = { id };
+  if (name && name !== id) model.name = name;
+  if (contextWindow !== undefined) model.contextWindow = contextWindow;
+  if (maxTokens !== undefined) model.maxTokens = maxTokens;
+  if (reasoning !== undefined) model.reasoning = reasoning;
+  return model;
 }
 
 function listFromResponse(value: unknown): unknown[] {

@@ -4,6 +4,7 @@ import { writePrivateFileAtomicSync } from "./atomic-file";
 import { invalidateModelsCache } from "./models-cache";
 import { invalidateUnifiedModelsCache } from "./unified-models-cache";
 import { resetModelRuntime } from "./model-discovery";
+import { resolveModelContextWindow } from "./model-catalog";
 import { homedir } from "node:os";
 
 /**
@@ -53,24 +54,45 @@ function normalizeModelCost(value: unknown): Record<string, unknown> | undefined
   ]);
 }
 
-/** Complete partial cost groups with zero; omit a cost group only when it is empty. */
-export function normalizeModelsConfigCosts(
+/** Normalize models config: complete partial costs and auto-fill missing/default contextWindow */
+export function normalizeModelsConfig(
   data: Record<string, unknown>,
 ): Record<string, unknown> {
   const normalized = structuredClone(data);
   if (!isRecord(normalized.providers)) return normalized;
 
-  for (const provider of Object.values(normalized.providers)) {
+  for (const [providerId, provider] of Object.entries(normalized.providers)) {
     if (!isRecord(provider) || !Array.isArray(provider.models)) continue;
     for (const model of provider.models) {
-      if (!isRecord(model) || !("cost" in model)) continue;
-      const cost = normalizeModelCost(model.cost);
-      if (cost) model.cost = cost;
-      else delete model.cost;
+      if (!isRecord(model) || typeof model.id !== "string" || !model.id.trim()) continue;
+
+      // Auto-fill contextWindow if missing or default (128k) when catalog/heuristics report better
+      const currentWindow = typeof model.contextWindow === "number" && Number.isFinite(model.contextWindow) && model.contextWindow > 0
+        ? model.contextWindow
+        : undefined;
+
+      const resolvedWindow = resolveModelContextWindow({
+        modelId: model.id,
+        providerHint: providerId,
+        declaredContextWindow: currentWindow,
+      });
+
+      if (resolvedWindow && (currentWindow === undefined || (currentWindow === 128_000 && resolvedWindow !== 128_000))) {
+        model.contextWindow = resolvedWindow;
+      }
+
+      if ("cost" in model) {
+        const cost = normalizeModelCost(model.cost);
+        if (cost) model.cost = cost;
+        else delete model.cost;
+      }
     }
   }
   return normalized;
 }
+
+/** Alias for backward compatibility */
+export const normalizeModelsConfigCosts = normalizeModelsConfig;
 
 function sanitizeModelsConfig(data: Record<string, unknown>): Record<string, unknown> {
   if (!isRecord(data.providers)) return data;
@@ -97,7 +119,8 @@ export async function readModelsConfig(
   const path = modelsPath ?? await getModelsConfigPath();
   if (!existsSync(path)) return { providers: {} };
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    return normalizeModelsConfig(raw);
   } catch {
     return { providers: {} };
   }
