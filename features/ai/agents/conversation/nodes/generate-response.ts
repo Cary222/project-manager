@@ -384,25 +384,6 @@ function buildMessages(
     msgs.push({ role: "user", content: userContent + contextSuffix } satisfies UserModelMessage);
   }
 
-  // #region debug log messages
-  const fs = require('fs');
-  fs.appendFileSync('/Users/vastgui/Desktop/project-manager/.cursor/debug-ebf0e5.log', JSON.stringify({
-    sessionId: 'ebf0e5',
-    location: 'buildMessages:return',
-    message: '[H-F] buildMessages output',
-    data: {
-      messagesCount: msgs.length,
-      messages: msgs.map((m, i) => ({
-        index: i,
-        role: m.role,
-        contentType: Array.isArray(m.content) ? m.content.map((p: any) => ({ type: p.type, keys: Object.keys(p) })) : typeof m.content
-      }))
-    },
-    timestamp: Date.now(),
-    hypothesisId: 'F'
-  }) + '\n');
-  // #endregion
-
   return msgs;
 }
 

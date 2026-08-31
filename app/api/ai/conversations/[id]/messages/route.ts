@@ -281,9 +281,6 @@ export async function POST(
     const { message, conversationHistory, mode, forceSearch, useWebSearch, clientCity, modelName } =
       messageSchema.parse(body);
     console.log(`[AI-MSG] parsed message="${message.slice(0, 80)}" mode=${mode}`);
-    // #region agent log
-    const fs = require('fs'); fs.appendFileSync('/Users/vastgui/Desktop/project-manager/.cursor/debug-ebf0e5.log', JSON.stringify({sessionId:'ebf0e5',location:'route.ts:283',message:'[H-C] body parsed',data:{inputImageIds:body.inputImageIds,inputImageIdsLength:body.inputImageIds?.length??0},timestamp:Date.now(),hypothesisId:'C'})+'\n');
-    // #endregion
 
     // 把客户端城市名传给 system prompt，用于天气等实时数据搜索
     const geoCity = clientCity ?? null;
@@ -767,9 +764,6 @@ async function handleLangGraphRequest(
     pendingLastAssistantMessage: pendingState?.lastAssistantMessage,
     ...(historyImageUrls.size > 0 ? { historyImageUrls } : {}),
   });
-  // #region agent log
-  const fs = require('fs'); fs.appendFileSync('/Users/vastgui/Desktop/project-manager/.cursor/debug-ebf0e5.log', JSON.stringify({sessionId:'ebf0e5',location:'route.ts:769',message:'[H-D] buildMessages result',data:{messagesCount:langgraphMessages.length,lastMessageContent:langgraphMessages[langgraphMessages.length-1]?.content},timestamp:Date.now(),hypothesisId:'D'})+'\n');
-  // #endregion
 
   // 图片解析失败但消息可继续发送（仅文字模式退化）
   if (currentImageResolveError) {
