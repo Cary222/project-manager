@@ -79,6 +79,28 @@ export function ProjectMeetingDetailModal({
   const [publishing, setPublishing] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!window.confirm("确定要彻底删除本条周会记录吗？相关的录音关联与纪要内容将被清除。")) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/meetings/${meetingId}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "删除失败");
+      toast.success("周会记录已删除");
+      onClose();
+      onUpdated();
+    } catch (err) {
+      toast.error(`删除失败: ${err instanceof Error ? err.message : "网络异常"}`);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const { toast } = useToast();
 
@@ -777,9 +799,15 @@ export function ProjectMeetingDetailModal({
 
         {/* 底部操作栏 */}
         <div className="flex items-center justify-between border-t border-ink-200 bg-ink-50/50 px-6 py-4 dark:border-ink-800 dark:bg-ink-800/30">
-          <div className="text-xs text-ink-400">
+          <div className="flex items-center gap-3">
+            <button
+              className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900/60 dark:text-rose-400 dark:hover:bg-rose-950/40"
+              title="删除周会记录"
+            >
+              {deleting ? "删除中..." : "🗑️ 删除周会"}
+            </button>
             {isPublished && meeting.publishedAt && (
-              <span>
+              <span className="text-xs text-ink-400">
                 发布时间：{new Date(meeting.publishedAt).toLocaleString()}
               </span>
             )}

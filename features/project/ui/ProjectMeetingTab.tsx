@@ -23,6 +23,32 @@ export function ProjectMeetingTab({ project }: Props) {
     null,
   );
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDeleteMeeting = async (meetingId: string, title: string) => {
+    if (!window.confirm(`确定要删除周会「${title}」吗？删除后录音关联与纪要内容将被清除。`)) {
+      return;
+    }
+    setDeletingId(meetingId);
+    try {
+      const res = await fetch(`/api/projects/${project.id}/meetings/${meetingId}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || "删除失败");
+      }
+      toast.success("周会记录已成功删除");
+      fetchMeetings();
+      if (selectedMeetingId === meetingId) {
+        setSelectedMeetingId(null);
+      }
+    } catch (err) {
+      toast.error(`删除失败: ${err instanceof Error ? err.message : "网络异常"}`);
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const { toast } = useToast();
 
@@ -188,6 +214,14 @@ export function ProjectMeetingTab({ project }: Props) {
                     className="rounded-lg border border-ink-200 px-3 py-1.5 text-xs font-semibold text-ink-700 hover:bg-ink-100 dark:border-ink-700 dark:text-ink-300 dark:hover:bg-ink-800"
                   >
                     {meeting.status === "PUBLISHED" ? "查看详情" : "审核与编辑"}
+                  </button>
+                  <button
+                    onClick={() => handleDeleteMeeting(meeting.id, meeting.title)}
+                    disabled={deletingId === meeting.id}
+                    className="rounded-lg border border-rose-200 px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900/60 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                    title="删除周会记录"
+                  >
+                    {deletingId === meeting.id ? "删除中..." : "删除"}
                   </button>
                 </div>
               </div>
