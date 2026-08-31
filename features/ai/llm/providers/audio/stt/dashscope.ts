@@ -10,6 +10,7 @@
  */
 
 import WebSocket from "ws";
+import { spawn } from "child_process";
 import { resolveVoiceCredential } from "@/features/ai/llm/providers/audio/credentials";
 
 const DASHSCOPE_TIMEOUT_MS = 60_000;
@@ -50,6 +51,41 @@ interface TaskStatusResponse {
 interface DashScopeError {
   code: string;
   message: string;
+}
+
+/**
+ * 尝试通过 ffmpeg 将任意输入音频转为标准 16000Hz 单声道 PCM WAV 格式
+ */
+async function normalizeAudioToWav(inputBuffer: Buffer): Promise<{ buffer: Buffer; format: "wav" }> {
+  try {
+    const wavBuffer = await new Promise<Buffer>((resolve, reject) => {
+      const ff = spawn("ffmpeg", [
+        "-i", "pipe:0",
+        "-ar", "16000",
+        "-ac", "1",
+        "-f", "wav",
+        "pipe:1",
+      ], { stdio: ["pipe", "pipe", "pipe"] });
+
+      const chunks: Buffer[] = [];
+      ff.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+      ff.on("close", (code) => {
+        if (code === 0 && chunks.length > 0) {
+          resolve(Buffer.concat(chunks));
+        } else {
+          reject(new Error(`ffmpeg exited with code ${code}`));
+        }
+      });
+      ff.on("error", (err) => reject(err));
+      ff.stdin.write(inputBuffer);
+      ff.stdin.end();
+    });
+
+    return { buffer: wavBuffer, format: "wav" };
+  } catch (err) {
+    console.warn("[stt] ffmpeg 格式重采样未执行或失败，回落到原格式:", err instanceof Error ? err.message : String(err));
+    return { buffer: inputBuffer, format: "wav" };
+  }
 }
 
 /**
@@ -102,6 +138,9 @@ export async function transcribeWithWebSocket(
   baseURL: string,
   modelName: string = "qwen-audio-3.0-asr-flash-streaming",
 ): Promise<TranscribeResult> {
+  // 预先将音频转为 16000Hz 单声道 wav 以彻底消除 sample_rate 不匹配错误
+  const { buffer: readyBuffer, format: readyFormat } = await normalizeAudioToWav(audioBuffer);
+
   // 构建 WebSocket 端点
   let wsUrl = "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
   const match = baseURL.match(/https:\/\/([a-zA-Z0-9_-]+)\.cn-beijing\.maas\.aliyuncs\.com/);
@@ -109,16 +148,15 @@ export async function transcribeWithWebSocket(
     wsUrl = `wss://${match[1]}.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference`;
   }
 
-  console.log(`[stt-ws] 开始 WebSocket 转录: url=${wsUrl}, model=${modelName}, format=${format}`);
+  console.log(`[stt-ws] 开始 WebSocket 转录: url=${wsUrl}, model=${modelName}, format=${readyFormat}, bufferSize=${readyBuffer.length}`);
 
-  // 格式兼容映射
-  const wsFormat = ["mp3", "wav", "pcm", "opus", "aac"].includes(format) ? format : "wav";
   const taskId = "t" + Date.now().toString(16).padEnd(31, "0").slice(0, 31);
 
   return new Promise((resolve, reject) => {
     let ws: WebSocket | null = null;
     let isFinished = false;
-    const recognizedSentences: string[] = [];
+    const finalSentences: string[] = [];
+    let currentSentence = "";
     let totalDuration = 0;
 
     const cleanup = () => {
@@ -127,7 +165,7 @@ export async function transcribeWithWebSocket(
         try {
           ws.close();
         } catch (closeErr) {
-          console.debug("[stt-ws] WebSocket close ignored error:", closeErr);
+          console.debug("[stt-ws] WebSocket close error:", closeErr);
         }
       }
     };
@@ -163,7 +201,7 @@ export async function transcribeWithWebSocket(
           model: modelName,
           parameters: {
             sample_rate: 16000,
-            format: wsFormat,
+            format: readyFormat,
           },
           input: {},
         },
@@ -175,7 +213,7 @@ export async function transcribeWithWebSocket(
       let msg: {
         header?: { event?: string; error_message?: string };
         payload?: {
-          output?: { sentence?: { text?: string } };
+          output?: { sentence?: { text?: string; sentence_end?: boolean } };
           usage?: { duration?: number };
         };
       };
@@ -191,12 +229,12 @@ export async function transcribeWithWebSocket(
       if (event === "task-started") {
         console.log("[stt-ws] 服务端已就绪 (task-started)，开始流式发送音频数据...");
         let offset = 0;
-        const chunkSize = 3200; // 约 100ms 音频帧
+        const chunkSize = 3200; // 约 100ms 音频帧 @ 16kHz
 
         const sendNextChunk = () => {
           if (isFinished || !ws || ws.readyState !== WebSocket.OPEN) return;
 
-          if (offset >= audioBuffer.length) {
+          if (offset >= readyBuffer.length) {
             console.log("[stt-ws] 音频发送完毕，发送 finish-task...");
             ws.send(
               JSON.stringify({
@@ -211,8 +249,8 @@ export async function transcribeWithWebSocket(
             return;
           }
 
-          const end = Math.min(offset + chunkSize, audioBuffer.length);
-          const chunk = audioBuffer.slice(offset, end);
+          const end = Math.min(offset + chunkSize, readyBuffer.length);
+          const chunk = readyBuffer.slice(offset, end);
           offset += chunkSize;
 
           ws.send(chunk);
@@ -221,9 +259,13 @@ export async function transcribeWithWebSocket(
 
         sendNextChunk();
       } else if (event === "result-generated") {
-        const sentence = msg.payload?.output?.sentence?.text;
-        if (sentence) {
-          recognizedSentences.push(sentence);
+        const sentenceObj = msg.payload?.output?.sentence;
+        if (sentenceObj?.text) {
+          currentSentence = sentenceObj.text;
+          if (sentenceObj.sentence_end) {
+            finalSentences.push(currentSentence);
+            currentSentence = "";
+          }
         }
         if (msg.payload?.usage?.duration) {
           totalDuration = msg.payload.usage.duration;
@@ -232,7 +274,10 @@ export async function transcribeWithWebSocket(
         console.log("[stt-ws] 转录任务圆满完成！");
         clearTimeout(timeoutTimer);
         cleanup();
-        const finalText = recognizedSentences.join("").trim();
+        if (currentSentence) {
+          finalSentences.push(currentSentence);
+        }
+        const finalText = finalSentences.join("").trim();
         resolve({
           text: finalText,
           duration: totalDuration || undefined,
