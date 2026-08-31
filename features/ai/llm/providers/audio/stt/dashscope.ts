@@ -56,24 +56,30 @@ interface DashScopeError {
 /**
  * 尝试通过 ffmpeg 将任意输入音频转为标准 16000Hz 单声道 PCM WAV 格式
  */
-async function normalizeAudioToWav(inputBuffer: Buffer): Promise<{ buffer: Buffer; format: "wav" }> {
+async function normalizeAudioToWav(
+  inputBuffer: Buffer,
+  originalFormat: SupportedAudioFormat,
+): Promise<{ buffer: Buffer; format: string }> {
+  const binary = process.env.FFMPEG_PATH || "ffmpeg";
   try {
     const wavBuffer = await new Promise<Buffer>((resolve, reject) => {
-      const ff = spawn("ffmpeg", [
-        "-i", "pipe:0",
-        "-ar", "16000",
-        "-ac", "1",
-        "-f", "wav",
-        "pipe:1",
-      ], { stdio: ["pipe", "pipe", "pipe"] });
+      const ff = spawn(
+        binary,
+        ["-i", "pipe:0", "-ar", "16000", "-ac", "1", "-f", "wav", "pipe:1"],
+        { stdio: ["pipe", "pipe", "pipe"] },
+      );
 
       const chunks: Buffer[] = [];
+      let errOutput = "";
       ff.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+      ff.stderr.on("data", (chunk: Buffer) => {
+        errOutput += chunk.toString();
+      });
       ff.on("close", (code) => {
         if (code === 0 && chunks.length > 0) {
           resolve(Buffer.concat(chunks));
         } else {
-          reject(new Error(`ffmpeg exited with code ${code}`));
+          reject(new Error(`ffmpeg exited with code ${code}: ${errOutput.slice(-200)}`));
         }
       });
       ff.on("error", (err) => reject(err));
@@ -83,8 +89,14 @@ async function normalizeAudioToWav(inputBuffer: Buffer): Promise<{ buffer: Buffe
 
     return { buffer: wavBuffer, format: "wav" };
   } catch (err) {
-    console.warn("[stt] ffmpeg 格式重采样未执行或失败，回落到原格式:", err instanceof Error ? err.message : String(err));
-    return { buffer: inputBuffer, format: "wav" };
+    console.warn(
+      `[stt] ffmpeg 格式重采样未执行或失败 (${binary})，保留原格式推流:`,
+      err instanceof Error ? err.message : String(err),
+    );
+    const validFormat = ["mp3", "wav", "opus", "aac", "pcm"].includes(originalFormat)
+      ? originalFormat
+      : "mp3";
+    return { buffer: inputBuffer, format: validFormat };
   }
 }
 
@@ -139,7 +151,7 @@ export async function transcribeWithWebSocket(
   modelName: string = "qwen-audio-3.0-asr-flash-streaming",
 ): Promise<TranscribeResult> {
   // 预先将音频转为 16000Hz 单声道 wav 以彻底消除 sample_rate 不匹配错误
-  const { buffer: readyBuffer, format: readyFormat } = await normalizeAudioToWav(audioBuffer);
+  const { buffer: readyBuffer, format: readyFormat } = await normalizeAudioToWav(audioBuffer, format);
 
   // 构建 WebSocket 端点
   let wsUrl = "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
@@ -200,7 +212,7 @@ export async function transcribeWithWebSocket(
           function: "recognition",
           model: modelName,
           parameters: {
-            sample_rate: 16000,
+            sample_rate: readyFormat === "wav" ? 16000 : 16000,
             format: readyFormat,
           },
           input: {},
@@ -260,13 +272,21 @@ export async function transcribeWithWebSocket(
         sendNextChunk();
       } else if (event === "result-generated") {
         const sentenceObj = msg.payload?.output?.sentence;
-        if (sentenceObj?.text) {
+        if (sentenceObj && typeof sentenceObj === "object" && sentenceObj.text) {
           currentSentence = sentenceObj.text;
           if (sentenceObj.sentence_end) {
             finalSentences.push(currentSentence);
             currentSentence = "";
           }
+        } else if (typeof sentenceObj === "string" && sentenceObj) {
+          currentSentence = sentenceObj;
+        } else if (msg.payload?.output && typeof msg.payload.output === "object") {
+          const directText = (msg.payload.output as Record<string, unknown>).text;
+          if (typeof directText === "string" && directText) {
+            currentSentence = directText;
+          }
         }
+
         if (msg.payload?.usage?.duration) {
           totalDuration = msg.payload.usage.duration;
         }
