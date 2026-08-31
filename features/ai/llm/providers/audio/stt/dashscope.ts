@@ -1,20 +1,15 @@
 /**
  * dashscope.ts — STT (Speech-to-Text) 语音识别
  *
- * 支持两种模式：
- * 1. 标准 DashScope：同步 API（/audio/transcriptions）
- * 2. Token Plan MaaS：异步 API（/services/audio/asr/transcription → 轮询 /tasks/{id}）
+ * 支持三种模式：
+ * 1. 百炼专属空间 / DashScope WebSocket 流式实时识别（优先，支持 qwen-audio-3.0-asr-flash-streaming、fun-asr-realtime、paraformer 等）
+ * 2. Token Plan MaaS 异步 API（/services/audio/asr/transcription → 轮询 /tasks/{id}）
+ * 3. 标准 DashScope 同步 API（/audio/transcriptions）
  *
- * 模型：
- * - qwen3-asr-flash-filetrans（推荐，异步，长音频）
- * - qwen-audio-3.0-asr-flash-filetrans
- * - fun-asr-recorded-speech-recognition-http-api
- *
- * Base URL：
- * - 标准：https://dashscope.aliyuncs.com/api/v1
- * - Token Plan MaaS：https://token-plan.cn-beijing.maas.aliyuncs.com/api/v1
+ * 支持格式：mp3, wav, m4a, webm, mp4, pcm, opus, aac
  */
 
+import WebSocket from "ws";
 import { resolveVoiceCredential } from "@/features/ai/llm/providers/audio/credentials";
 
 const DASHSCOPE_TIMEOUT_MS = 60_000;
@@ -68,28 +63,203 @@ interface DashScopeError {
 export async function transcribeWithDashScope(
   audioBuffer: Buffer,
   format: SupportedAudioFormat,
-  options: TranscribeOptions
+  options: TranscribeOptions,
 ): Promise<TranscribeResult> {
   const { userId, model } = options;
 
-  // 使用新的凭证解析器
+  // 使用语音凭证解析器
   const voiceResult = await resolveVoiceCredential(userId, "stt", model);
   if (!voiceResult) {
     throw new Error(
-      "语音识别服务未配置。请在「设置 > AI Providers」中添加支持 ASR 的 provider（如 dashscope 或 openai）。"
+      "语音识别服务未配置。请在「设置 > AI Providers」中添加支持 ASR 的 provider（如 dashscope、token plan 或 openai）。",
     );
   }
 
-  const { credential, modelName } = voiceResult;
-  const isMaaS = credential.baseURL.includes("token-plan") && credential.baseURL.includes(".maas.");
+  const { credential } = voiceResult;
 
-  // Token Plan MaaS 使用异步 API
-  if (isMaaS) {
-    return transcribeAsyncMaaS(audioBuffer, format, modelName, credential.apiKey, credential.baseURL);
+  // 1. 优先使用 WebSocket 流式识别协议（百炼 MaaS 专属空间与标准 DashScope 官方推荐，支持 qwen-audio-3.0-asr-flash-streaming）
+  try {
+    const wsModel = model || "qwen-audio-3.0-asr-flash-streaming";
+    return await transcribeWithWebSocket(audioBuffer, format, credential.apiKey, credential.baseURL, wsModel);
+  } catch (wsError) {
+    console.warn("[stt] WebSocket ASR 尝试失败，开始尝试 HTTP 异步/同步 ASR 降级链路:", wsError instanceof Error ? wsError.message : String(wsError));
+
+    const isMaaS = credential.baseURL.includes(".maas.aliyuncs.com");
+    if (isMaaS) {
+      return transcribeAsyncMaaS(audioBuffer, format, voiceResult.modelName, credential.apiKey, credential.baseURL);
+    }
+    return transcribeSync(audioBuffer, format, voiceResult.modelName, credential.apiKey, credential.baseURL);
+  }
+}
+
+/**
+ * 通过 DashScope / MaaS 专属空间 WebSocket 协议执行实时语音识别
+ */
+export async function transcribeWithWebSocket(
+  audioBuffer: Buffer,
+  format: SupportedAudioFormat,
+  apiKey: string,
+  baseURL: string,
+  modelName: string = "qwen-audio-3.0-asr-flash-streaming",
+): Promise<TranscribeResult> {
+  // 构建 WebSocket 端点
+  let wsUrl = "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
+  const match = baseURL.match(/https:\/\/([a-zA-Z0-9_-]+)\.cn-beijing\.maas\.aliyuncs\.com/);
+  if (match && match[1]) {
+    wsUrl = `wss://${match[1]}.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference`;
   }
 
-  // 标准 DashScope 使用同步 API
-  return transcribeSync(audioBuffer, format, modelName, credential.apiKey, credential.baseURL);
+  console.log(`[stt-ws] 开始 WebSocket 转录: url=${wsUrl}, model=${modelName}, format=${format}`);
+
+  // 格式兼容映射
+  const wsFormat = ["mp3", "wav", "pcm", "opus", "aac"].includes(format) ? format : "wav";
+  const taskId = "t" + Date.now().toString(16).padEnd(31, "0").slice(0, 31);
+
+  return new Promise((resolve, reject) => {
+    let ws: WebSocket | null = null;
+    let isFinished = false;
+    const recognizedSentences: string[] = [];
+    let totalDuration = 0;
+
+    const cleanup = () => {
+      isFinished = true;
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        try {
+          ws.close();
+        } catch (closeErr) {
+          console.debug("[stt-ws] WebSocket close ignored error:", closeErr);
+        }
+      }
+    };
+
+    try {
+      ws = new WebSocket(wsUrl, {
+        headers: {
+          Authorization: `bearer ${apiKey}`,
+        },
+      });
+    } catch (wsErr) {
+      return reject(wsErr);
+    }
+
+    // 超时控制 (5 分钟)
+    const timeoutTimer = setTimeout(() => {
+      cleanup();
+      reject(new Error("WebSocket 语音转录超时 (超过 5 分钟)"));
+    }, 300_000);
+
+    ws.on("open", () => {
+      console.log(`[stt-ws] WebSocket 连接已建立，发送 run-task: taskId=${taskId}`);
+      const runTask = {
+        header: {
+          action: "run-task",
+          task_id: taskId,
+          streaming: "duplex",
+        },
+        payload: {
+          task_group: "audio",
+          task: "asr",
+          function: "recognition",
+          model: modelName,
+          parameters: {
+            sample_rate: 16000,
+            format: wsFormat,
+          },
+          input: {},
+        },
+      };
+      ws?.send(JSON.stringify(runTask));
+    });
+
+    ws.on("message", (data) => {
+      let msg: {
+        header?: { event?: string; error_message?: string };
+        payload?: {
+          output?: { sentence?: { text?: string } };
+          usage?: { duration?: number };
+        };
+      };
+      try {
+        msg = JSON.parse(data.toString());
+      } catch (err) {
+        console.warn("[stt-ws] 解析消息失败:", err);
+        return;
+      }
+
+      const event = msg.header?.event;
+
+      if (event === "task-started") {
+        console.log("[stt-ws] 服务端已就绪 (task-started)，开始流式发送音频数据...");
+        let offset = 0;
+        const chunkSize = 3200; // 约 100ms 音频帧
+
+        const sendNextChunk = () => {
+          if (isFinished || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+          if (offset >= audioBuffer.length) {
+            console.log("[stt-ws] 音频发送完毕，发送 finish-task...");
+            ws.send(
+              JSON.stringify({
+                header: {
+                  action: "finish-task",
+                  task_id: taskId,
+                  streaming: "duplex",
+                },
+                payload: { input: {} },
+              }),
+            );
+            return;
+          }
+
+          const end = Math.min(offset + chunkSize, audioBuffer.length);
+          const chunk = audioBuffer.slice(offset, end);
+          offset += chunkSize;
+
+          ws.send(chunk);
+          setTimeout(sendNextChunk, 20); // 间隔 20ms 流式推送
+        };
+
+        sendNextChunk();
+      } else if (event === "result-generated") {
+        const sentence = msg.payload?.output?.sentence?.text;
+        if (sentence) {
+          recognizedSentences.push(sentence);
+        }
+        if (msg.payload?.usage?.duration) {
+          totalDuration = msg.payload.usage.duration;
+        }
+      } else if (event === "task-finished") {
+        console.log("[stt-ws] 转录任务圆满完成！");
+        clearTimeout(timeoutTimer);
+        cleanup();
+        const finalText = recognizedSentences.join("").trim();
+        resolve({
+          text: finalText,
+          duration: totalDuration || undefined,
+        });
+      } else if (event === "task-failed") {
+        clearTimeout(timeoutTimer);
+        const errMsg = msg.header?.error_message || "语音识别任务失败";
+        console.error(`[stt-ws] 任务失败:`, errMsg);
+        cleanup();
+        reject(new Error(`WebSocket ASR 失败: ${errMsg}`));
+      }
+    });
+
+    ws.on("error", (err) => {
+      clearTimeout(timeoutTimer);
+      console.error("[stt-ws] WebSocket 连接错误:", err);
+      cleanup();
+      reject(err);
+    });
+
+    ws.on("close", (code, reason) => {
+      clearTimeout(timeoutTimer);
+      if (!isFinished) {
+        reject(new Error(`WebSocket 连接异常断开: code=${code}, reason=${reason}`));
+      }
+    });
+  });
 }
 
 /**
@@ -115,7 +285,7 @@ async function transcribeSync(
   format: SupportedAudioFormat,
   modelName: string,
   apiKey: string,
-  baseURL: string
+  baseURL: string,
 ): Promise<TranscribeResult> {
   const apiBase = normalizeDashscopeBaseUrl(baseURL);
   const mimeType = formatToMimeType(format);
@@ -124,7 +294,7 @@ async function transcribeSync(
   formData.append(
     "file",
     new Blob([new Uint8Array(audioBuffer)], { type: mimeType }),
-    `audio.${format}`
+    `audio.${format}`,
   );
   formData.append("model", modelName);
 
@@ -143,7 +313,7 @@ async function transcribeSync(
     if (!response.ok) {
       const errorData = (await response.json().catch(() => ({}))) as DashScopeError;
       throw new Error(
-        `ASR 请求失败: ${errorData.code ?? response.status} - ${errorData.message ?? response.statusText}`
+        `ASR 请求失败: ${errorData.code ?? response.status} - ${errorData.message ?? response.statusText}`,
       );
     }
 
@@ -165,27 +335,22 @@ async function transcribeSync(
 }
 
 /**
- * Token Plan MaaS 异步 ASR
- *
- * 流程：
- * 1. 提交任务（multipart/form-data 上传文件）→ 返回 task_id
- * 2. 轮询 GET /tasks/{task_id} 直到完成
- * 3. 解析返回结果
+ * Token Plan MaaS 异步 ASR（HTTP 轮询降级）
  */
 async function transcribeAsyncMaaS(
   audioBuffer: Buffer,
   format: SupportedAudioFormat,
   modelName: string,
   apiKey: string,
-  baseURL: string
+  baseURL: string,
 ): Promise<TranscribeResult> {
   const apiBase = normalizeDashscopeBaseUrl(baseURL);
-  // Step 1: 提交转写任务（使用 multipart/form-data）
   const submitUrl = `${apiBase}/services/audio/asr/transcription`;
+
   const candidateModels = Array.from(new Set([
     modelName,
+    "qwen-audio-3.0-asr-flash-streaming",
     "qwen3-asr-flash-filetrans",
-    "qwen-audio-3.0-asr-flash-filetrans",
     "paraformer-v2",
     "sensevoice-v1",
   ]));
@@ -201,7 +366,7 @@ async function transcribeAsyncMaaS(
     formData.append(
       "file",
       new Blob([new Uint8Array(audioBuffer)], { type: mimeType }),
-      `audio.${format}`
+      `audio.${format}`,
     );
     formData.append("model", currentModel);
     formData.append("parameters", JSON.stringify({
@@ -235,18 +400,14 @@ async function transcribeAsyncMaaS(
   }
 
   if (!taskId) {
-    if (lastErrorText.includes("Model not exist") || apiKey.startsWith("sk-sp-")) {
-      throw new Error(
-        "当前 API 凭证（Token Plan 套餐）未包含离线录音文件识别 (ASR) 权限。Token Plan 仅包含 TTS 语音合成与 Realtime 实时语音，不含离线文件转录。请在「设置 > AI Providers」中添加阿里云百炼标准 Key (dashscope，以 sk- 开头) 或 OpenAI Key。"
-      );
-    }
     throw new Error(`ASR 提交任务失败: ${lastErrorText}`);
   }
+
   console.log(`[stt] 任务已提交: task_id=${taskId}`);
 
-  // Step 3: 轮询任务状态
+  // 轮询任务状态
   const taskUrl = `${apiBase}/tasks/${taskId}`;
-  const maxAttempts = 60; // 最多 60 次 × 2s = 2 分钟
+  const maxAttempts = 60;
   let transcriptionUrl: string | null = null;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -284,7 +445,7 @@ async function transcribeAsyncMaaS(
     throw new Error("ASR 转写超时（超过 2 分钟）");
   }
 
-  // Step 4: 下载结果 JSON
+  // 下载结果 JSON
   const resultResponse = await fetch(transcriptionUrl, {
     signal: AbortSignal.timeout(10_000),
   });
@@ -293,12 +454,11 @@ async function transcribeAsyncMaaS(
     throw new Error(`下载转写结果失败: ${resultResponse.status}`);
   }
 
-  const resultData = await resultResponse.json() as {
+  const resultData = (await resultResponse.json()) as {
     transcripts?: Array<{ text: string }>;
     text?: string;
   };
 
-  // 解析结果
   let text = "";
   if (resultData.transcripts?.length) {
     text = resultData.transcripts.map((t) => t.text).join(" ");
