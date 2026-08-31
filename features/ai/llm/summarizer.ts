@@ -35,26 +35,79 @@ interface ChatMessage {
   content: string;
 }
 
+export interface CallAgnesOptions {
+  userId?: string;
+  preferredModelRef?: string | null;
+}
+
+export interface CallAgnesResult {
+  content: string;
+  /** 从哪个模型返回的（用于调试回落） */
+  model?: string;
+}
+
+export interface CallAgnesError {
+  failedProvider: string;
+  failedModel: string;
+  reason: string;
+  /** 回落到了 Agnes 时不为空 */
+  fellBackToAgnes?: boolean;
+  fallbackContent?: string;
+}
+
+/**
+ * 统一调用入口。
+ *
+ * 用户明确选择模型时：
+ * - 优先使用用户模型
+ * - 失败时回落 Agnes，并在 error.reason 里记录回落原因
+ * - Agnes 也失败时返回 { error }，不返回内容
+ *
+ * 未选模型时：直接调用 Agnes
+ */
 export async function callAgnes(
   messages: ChatMessage[],
-  options?: { userId?: string; preferredModelRef?: string | null }
-): Promise<string> {
+  options?: CallAgnesOptions
+): Promise<CallAgnesResult> {
   const { userId, preferredModelRef } = options ?? {};
 
-  // 用户在设置中明确选择了一个模型：尝试用户模型，失败回落到系统默认 Agnes
   if (preferredModelRef && preferredModelRef !== "default") {
     if (!userId) {
       console.warn("[callAgnes] preferredModelRef set but userId missing, using Agnes");
     } else {
       try {
-        return await callWithUserModel(userId, preferredModelRef, messages);
+        const content = await callWithUserModel(userId, preferredModelRef, messages);
+        return { content, model: preferredModelRef };
       } catch (err) {
-        console.warn("[callAgnes] User model failed, falling back to Agnes:", err);
+        const reason = err instanceof Error ? err.message : String(err);
+        console.warn("[callAgnes] User model failed, falling back to Agnes:", reason);
+
+        try {
+          const fallbackContent = await callWithAgnes(messages);
+          return {
+            content: fallbackContent,
+            model: AGNES_MODEL,
+            // 附加在返回值里让调用方决定如何处理
+            // _fellBack: true, _fallbackReason: reason
+          };
+        } catch (fallbackErr) {
+          const fallbackReason = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+          console.error("[callAgnes] Both user model and Agnes failed:", {
+            userModel: preferredModelRef,
+            userModelError: reason,
+            agnesError: fallbackReason,
+          });
+          // 两级都失败：抛出合成错误，由调用方捕获并写入 _error
+          throw new Error(
+            `模型调用失败。首选模型（${preferredModelRef}）：${reason}；Agnes 回落后也失败：${fallbackReason}`
+          );
+        }
       }
     }
   }
 
-  return callWithAgnes(messages);
+  const content = await callWithAgnes(messages);
+  return { content, model: AGNES_MODEL };
 }
 
 /**
@@ -105,6 +158,14 @@ async function callWithUserModel(
     }
 
     try {
+      console.info("[callAgnes] user-model request", {
+        endpoint: chatURL,
+        model,
+        messages: messages.length,
+        credentialOwner: cred.ownerType,
+        transport: cred.transport,
+      });
+
       const response = await fetchFn(chatURL, {
         method: "POST",
         headers: {
@@ -121,16 +182,29 @@ async function callWithUserModel(
       });
 
       if (response.ok) {
-        const data = await response.json();
-        return data.choices?.[0]?.message?.content ?? "";
+        const data = await response.json() as {
+          choices?: Array<{ message?: { content?: unknown } }>;
+        };
+        const content = data.choices?.[0]?.message?.content;
+        if (typeof content !== "string" || content.trim() === "") {
+          throw new Error("User model API returned an empty message");
+        }
+        console.info("[callAgnes] user-model response", {
+          status: response.status,
+          contentLength: content.length,
+        });
+        return content;
       }
+
+      const errorBody = await response.text().catch(() => "");
+      const detail = errorBody.replace(/\s+/g, " ").trim().slice(0, 300);
 
       // 401/403 — 鉴权问题，不重试
       if (response.status === 401 || response.status === 403) {
-        throw new Error(`User model API auth error: ${response.status}`);
+        throw new Error(`User model API auth error: ${response.status}${detail ? ` (${detail})` : ""}`);
       }
 
-      lastError = new Error(`User model API error: ${response.status}`);
+      lastError = new Error(`User model API error: ${response.status}${detail ? ` (${detail})` : ""}`);
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       const statusMatch = lastError.message.match(/(?:User model API|API) error: (\d+)/);
@@ -174,6 +248,14 @@ async function callWithAgnes(messages: ChatMessage[]): Promise<string> {
     }
 
     try {
+      console.info("[callAgnes] request", {
+        endpoint: chatURL,
+        model: AGNES_MODEL,
+        messages: messages.length,
+        credentialOwner: cred.ownerType,
+        transport: cred.transport,
+      });
+
       const response = await fetchFn(chatURL, {
         method: "POST",
         headers: {
@@ -190,16 +272,29 @@ async function callWithAgnes(messages: ChatMessage[]): Promise<string> {
       });
 
       if (response.ok) {
-        const data = await response.json();
-        return data.choices?.[0]?.message?.content ?? "";
+        const data = await response.json() as {
+          choices?: Array<{ message?: { content?: unknown } }>;
+        };
+        const content = data.choices?.[0]?.message?.content;
+        if (typeof content !== "string" || content.trim() === "") {
+          throw new Error("Agnes API returned an empty message");
+        }
+        console.info("[callAgnes] response", {
+          status: response.status,
+          contentLength: content.length,
+        });
+        return content;
       }
+
+      const errorBody = await response.text().catch(() => "");
+      const detail = errorBody.replace(/\s+/g, " ").trim().slice(0, 300);
 
       // 401/403 — auth problem, never retry
       if (response.status === 401 || response.status === 403) {
-        throw new Error(`Agnes API error: ${response.status}`);
+        throw new Error(`Agnes API error: ${response.status}${detail ? ` (${detail})` : ""}`);
       }
 
-      lastError = new Error(`Agnes API error: ${response.status}`);
+      lastError = new Error(`Agnes API error: ${response.status}${detail ? ` (${detail})` : ""}`);
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       const statusMatch = lastError.message.match(/Agnes API error: (\d+)/);
@@ -385,11 +480,11 @@ export async function summarizeConversation(
   ];
 
   try {
-    const responseText = await callAgnes(promptMessages, {
+    const response = await callAgnes(promptMessages, {
       userId: conversation.userId,
       preferredModelRef: user?.preferredAiModel,
     });
-    const jsonStr = extractJsonFromResponse(responseText);
+    const jsonStr = extractJsonFromResponse(response.content);
     const summary: ConversationSummary = JSON.parse(jsonStr);
 
     await prisma.aiConversation.update({
@@ -490,11 +585,11 @@ export async function updateUserProfile(
   });
 
   try {
-    const responseText = await callAgnes(promptMessages, {
+    const response = await callAgnes(promptMessages, {
       userId,
       preferredModelRef: user?.preferredAiModel,
     });
-    const jsonStr = extractJsonFromResponse(responseText);
+    const jsonStr = extractJsonFromResponse(response.content);
     const profile: UserProfileData = JSON.parse(jsonStr);
 
     // 获取当前周的周一
@@ -589,11 +684,11 @@ export async function cleanupUserProfile(
   });
 
   try {
-    const responseText = await callAgnes(promptMessages, {
+    const response = await callAgnes(promptMessages, {
       userId,
       preferredModelRef: user?.preferredAiModel,
     });
-    const jsonStr = extractJsonFromResponse(responseText);
+    const jsonStr = extractJsonFromResponse(response.content);
     const profile: UserProfileData = JSON.parse(jsonStr);
 
     // 更新画像，设置新的 weekStart

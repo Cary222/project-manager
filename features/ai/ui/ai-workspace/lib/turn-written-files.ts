@@ -13,7 +13,7 @@ function isFileWritingToolName(toolName: string): boolean {
 
 function readToolPath(input: Record<string, unknown> | undefined): string | null {
   if (!input) return null;
-  const value = input.file_path ?? input.path;
+  const value = input.file_path ?? input.path ?? input.filePath ?? input.target_file ?? input.targetFile;
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 

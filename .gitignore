@@ -52,3 +52,8 @@ embedding/api.log
 *.pyo
 *.pyd
 .Python
+
+# pi agents
+.pi-glla/
+.pi/
+piolium/

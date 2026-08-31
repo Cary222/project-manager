@@ -11,9 +11,11 @@ import type { FileAttachment } from "@/features/knowledge/lib/pkm";
 
 type ProjectOption = { id: string; name: string };
 
-function toLocalMidnight(dateStr: string): Date {
-  const [y, m, day] = dateStr.split("-").map(Number);
-  return new Date(y!, m! - 1, day!, 0, 0, 0, 0);
+function toBeijingDate(dateStr: string, isEndOfDay = false): Date {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return isEndOfDay
+    ? new Date(Date.UTC(year!, month! - 1, day!, 15, 59, 59, 999))
+    : new Date(Date.UTC(year!, month! - 1, day!, -8, 0, 0, 0));
 }
 
 interface WeeklyReportFormProps {
@@ -108,8 +110,8 @@ export function WeeklyReportForm({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          weekStart: toLocalMidnight(weekStart).toISOString(),
-          weekEnd: toLocalMidnight(weekEnd).toISOString(),
+          weekStart: toBeijingDate(weekStart).toISOString(),
+          weekEnd: toBeijingDate(weekEnd, true).toISOString(),
           formDraft: {
             title: title.trim() || undefined,
             content: content.trim() || undefined,
@@ -144,7 +146,11 @@ export function WeeklyReportForm({
       setDraftSummary(data.draft);
       setDraftComputedAt(data.computedAt);
       setDraftError(draftError);
-      toast.success("AI 总结已生成，请查看右侧面板");
+      if (draftError) {
+        toast.error(`AI 总结失败：${draftError}`);
+      } else {
+        toast.success("AI 总结已生成，请查看右侧面板");
+      }
     } catch (err) {
       // 网络异常 (DNS / 超时 / 断网) — fetch 抛 TypeError
       const isNetworkError = err instanceof TypeError;
@@ -191,8 +197,8 @@ export function WeeklyReportForm({
 
     setLoading(true);
     try {
-      const start = toLocalMidnight(weekStart);
-      const end = toLocalMidnight(weekEnd);
+      const start = toBeijingDate(weekStart);
+      const end = toBeijingDate(weekEnd, true);
 
       if (mode === "edit" && initialReportId) {
         // PATCH existing report
@@ -202,8 +208,8 @@ export function WeeklyReportForm({
           body: JSON.stringify({
             title: title.trim(),
             content: content.trim(),
-            weekStart: weekStart ? toLocalMidnight(weekStart).toISOString() : undefined,
-            weekEnd: weekEnd ? toLocalMidnight(weekEnd).toISOString() : undefined,
+            weekStart: weekStart ? toBeijingDate(weekStart).toISOString() : undefined,
+            weekEnd: weekEnd ? toBeijingDate(weekEnd, true).toISOString() : undefined,
             projectIds: Array.from(selectedProjectIds),
             attachments,
           }),

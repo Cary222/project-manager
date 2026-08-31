@@ -98,7 +98,7 @@ export function ConversationChangesPanel({
 
   const openRow = useCallback(
     (row: ConversationChangeRow) => {
-      onOpenFile(row.displayPath, getFileName(row.displayPath), {
+      onOpenFile(row.filePath, getFileName(row.displayPath), {
         sourceSessionId: sessionId,
         ...(row.status !== "clean" ? { modeHint: "diff" as const } : {}),
       });
@@ -164,7 +164,7 @@ export function ConversationChangesPanel({
       {expanded && (
         <div style={{ overflowY: "auto", minHeight: 0 }}>
           {rows.map((row) => {
-            const selected = activeTabId === `file:${row.displayPath}`;
+            const selected = activeTabId === `file:${row.filePath}` || activeTabId === `file:${row.displayPath}`;
             return (
               <button
                 key={row.filePath}

@@ -5,7 +5,7 @@ import { transcribeWithDashScope } from "@/features/ai/llm/providers/audio/stt/d
 
 const TranscribeSchema = z.object({
   audio: z.string(), // base64 编码的音频数据
-  format: z.enum(["webm", "mp4", "wav"]),
+  format: z.enum(["webm", "mp4", "wav", "mp3", "m4a"]),
   model: z.string().optional(),
 });
 

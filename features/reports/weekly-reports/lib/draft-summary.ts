@@ -223,11 +223,11 @@ export async function reviseWeeklyDraftSummary(
   });
 
   try {
-    const responseText = await callAgnes(messages, {
+    const response = await callAgnes(messages, {
       userId,
       preferredModelRef: user?.preferredAiModel,
     });
-    const jsonStr = extractJsonFromResponse(responseText);
+    const jsonStr = extractJsonFromResponse(response.content);
     const result = JSON.parse(jsonStr) as WeeklyDraftSummary;
 
     // Keep existing projectIds/projectNames through revise rounds
@@ -235,11 +235,20 @@ export async function reviseWeeklyDraftSummary(
       ? result.projectIds
       : currentSummary.projectIds;
 
+    const highlights = Array.isArray(result.highlights) ? result.highlights : [];
+    const tasks = Array.isArray(result.tasks) ? result.tasks : [];
+    const nextPlan = Array.isArray(result.nextPlan) ? result.nextPlan : [];
+    const rawMarkdown = typeof result.rawMarkdown === "string" ? result.rawMarkdown : "";
+
+    if (highlights.length === 0 && tasks.length === 0 && nextPlan.length === 0) {
+      throw new Error("AI 返回了空摘要：模型调用成功，但没有生成任何周报内容");
+    }
+
     return {
-      highlights: Array.isArray(result.highlights) ? result.highlights : [],
-      tasks: Array.isArray(result.tasks) ? result.tasks : [],
-      nextPlan: Array.isArray(result.nextPlan) ? result.nextPlan : [],
-      rawMarkdown: typeof result.rawMarkdown === "string" ? result.rawMarkdown : "",
+      highlights,
+      tasks,
+      nextPlan,
+      rawMarkdown,
       projectIds,
       projectNames: currentSummary.projectNames,
     };
@@ -301,22 +310,31 @@ export async function generateWeeklyDraftSummary(
   });
 
   try {
-    const responseText = await callAgnes(messages, {
+    const response = await callAgnes(messages, {
       userId,
       preferredModelRef: user?.preferredAiModel,
     });
-    const jsonStr = extractJsonFromResponse(responseText);
+    const jsonStr = extractJsonFromResponse(response.content);
     const result = JSON.parse(jsonStr) as WeeklyDraftSummary;
 
     // Use projectIds from tickets; resolve names from context
     const projectIds = context.projectIds ?? [];
     const projectNames = projectIds.map((id) => context.projectIdToName[id]).filter(Boolean);
 
+    const highlights = Array.isArray(result.highlights) ? result.highlights : [];
+    const tasks = Array.isArray(result.tasks) ? result.tasks : [];
+    const nextPlan = Array.isArray(result.nextPlan) ? result.nextPlan : [];
+    const rawMarkdown = typeof result.rawMarkdown === "string" ? result.rawMarkdown : "";
+
+    if (highlights.length === 0 && tasks.length === 0 && nextPlan.length === 0) {
+      throw new Error("AI 返回了空摘要：模型调用成功，但没有生成任何周报内容");
+    }
+
     return {
-      highlights: Array.isArray(result.highlights) ? result.highlights : [],
-      tasks: Array.isArray(result.tasks) ? result.tasks : [],
-      nextPlan: Array.isArray(result.nextPlan) ? result.nextPlan : [],
-      rawMarkdown: typeof result.rawMarkdown === "string" ? result.rawMarkdown : "",
+      highlights,
+      tasks,
+      nextPlan,
+      rawMarkdown,
       projectIds,
       projectNames,
     };

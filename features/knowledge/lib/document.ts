@@ -71,6 +71,13 @@ async function resolveProjectIdFromFileAsset(
     }
     case "PROJECT":
       return ref.sourceId;
+    case "PROJECT_MEETING": {
+      const meeting = await prisma.projectMeeting.findUnique({
+        where: { id: ref.sourceId },
+        select: { projectId: true },
+      });
+      return meeting?.projectId ?? null;
+    }
     default:
       return null;
   }

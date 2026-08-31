@@ -16,6 +16,7 @@ import { DispatchProjectDetail } from "@/features/dispatch/ui/DispatchProjectDet
 import { useToast } from "@/shared/lib/use-toast";
 import { useRecentVisits } from "@/shared/lib/visits-context";
 import { ProjectMemberTab } from "@/features/project/ui/ProjectMemberTab";
+import { ProjectMeetingTab } from "@/features/project/ui/ProjectMeetingTab";
 import { type TicketStatus, type MyTicket } from "@/entities/ticket/model/types";
 import { TicketColumnsGrid, TicketColumnsSkeleton } from "@/features/task/ui/TicketColumn";
 import { isRoot } from "@/shared/lib/permissions-client";
@@ -877,16 +878,17 @@ function SettingsTab() {
 
 // ---- Tab navigation ----
 
-type TabKey = "overview" | "tasks" | "dispatch" | "code" | "docs" | "members" | "settings";
+type TabKey = "overview" | "tasks" | "dispatch" | "code" | "docs" | "meetings" | "members" | "settings";
 
 const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
-  { key: "overview",  label: "概览",   icon: <IconTask className="h-4 w-4" /> },
-  { key: "tasks",    label: "任务",   icon: <IconTask className="h-4 w-4" /> },
-  { key: "dispatch", label: "派单",   icon: <IconTask className="h-4 w-4" /> },
-  { key: "code",     label: "代码",   icon: <IconRepo className="h-4 w-4" /> },
-  { key: "docs",     label: "文档",   icon: <IconBook className="h-4 w-4" /> },
-  { key: "members",  label: "成员",   icon: <IconTeam className="h-4 w-4" /> },
-  { key: "settings", label: "设置",   icon: <IconSettings className="h-4 w-4" /> },
+  { key: "overview",  label: "概览",     icon: <IconTask className="h-4 w-4" /> },
+  { key: "tasks",     label: "任务",     icon: <IconTask className="h-4 w-4" /> },
+  { key: "dispatch",  label: "派单",     icon: <IconTask className="h-4 w-4" /> },
+  { key: "code",      label: "代码",     icon: <IconRepo className="h-4 w-4" /> },
+  { key: "docs",      label: "文档",     icon: <IconBook className="h-4 w-4" /> },
+  { key: "meetings",  label: "会议纪要", icon: <IconBook className="h-4 w-4" /> },
+  { key: "members",   label: "成员",     icon: <IconTeam className="h-4 w-4" /> },
+  { key: "settings",  label: "设置",     icon: <IconSettings className="h-4 w-4" /> },
 ];
 
 function TabNav({
@@ -972,7 +974,7 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
 
   const [mounted, setMounted] = useState(false);
   const tabParam = searchParams.get("tab") as TabKey | null;
-  const validTabs: TabKey[] = ["overview", "tasks", "dispatch", "code", "docs", "members", "settings"];
+  const validTabs: TabKey[] = ["overview", "tasks", "dispatch", "code", "docs", "meetings", "members", "settings"];
   const [activeTab, setActiveTab] = useState<TabKey>(
     tabParam && validTabs.includes(tabParam) ? tabParam : "overview"
   );
@@ -1128,6 +1130,7 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
       {activeTab === "dispatch"  && <DispatchTab projectId={project.id} />}
       {activeTab === "code"      && <CodeTab />}
       {activeTab === "docs"      && <DocsTab project={project} />}
+      {activeTab === "meetings"  && <ProjectMeetingTab project={project} />}
       {activeTab === "members"   && (
         <ProjectMemberTab
           projectId={project.id}

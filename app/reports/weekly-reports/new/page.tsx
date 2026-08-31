@@ -3,13 +3,9 @@ import { auth } from "@/lib/auth";
 import { AppShell } from "@/shared/ui/AppShell";
 import { BackPageHeader } from "@/shared/ui/headers";
 import { WeeklyReportForm } from "@/features/reports/weekly-reports/ui/WeeklyReportForm";
-import { getWeekRange } from "@/features/weekly-reports/lib/week";
+import { formatBeijingDateInput, getWeekRange } from "@/features/weekly-reports/lib/week";
 
 export const dynamic = "force-dynamic";
-
-function formatDateInput(d: Date): string {
-  return d.toISOString().split("T")[0];
-}
 
 export default async function NewWeeklyReportPage() {
   const session = await auth();
@@ -39,8 +35,8 @@ export default async function NewWeeklyReportPage() {
           </div>
 
           <WeeklyReportForm
-            initialWeekStart={formatDateInput(weekStart)}
-            initialWeekEnd={formatDateInput(weekEnd)}
+            initialWeekStart={formatBeijingDateInput(weekStart)}
+            initialWeekEnd={formatBeijingDateInput(weekEnd)}
           />
         </div>
       </div>

@@ -19,6 +19,8 @@ import { resolveVoiceCredential } from "@/features/ai/llm/providers/audio/creden
 
 const DASHSCOPE_TIMEOUT_MS = 60_000;
 
+export type SupportedAudioFormat = "webm" | "mp4" | "wav" | "mp3" | "m4a";
+
 export interface TranscribeResult {
   text: string;
   duration?: number;
@@ -58,14 +60,14 @@ interface DashScopeError {
 /**
  * 调用 ASR API 进行语音识别
  *
- * @param audioBuffer 音频数据（webm/mp4/wav 格式）
- * @param format      音频格式（webm | mp4 | wav）
+ * @param audioBuffer 音频数据（mp3/wav/m4a/webm/mp4 格式）
+ * @param format      音频格式（mp3 | wav | m4a | webm | mp4）
  * @param options     选项（userId 用于凭证解析）
  * @returns 识别结果 { text, duration? }
  */
 export async function transcribeWithDashScope(
   audioBuffer: Buffer,
-  format: "webm" | "mp4" | "wav",
+  format: SupportedAudioFormat,
   options: TranscribeOptions
 ): Promise<TranscribeResult> {
   const { userId, model } = options;
@@ -95,7 +97,7 @@ export async function transcribeWithDashScope(
  */
 async function transcribeSync(
   audioBuffer: Buffer,
-  format: "webm" | "mp4" | "wav",
+  format: SupportedAudioFormat,
   modelName: string,
   apiKey: string,
   baseURL: string
@@ -156,7 +158,7 @@ async function transcribeSync(
  */
 async function transcribeAsyncMaaS(
   audioBuffer: Buffer,
-  format: "webm" | "mp4" | "wav",
+  format: SupportedAudioFormat,
   modelName: string,
   apiKey: string,
   baseURL: string
@@ -268,21 +270,28 @@ async function transcribeAsyncMaaS(
 /**
  * 格式转 MIME 类型
  */
-function formatToMimeType(format: "webm" | "mp4" | "wav"): string {
-  const mimeMap: Record<string, string> = {
+function formatToMimeType(format: SupportedAudioFormat): string {
+  const mimeMap: Record<SupportedAudioFormat, string> = {
     webm: "audio/webm",
     mp4: "audio/mp4",
     wav: "audio/wav",
+    mp3: "audio/mpeg",
+    m4a: "audio/x-m4a",
   };
   return mimeMap[format] ?? "audio/webm";
 }
 
 /**
- * 根据文件扩展名推断音频格式
+ * 根据 MIME 类型或文件名推断音频格式
  */
-export function inferFormatFromMimeType(mimeType: string): "webm" | "mp4" | "wav" {
-  if (mimeType.includes("webm")) return "webm";
-  if (mimeType.includes("mp4") || mimeType.includes("m4a")) return "mp4";
-  if (mimeType.includes("wav")) return "wav";
-  return "webm";
+export function inferFormatFromMimeType(mimeType: string, filename?: string): SupportedAudioFormat {
+  const lowerMime = mimeType.toLowerCase();
+  const lowerName = (filename ?? "").toLowerCase();
+
+  if (lowerMime.includes("mpeg") || lowerMime.includes("mp3") || lowerName.endsWith(".mp3")) return "mp3";
+  if (lowerMime.includes("m4a") || lowerMime.includes("x-m4a") || lowerName.endsWith(".m4a")) return "m4a";
+  if (lowerMime.includes("wav") || lowerName.endsWith(".wav")) return "wav";
+  if (lowerMime.includes("webm") || lowerName.endsWith(".webm")) return "webm";
+  if (lowerMime.includes("mp4") || lowerName.endsWith(".mp4")) return "mp4";
+  return "mp3";
 }

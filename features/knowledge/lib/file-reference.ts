@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
 
-export type FileReferenceSourceType = "PKM_NOTE" | "TICKET" | "TICKET_COMMENT" | "PROJECT";
+export type FileReferenceSourceType = "PKM_NOTE" | "TICKET" | "TICKET_COMMENT" | "PROJECT" | "PROJECT_MEETING";
 
 /**
  * 在事务内记录一条文件引用（upsert，deletedAt = null）。

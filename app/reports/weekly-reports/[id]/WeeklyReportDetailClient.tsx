@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { WeeklyReportForm } from "@/features/reports/weekly-reports/ui/WeeklyReportForm";
 import { WeeklyReportRegenerateButton } from "@/features/reports/weekly-reports/ui/WeeklyReportRegenerateButton";
+import { formatBeijingDateInput } from "@/features/weekly-reports/lib/week";
 import { MarkdownContent } from "@/shared/ui/MarkdownContent";
 import type { WeeklyReportWithProjects } from "@/features/weekly-reports/lib/weekly-report-store";
 import { AttachmentItem, type PreviewableFile } from "@/shared/ui/AttachmentItem";
@@ -252,8 +253,8 @@ export function WeeklyReportDetailClient({ initialReport, reportId, isOwnReport 
             initialReportId={report.id}
             initialReport={report}
             initialTitle={report.title}
-            initialWeekStart={new Date(report.weekStart).toISOString().split("T")[0]}
-            initialWeekEnd={new Date(report.weekEnd).toISOString().split("T")[0]}
+            initialWeekStart={formatBeijingDateInput(new Date(report.weekStart))}
+            initialWeekEnd={formatBeijingDateInput(new Date(report.weekEnd))}
             initialContent={report.content}
             initialProjectIds={report.projects.map((p) => p.id)}
             onSaved={() => {

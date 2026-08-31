@@ -52,10 +52,11 @@ async function callAgnesForSummary(
     { role: "system", content: SUMMARY_INSTRUCTION },
     { role: "user", content: prompt },
   ];
-  return callAgnes(messages, {
+  const res = await callAgnes(messages, {
     userId,
     preferredModelRef: user?.preferredAiModel,
   });
+  return res.content ?? "";
 }
 
 /**

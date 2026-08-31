@@ -27,6 +27,11 @@ export const JOB_POLICY: Record<BackgroundJobType, JobPolicy> = {
     timeoutMs: 60_000,
     backoffMs: [1_000, 5_000, 30_000],
   },
+  MEETING_PROCESS: {
+    maxAttempts: 3,
+    timeoutMs: 300_000,
+    backoffMs: [3_000, 10_000, 30_000],
+  },
 };
 
 const DEFAULT_POLICY: JobPolicy = {

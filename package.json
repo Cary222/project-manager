@@ -16,6 +16,7 @@
     "db:studio": "prisma studio",
     "db:promote": "tsx prisma/promote-admin.ts",
     "test": "vitest run",
+    "test:run": "vitest run",
     "test:i18n": "node --test lib/i18n/*.test.mjs",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

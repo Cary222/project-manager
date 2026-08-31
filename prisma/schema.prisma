@@ -51,6 +51,7 @@ model User {
   policyRules            PolicyRule[]            @relation("PolicyRules")
   policyAuditLogs        PolicyAuditLog[]        @relation("PolicyAuditLogs")
   subAgentRuns           SubAgentRun[]           @relation("SubAgentRuns")
+  createdMeetings        ProjectMeeting[]        @relation("MeetingCreator")
 
   @@schema("pm")
 }
@@ -215,6 +216,7 @@ model Project {
   tickets          Ticket[]
   members          UserOnProject[]
   weeklyReports    WeeklyReportProject[]
+  meetings         ProjectMeeting[]
 
   @@schema("pm")
 }
@@ -669,6 +671,8 @@ model FileAsset {
   document     Document?
   /// FileReference 反向引用：FileAsset 被哪些业务实体引用
   references   FileReference[]
+  meetingAudios    ProjectMeeting[]        @relation("MeetingAudio")
+  meetingDocuments ProjectMeeting[]        @relation("MeetingDocument")
 
   @@unique([hash, size])
   @@index([uploaderId, createdAt(sort: Desc)])
@@ -833,6 +837,7 @@ enum FileReferenceSourceType {
   TICKET
   TICKET_COMMENT
   PROJECT
+  PROJECT_MEETING
 
   @@schema("pm")
 }
@@ -926,6 +931,7 @@ enum BackgroundJobType {
   VIDEO_GENERATE
   DOCUMENT_INDEX
   TEXT_SUMMARY
+  MEETING_PROCESS
 
   @@schema("pm")
 }
@@ -1177,5 +1183,49 @@ enum SubAgentStatus {
   FAILED
   CANCELLED
 
+  @@schema("pm")
+}
+
+/// 项目周会状态枚举
+enum ProjectMeetingStatus {
+  UPLOADING        // 上传中
+  TRANSCRIBING     // 语音转文字中
+  SUMMARIZING      // AI 结构化纪要生成中
+  PENDING_REVIEW   // 待审核（转录与AI生成完成，等待专员确认）
+  PUBLISHED        // 已发布（已固化并生成正式 Document）
+  FAILED           // 失败（转录或AI生成异常）
+
+  @@schema("pm")
+}
+
+/// 项目周会纪要业务实体
+model ProjectMeeting {
+  id                      String               @id @default(cuid())
+  projectId               String
+  creatorId               String
+  title                   String
+  meetingDate             DateTime
+  status                  ProjectMeetingStatus @default(UPLOADING)
+  audioFileAssetId        String?
+  audioDuration           Int?
+  rawTranscript           String?              @db.Text
+  aiSummary               Json?
+  draftSummary            Json?
+  publishedSummary        String?              @db.Text
+  documentFileAssetId     String?
+  publishedAt             DateTime?
+  errorMessage            String?
+  failedStep              String?
+  includedWeeklyReportIds String[]             @default([])
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+
+  project                 Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creator                 User                 @relation("MeetingCreator", fields: [creatorId], references: [id])
+  audioFileAsset          FileAsset?           @relation("MeetingAudio", fields: [audioFileAssetId], references: [id], onDelete: SetNull)
+  documentFileAsset       FileAsset?           @relation("MeetingDocument", fields: [documentFileAssetId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, meetingDate(sort: Desc)])
+  @@index([status])
   @@schema("pm")
 }

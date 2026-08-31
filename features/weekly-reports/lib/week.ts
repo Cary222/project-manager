@@ -32,6 +32,18 @@ function beijingMidnightToUtc(year: number, month: number, day: number, hour = 0
   return new Date(Date.UTC(year, month - 1, day, hour - 8, 0, 0, 0));
 }
 
+/** 将 UTC Date 格式化为北京时间日历日期，供 `<input type="date">` 使用。 */
+export function formatBeijingDateInput(date: Date): string {
+  const parts = new Intl.DateTimeFormat(SHANGHAI, {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const lookup = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${lookup.year}-${lookup.month}-${lookup.day}`;
+}
+
 /** 返回给定日期所在自然周（周一 00:00 北京 → 周日 23:59:59 北京）。 */
 export function getWeekRange(reference: Date = new Date()): { weekStart: Date; weekEnd: Date } {
   const { year, month, day, weekday } = getBeijingDateParts(reference);

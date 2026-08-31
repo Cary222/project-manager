@@ -12,7 +12,7 @@ const markdownSanitizeSchema = {
     ...defaultSchema.attributes,
     code: [["className", /^language-./, "math-inline", "math-display"]],
   },
-  strip: [...(defaultSchema.strip || []), "iframe", "object", "style", "form"],
+  strip: [...(defaultSchema.strip || []), "iframe", "input", "object", "style", "form"],
 };
 
 export function normalizeDisplayMath(markdown: string): string {

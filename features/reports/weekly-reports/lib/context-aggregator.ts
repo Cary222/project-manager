@@ -190,10 +190,10 @@ async function fetchNotes(
   const rows = await prisma.pkmNote.findMany({
     where: {
       userId,
-      createdAt: { gte: weekStart, lte: weekEnd },
+      updatedAt: { gte: weekStart, lte: weekEnd },
     },
     take: NOTES_TAKE,
-    orderBy: { createdAt: "desc" },
+    orderBy: { updatedAt: "desc" },
     select: {
       id: true,
       title: true,
