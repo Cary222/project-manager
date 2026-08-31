@@ -182,40 +182,65 @@ async function transcribeAsyncMaaS(
   const apiBase = normalizeDashscopeBaseUrl(baseURL);
   // Step 1: 提交转写任务（使用 multipart/form-data）
   const submitUrl = `${apiBase}/services/audio/asr/transcription`;
-  console.log(`[stt] 提交异步转写任务: url=${submitUrl}, model=${modelName}`);
+  const candidateModels = Array.from(new Set([
+    modelName,
+    "qwen3-asr-flash-filetrans",
+    "qwen-audio-3.0-asr-flash-filetrans",
+    "paraformer-v2",
+    "sensevoice-v1",
+  ]));
 
-  const mimeType = formatToMimeType(format);
-  const formData = new FormData();
-  formData.append(
-    "file",
-    new Blob([new Uint8Array(audioBuffer)], { type: mimeType }),
-    `audio.${format}`
-  );
-  formData.append("model", modelName);
-  formData.append("parameters", JSON.stringify({
-    language_hints: ["zh", "en"],
-  }));
+  let taskId: string | null = null;
+  let lastErrorText = "";
 
-  const submitResponse = await fetch(submitUrl, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "X-DashScope-Async": "enable",
-    },
-    body: formData,
-    signal: AbortSignal.timeout(30_000),
-  });
+  for (const currentModel of candidateModels) {
+    console.log(`[stt] 尝试提交异步转写任务: url=${submitUrl}, model=${currentModel}`);
 
-  if (!submitResponse.ok) {
-    const errorText = await submitResponse.text().catch(() => "");
-    console.error(`[stt] 提交任务失败: ${submitResponse.status}`, errorText);
-    throw new Error(`ASR 提交任务失败: ${submitResponse.status} - ${errorText}`);
+    const mimeType = formatToMimeType(format);
+    const formData = new FormData();
+    formData.append(
+      "file",
+      new Blob([new Uint8Array(audioBuffer)], { type: mimeType }),
+      `audio.${format}`
+    );
+    formData.append("model", currentModel);
+    formData.append("parameters", JSON.stringify({
+      language_hints: ["zh", "en"],
+    }));
+
+    const submitResponse = await fetch(submitUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-DashScope-Async": "enable",
+      },
+      body: formData,
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (submitResponse.ok) {
+      const submitData = (await submitResponse.json()) as { output?: { task_id: string }; request_id: string };
+      taskId = submitData.output?.task_id ?? null;
+      if (taskId) {
+        console.log(`[stt] 任务提交成功: model=${currentModel}, task_id=${taskId}`);
+        break;
+      }
+    } else {
+      lastErrorText = await submitResponse.text().catch(() => "");
+      console.warn(`[stt] 模型 ${currentModel} 提交失败 (${submitResponse.status}):`, lastErrorText);
+      if (!lastErrorText.includes("Model not exist")) {
+        break;
+      }
+    }
   }
 
-  const submitData = (await submitResponse.json()) as { output?: { task_id: string }; request_id: string };
-  const taskId = submitData.output?.task_id;
   if (!taskId) {
-    throw new Error(`ASR 返回无 task_id: ${JSON.stringify(submitData)}`);
+    if (lastErrorText.includes("Model not exist") || apiKey.startsWith("sk-sp-")) {
+      throw new Error(
+        "当前 API 凭证（Token Plan 套餐）未包含离线录音文件识别 (ASR) 权限。Token Plan 仅包含 TTS 语音合成与 Realtime 实时语音，不含离线文件转录。请在「设置 > AI Providers」中添加阿里云百炼标准 Key (dashscope，以 sk- 开头) 或 OpenAI Key。"
+      );
+    }
+    throw new Error(`ASR 提交任务失败: ${lastErrorText}`);
   }
   console.log(`[stt] 任务已提交: task_id=${taskId}`);
 
