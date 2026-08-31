@@ -15,7 +15,9 @@ describe("E2E Meeting Audio Transcribe & Summary Pipeline", () => {
     });
 
     if (!audioAsset) {
-      console.warn("[e2e-test] No audio file asset found in DB, skipping live ASR check");
+      console.warn(
+        "[e2e-test] No audio file asset found in DB, skipping live ASR check",
+      );
       return;
     }
 
@@ -34,13 +36,14 @@ describe("E2E Meeting Audio Transcribe & Summary Pipeline", () => {
     expect(sttResult.text).toContain("项目例会");
 
     // 3. 执行 AI 7 要素生成
-    const summaryData: MeetingSummaryData = await generateMeetingSummaryFromTranscript({
-      userId,
-      meetingTitle: "2026年第35周 项目周例会",
-      meetingDate: new Date(),
-      transcript: sttResult.text,
-      weeklyReports: [],
-    });
+    const summaryData: MeetingSummaryData =
+      await generateMeetingSummaryFromTranscript({
+        userId,
+        meetingTitle: "2026年第35周 项目周例会",
+        meetingDate: new Date(),
+        transcript: sttResult.text,
+        weeklyReports: [],
+      });
 
     expect(summaryData.summary).toBeTruthy();
     expect(summaryData.progress.length).toBeGreaterThanOrEqual(1);

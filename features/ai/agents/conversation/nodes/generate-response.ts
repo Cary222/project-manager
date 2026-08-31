@@ -2,11 +2,21 @@ import type { BaseMessage } from "@langchain/core/messages";
 import { HumanMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
 import type { AgentState } from "../agent";
 import { generateText } from "ai";
-import type { ModelMessage, UserModelMessage, AssistantModelMessage, TextPart, FilePart } from "ai";
+import type {
+  ModelMessage,
+  UserModelMessage,
+  AssistantModelMessage,
+  TextPart,
+  FilePart,
+} from "ai";
 import { createModel } from "@/features/ai/llm/providers/registry";
 import { ensureSystemProvider } from "@/features/ai/llm/providers/init";
 import { selectModel } from "@/features/ai/llm/model-routing";
-import { resolveModelRuntimeConfig, buildReasoningProviderOptions, type ModelRuntimeConfig } from "@/features/ai/llm/model-runtime-config";
+import {
+  resolveModelRuntimeConfig,
+  buildReasoningProviderOptions,
+  type ModelRuntimeConfig,
+} from "@/features/ai/llm/model-runtime-config";
 import { isUserActivityQuery } from "./detect-intent";
 import { type MultimodalPart } from "@/features/ai/core/context/messages/multimodal-builder";
 import type { UserContent } from "ai";
@@ -20,7 +30,7 @@ async function callWithDynamicModel(
   modelContext: AgentState["modelContext"],
   systemPrompt: string,
   messages: ModelMessage[],
-  userId: string
+  userId: string,
 ): Promise<string> {
   const taskType = modelContext?.taskType ?? "chat";
   const manualOverride = modelContext?.userConfig?.manualOverride;
@@ -32,7 +42,9 @@ async function callWithDynamicModel(
   try {
     const { providerId, modelName } = selectModel(taskType, userConfig);
     const modelRef = `${providerId}:${modelName}`;
-    console.log(`[generateResponseNode] calling model: providerId=${providerId} modelName=${modelName} modelRef=${modelRef}`);
+    console.log(
+      `[generateResponseNode] calling model: providerId=${providerId} modelName=${modelName} modelRef=${modelRef}`,
+    );
 
     // Stage 6：Selection（selectModel）与 Runtime Configuration（resolveModelRuntimeConfig）分离。
     // 解析失败时降级为无覆盖（行为与接入前完全一致）。
@@ -40,30 +52,57 @@ async function callWithDynamicModel(
     try {
       runtimeConfig = await resolveModelRuntimeConfig(userId, modelRef);
     } catch (error) {
-      console.warn(`[generateResponseNode] resolveModelRuntimeConfig failed for "${modelRef}":`, error instanceof Error ? error.message : String(error));
+      console.warn(
+        `[generateResponseNode] resolveModelRuntimeConfig failed for "${modelRef}":`,
+        error instanceof Error ? error.message : String(error),
+      );
     }
 
     const model = await createModel({ userId, modelRef });
-    console.log(`[generateResponseNode] using model instance for "${modelRef}", calling generateText...`);
+    console.log(
+      `[generateResponseNode] using model instance for "${modelRef}", calling generateText...`,
+    );
 
     // Stage 7：reasoning level → provider-specific 请求参数（anthropic thinking / openai reasoningEffort）
-    const providerOptions = runtimeConfig ? buildReasoningProviderOptions(runtimeConfig) : undefined;
+    const providerOptions = runtimeConfig
+      ? buildReasoningProviderOptions(runtimeConfig)
+      : undefined;
 
     const result = await generateText({
       model,
       system: systemPrompt,
       messages,
       // 字段级覆盖：仅当用户偏好存在时传入对应字段
-      ...(runtimeConfig?.temperature !== undefined ? { temperature: runtimeConfig.temperature } : {}),
-      ...(runtimeConfig?.maxTokens !== undefined ? { maxOutputTokens: runtimeConfig.maxTokens } : {}),
+      ...(runtimeConfig?.temperature !== undefined
+        ? { temperature: runtimeConfig.temperature }
+        : {}),
+      ...(runtimeConfig?.maxTokens !== undefined
+        ? { maxOutputTokens: runtimeConfig.maxTokens }
+        : {}),
       ...(providerOptions
-        ? { providerOptions: providerOptions as Parameters<typeof generateText>[0]["providerOptions"] }
+        ? {
+            providerOptions: providerOptions as Parameters<
+              typeof generateText
+            >[0]["providerOptions"],
+          }
         : {}),
     });
-    
-    console.log(`[DEBUG:H2:callWithDynamicModel] generateText called with messages.length=${messages.length} message[0].role=${messages[0]?.role} message[last].role=${messages[messages.length-1]?.role}`);
-    console.log(`[DEBUG:H2:callWithDynamicModel] message[last].content types:`, (() => { const c = messages[messages.length-1]?.content; return Array.isArray(c) ? c.map((p: any) => ({ type: p.type })) : "string"; })());
-    console.log(`[generateResponseNode] generateText success, textLen=${result.text.length}`);
+
+    console.log(
+      `[DEBUG:H2:callWithDynamicModel] generateText called with messages.length=${messages.length} message[0].role=${messages[0]?.role} message[last].role=${messages[messages.length - 1]?.role}`,
+    );
+    console.log(
+      `[DEBUG:H2:callWithDynamicModel] message[last].content types:`,
+      (() => {
+        const c = messages[messages.length - 1]?.content;
+        return Array.isArray(c)
+          ? c.map((p: any) => ({ type: p.type }))
+          : "string";
+      })(),
+    );
+    console.log(
+      `[generateResponseNode] generateText success, textLen=${result.text.length}`,
+    );
     return result.text;
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
@@ -87,7 +126,7 @@ function buildSystemPrompt(
   userName: string,
   mode: string,
   profile: Record<string, unknown> | null,
-  lastMentionedUser?: { id: string; name: string } | null
+  lastMentionedUser?: { id: string; name: string } | null,
 ): string {
   const baseIntro = `你叫"小星"，是恒星研公司内部项目管理系统的 AI 助手，由 cary 开发。`;
 
@@ -95,7 +134,8 @@ function buildSystemPrompt(
   const chatDuty = `${baseIntro}你的职责是帮助用户进行日常对话和问题解答，擅长：项目管理相关问题的咨询和建议；技术讨论和方案设计；日常工作的沟通和协调；通用知识问题的解答。`;
 
   const duty = mode === "chat" ? chatDuty : ragDuty;
-  const style = "回答特点：简洁、专业、友好；善用列表和结构化表达；主动提供相关链接和操作建议；遇到不确定的问题，诚实说明。";
+  const style =
+    "回答特点：简洁、专业、友好；善用列表和结构化表达；主动提供相关链接和操作建议；遇到不确定的问题，诚实说明。";
   const userContext = `当前用户：${userName}`;
 
   const modeHints: Record<string, string> = {
@@ -221,10 +261,14 @@ function formatProfile(profile: unknown): string | null {
   if (p.stats && typeof p.stats === "object") {
     const stats = p.stats as Record<string, unknown>;
     const sections: string[] = [];
-    if (typeof stats.totalTickets === "number") sections.push(`累计工单：${stats.totalTickets}`);
-    if (typeof stats.completedTickets === "number") sections.push(`已完成：${stats.completedTickets}`);
-    if (typeof stats.activeProjects === "number") sections.push(`参与项目：${stats.activeProjects}`);
-    if (typeof stats.totalReports === "number") sections.push(`累计周报：${stats.totalReports}`);
+    if (typeof stats.totalTickets === "number")
+      sections.push(`累计工单：${stats.totalTickets}`);
+    if (typeof stats.completedTickets === "number")
+      sections.push(`已完成：${stats.completedTickets}`);
+    if (typeof stats.activeProjects === "number")
+      sections.push(`参与项目：${stats.activeProjects}`);
+    if (typeof stats.totalReports === "number")
+      sections.push(`累计周报：${stats.totalReports}`);
     if (sections.length > 0) {
       return `用户画像统计：\n${sections.join("\n")}`;
     }
@@ -248,7 +292,7 @@ function formatProfile(profile: unknown): string | null {
     const entries = Object.entries(p.preferences as Record<string, unknown>);
     if (entries.length > 0) {
       sections.push(
-        `偏好：${entries.map(([k, v]) => `${k}=${String(v)}`).join("、")}`
+        `偏好：${entries.map(([k, v]) => `${k}=${String(v)}`).join("、")}`,
       );
     }
   }
@@ -274,7 +318,7 @@ function buildMessages(
   history: BaseMessage[],
   userContent: string,
   searchResults: string[] | undefined,
-  toolResults: Record<string, unknown> | undefined
+  toolResults: Record<string, unknown> | undefined,
 ): ModelMessage[] {
   const msgs: ModelMessage[] = [];
 
@@ -286,11 +330,12 @@ function buildMessages(
   if (toolResults) {
     const toolLines = Object.entries(toolResults).map(
       ([name, result]) =>
-        `[${name}]\n${typeof result === "string" ? result : JSON.stringify(result)}`
+        `[${name}]\n${typeof result === "string" ? result : JSON.stringify(result)}`,
     );
     contextParts.push("=== 工具结果 ===\n" + toolLines.join("\n\n"));
   }
-  const contextSuffix = contextParts.length > 0 ? "\n\n" + contextParts.join("\n\n") : "";
+  const contextSuffix =
+    contextParts.length > 0 ? "\n\n" + contextParts.join("\n\n") : "";
 
   for (const m of history) {
     if (m instanceof HumanMessage) {
@@ -300,32 +345,49 @@ function buildMessages(
         const parts = m.content as MultimodalPart[];
         const textParts: string[] = [];
         const imageParts: string[] = [];
-        
+
         for (const p of parts) {
           if (p.type === "text") {
             textParts.push(p.text);
-          } else if (p.type === "image_url" && typeof p.image_url === "object" && p.image_url.url) {
+          } else if (
+            p.type === "image_url" &&
+            typeof p.image_url === "object" &&
+            p.image_url.url
+          ) {
             imageParts.push(p.image_url.url);
           }
           // 忽略其他未知类型的 part
         }
-        
+
         // 从文本中提取图片 URL（用户手动输入的 https://...jpg 等）
-        const imageUrlPattern = /(https?:\/\/[^\s]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s]*)?)/gi;
+        const imageUrlPattern =
+          /(https?:\/\/[^\s]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s]*)?)/gi;
         const textContent = textParts.join("\n");
         const extractedUrls = textContent.match(imageUrlPattern) || [];
         if (extractedUrls.length > 0) {
-          console.log(`[buildMessages] extracted ${extractedUrls.length} image URLs from text`);
+          console.log(
+            `[buildMessages] extracted ${extractedUrls.length} image URLs from text`,
+          );
           imageParts.push(...extractedUrls);
           // 从文本中移除这些 URL
           textParts[0] = textContent.replace(imageUrlPattern, "").trim();
         }
-        
+
         // AI SDK FilePart for images: { type: "file", mediaType: "image/...", data: URL }
         // `data` accepts a bare URL — works for both HTTP URLs and data: URIs.
-        const content: Array<{ type: "text"; text: string } | { type: "file"; mediaType: string; data: URL }> = [
-          ...(textParts.length > 0 ? [{ type: "text" as const, text: textParts.join("\n") + contextSuffix }] : []),
-          ...imageParts.map(url => {
+        const content: Array<
+          | { type: "text"; text: string }
+          | { type: "file"; mediaType: string; data: URL }
+        > = [
+          ...(textParts.length > 0
+            ? [
+                {
+                  type: "text" as const,
+                  text: textParts.join("\n") + contextSuffix,
+                },
+              ]
+            : []),
+          ...imageParts.map((url) => {
             const m = /^data:([^;]+);base64,/.exec(url);
             const mediaType = m ? m[1] : "image/jpeg";
             return {
@@ -335,42 +397,57 @@ function buildMessages(
             };
           }),
         ];
-        
+
         msgs.push({ role: "user", content } satisfies UserModelMessage);
       } else {
         // 字符串 content：提取图片 URL 并追加 contextSuffix
         const c = typeof m.content === "string" ? m.content : String(m.content);
-        const imageUrlPattern = /(https?:\/\/[^\s]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s]*)?)/gi;
+        const imageUrlPattern =
+          /(https?:\/\/[^\s]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s]*)?)/gi;
         const extractedUrls = c.match(imageUrlPattern) || [];
-        
+
         if (extractedUrls.length > 0) {
           // 找到图片 URL — 转为 multimodal
-          console.log(`[buildMessages] extracted ${extractedUrls.length} image URLs from plain text`);
+          console.log(
+            `[buildMessages] extracted ${extractedUrls.length} image URLs from plain text`,
+          );
           const cleanText = c.replace(imageUrlPattern, "").trim();
-          
-          const content: Array<{ type: "text"; text: string } | { type: "file"; mediaType: string; data: URL }> = [
+
+          const content: Array<
+            | { type: "text"; text: string }
+            | { type: "file"; mediaType: string; data: URL }
+          > = [
             { type: "text" as const, text: cleanText + contextSuffix },
-            ...extractedUrls.map(url => ({
+            ...extractedUrls.map((url) => ({
               type: "file" as const,
               mediaType: "image/jpeg",
               data: new URL(url),
             })),
           ];
-          
+
           msgs.push({ role: "user", content } satisfies UserModelMessage);
         } else {
           // 没有图片 — 纯文本
-          msgs.push({ role: "user", content: c + contextSuffix } satisfies UserModelMessage);
+          msgs.push({
+            role: "user",
+            content: c + contextSuffix,
+          } satisfies UserModelMessage);
         }
       }
     } else if (m instanceof AIMessage) {
       // AIMessage：转 AssistantModelMessage
-      const c = typeof m.content === "string"
-        ? m.content
-        : Array.isArray(m.content)
-          ? m.content.map((p: any) => typeof p === "string" ? p : p?.text ?? "").join("")
-          : String(m.content ?? "");
-      msgs.push({ role: "assistant", content: c } satisfies AssistantModelMessage);
+      const c =
+        typeof m.content === "string"
+          ? m.content
+          : Array.isArray(m.content)
+            ? m.content
+                .map((p: any) => (typeof p === "string" ? p : (p?.text ?? "")))
+                .join("")
+            : String(m.content ?? "");
+      msgs.push({
+        role: "assistant",
+        content: c,
+      } satisfies AssistantModelMessage);
     } else {
       // ToolMessage 等其他消息类型跳过
       // OpenAI Chat Completions 不支持 tool role 直接出现在 user/assistant 消息中
@@ -381,7 +458,10 @@ function buildMessages(
   // 不再 push 重复的 userContent（route.ts 已经把完整 multimodal HumanMessage 放进 state.messages）
   // 如果 history 为空（首轮对话），仍需要 push 当前文本
   if (history.length === 0) {
-    msgs.push({ role: "user", content: userContent + contextSuffix } satisfies UserModelMessage);
+    msgs.push({
+      role: "user",
+      content: userContent + contextSuffix,
+    } satisfies UserModelMessage);
   }
 
   return msgs;
@@ -402,13 +482,15 @@ function buildMessages(
  * This node should NOT contain any pendingConfirmation / pendingHumanAction logic.
  */
 export async function generateResponseNode(
-  state: AgentState
+  state: AgentState,
 ): Promise<Partial<AgentState>> {
   // Guard: never generate a response while waiting for human confirmation.
   // The graph should be at humanConfirmation, not here. This guards against
   // edge cases where the router doesn't catch waitingForConfirmation=true.
   if (state.waitingForConfirmation) {
-    console.log(`[generateResponseNode] SKIP: waitingForConfirmation=true, no response generated`);
+    console.log(
+      `[generateResponseNode] SKIP: waitingForConfirmation=true, no response generated`,
+    );
     return {};
   }
 
@@ -419,7 +501,9 @@ export async function generateResponseNode(
       typeof lastMessage?.content === "string"
         ? lastMessage.content.trim()
         : "";
-    console.log(`[generateResponseNode] image mode detected, content="${content}"`);
+    console.log(
+      `[generateResponseNode] image mode detected, content="${content}"`,
+    );
     return {
       response: "[IMAGE_MODE] 检测到图片生成意图，前端将自动切换到生图模式。",
       pendingHumanAction: null,
@@ -429,7 +513,9 @@ export async function generateResponseNode(
   // ── Workflow Match: Return special response to trigger frontend dialog ──
   if (state.workflowMatch) {
     const { workflow } = state.workflowMatch;
-    console.log(`[generateResponseNode] workflow match detected: ${workflow.type}`);
+    console.log(
+      `[generateResponseNode] workflow match detected: ${workflow.type}`,
+    );
     return {
       response: `[WORKFLOW_MATCH:${workflow.type}]:检测到你可能想要执行「${workflow.name}」工作流。它可以帮你${workflow.description}。是否现在启动？`,
       pendingHumanAction: null,
@@ -451,20 +537,28 @@ export async function generateResponseNode(
             .join("\n")
         : "";
 
-  console.log(`[generateResponseNode] searchResults=${state.searchResults?.length} toolResults=${state.toolResults ? Object.keys(state.toolResults).join(',') : 'none'} mode=${state.mode}`);
+  console.log(
+    `[generateResponseNode] searchResults=${state.searchResults?.length} toolResults=${state.toolResults ? Object.keys(state.toolResults).join(",") : "none"} mode=${state.mode}`,
+  );
 
   // 保留 lastMentionedUser：如果 resolvedEntities 中有用户信息，优先使用
-  const lastMentionedUser = state.lastMentionedUser ?? (state.resolvedEntities?.user ? {
-    id: state.resolvedEntities.user.id,
-    name: state.resolvedEntities.user.name,
-  } : null);
+  const lastMentionedUser =
+    state.lastMentionedUser ??
+    (state.resolvedEntities?.user
+      ? {
+          id: state.resolvedEntities.user.id,
+          name: state.resolvedEntities.user.name,
+        }
+      : null);
 
   // Handle user activity queries with summary results from searchStructured
   // 周报和个人活动查询的结果在 searchResults[0] 中（JSON 格式）
   const userActivityContext = getUserActivityContext(state.toolResults);
   if (userActivityContext) {
     // 根据用户意图决定输出格式：汇总意图 vs 具体意图
-    const systemPrompt = buildSystemPrompt(userName, state.mode, profile, lastMentionedUser) + activityReportHint;
+    const systemPrompt =
+      buildSystemPrompt(userName, state.mode, profile, lastMentionedUser) +
+      activityReportHint;
     const activityMsgs: ModelMessage[] = [
       {
         role: "user",
@@ -477,13 +571,15 @@ export async function generateResponseNode(
         state.modelContext,
         systemPrompt,
         activityMsgs,
-        state.userId
+        state.userId,
       );
       return { response: resultText, lastMentionedUser };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       // 失败时降级返回原文，保证前端至少能看到内容
-      console.warn(`[generateResponseNode] activity二次排版失败，降级返回原文: ${msg}`);
+      console.warn(
+        `[generateResponseNode] activity二次排版失败，降级返回原文: ${msg}`,
+      );
       return { response: userActivityContext, lastMentionedUser };
     }
   }
@@ -504,64 +600,80 @@ export async function generateResponseNode(
   // 如果是用户活动查询但没有有效结果，返回提示
   if (isUserActivityQuery(userContent)) {
     return {
-      response: "暂未查询到该用户的结构化活动记录，请确认用户名或邮箱是否准确后重试。",
+      response:
+        "暂未查询到该用户的结构化活动记录，请确认用户名或邮箱是否准确后重试。",
       lastMentionedUser,
     };
   }
 
-  const systemPrompt = buildSystemPrompt(userName, state.mode, profile, lastMentionedUser);
+  const systemPrompt = buildSystemPrompt(
+    userName,
+    state.mode,
+    profile,
+    lastMentionedUser,
+  );
   // 把全部 state.messages（包括最后一条 user HumanMessage，多模态）传给 buildMessages。
   // buildMessages 已支持 multimodal content，并按"history 最后一轮作为 current user message"处理。
   const messages = buildMessages(
     state.messages,
     userContent,
     state.searchResults,
-    state.toolResults
+    state.toolResults,
   );
 
   // Log what context the LLM will see (first user message after history)
   // #H2 confirm: 确认最终传给 generateText 的 messages content 格式
-    const ctxMsg = messages[messages.length - 1];
-    if (ctxMsg && ctxMsg.role === "user") {
-      const contentPreview = Array.isArray(ctxMsg.content)
-        ? ctxMsg.content.map((p) => `{type:${p.type}}`).join(",")
-        : String(ctxMsg.content).slice(0, 200);
-      console.log(`[DEBUG:H2:generateText] ctxMsg content preview="${contentPreview}"`);
-      console.log(`[DEBUG:H2:generateText] ctxMsg full:`, JSON.stringify(ctxMsg, null, 2).slice(0, 500));
-    }
-    // #H2 instrument: 打印所有 messages 的 content type 摘要（精确定位 unknown 来源）
+  const ctxMsg = messages[messages.length - 1];
+  if (ctxMsg && ctxMsg.role === "user") {
+    const contentPreview = Array.isArray(ctxMsg.content)
+      ? ctxMsg.content.map((p) => `{type:${p.type}}`).join(",")
+      : String(ctxMsg.content).slice(0, 200);
     console.log(
-      `[DEBUG:H2:generateText] all messages contentTypes:`,
-      messages.map((m, i) => ({
-        i,
-        role: m.role,
-        contentType: Array.isArray(m.content)
-          ? m.content.map((p) => `{type:${(p as any).type}}`).join("|")
-          : "string",
-      }))
+      `[DEBUG:H2:generateText] ctxMsg content preview="${contentPreview}"`,
     );
+    console.log(
+      `[DEBUG:H2:generateText] ctxMsg full:`,
+      JSON.stringify(ctxMsg, null, 2).slice(0, 500),
+    );
+  }
+  // #H2 instrument: 打印所有 messages 的 content type 摘要（精确定位 unknown 来源）
+  console.log(
+    `[DEBUG:H2:generateText] all messages contentTypes:`,
+    messages.map((m, i) => ({
+      i,
+      role: m.role,
+      contentType: Array.isArray(m.content)
+        ? m.content.map((p) => `{type:${(p as any).type}}`).join("|")
+        : "string",
+    })),
+  );
 
-    try {
+  try {
     const resultText = await callWithDynamicModel(
       state.modelContext,
       systemPrompt,
       messages,
-      state.userId
+      state.userId,
     );
 
     // Fallback: if data retrieval failed and the model produced nothing useful,
     //    retry once with chat-mode (no tool-result context) so the user still
     //    gets a friendly answer instead of an empty bubble.
     if (!resultText.trim() && isDataRetrievalFailed(state.toolResults)) {
-      console.log(`[generateResponseNode] fallback to chat mode (data retrieval failed, empty response)`);
+      console.log(
+        `[generateResponseNode] fallback to chat mode (data retrieval failed, empty response)`,
+      );
       const chatResult = await callWithDynamicModel(
         state.modelContext,
         buildSystemPrompt(userName, "chat", profile, lastMentionedUser),
         [{ role: "user", content: userContent } satisfies UserModelMessage],
-        state.userId
+        state.userId,
       );
       return {
-        response: chatResult || resultText || "抱歉，我没能理解这个问题，请换个说法试试。",
+        response:
+          chatResult ||
+          resultText ||
+          "抱歉，我没能理解这个问题，请换个说法试试。",
         lastMentionedUser,
         // Belt-and-suspenders: clear any stale pending action so a fresh user message
         // is not hijacked by an abandoned HIL session from a previous request.
@@ -590,7 +702,7 @@ export async function generateResponseNode(
  * generated response is unreliable and we should fall back to chat mode.
  */
 function isDataRetrievalFailed(
-  toolResults: Record<string, unknown> | undefined
+  toolResults: Record<string, unknown> | undefined,
 ): boolean {
   if (!toolResults || typeof toolResults !== "object") return false;
 
@@ -604,7 +716,11 @@ function isDataRetrievalFailed(
     // searchStructured returns a "summary" — flag if it contains failure phrases
     if (toolName === "searchStructured" && typeof r.summary === "string") {
       const s = r.summary;
-      if (s.includes("不支持的查询类型") || s.includes("查询失败") || s.includes("系统错误")) {
+      if (
+        s.includes("不支持的查询类型") ||
+        s.includes("查询失败") ||
+        s.includes("系统错误")
+      ) {
         return true;
       }
     }

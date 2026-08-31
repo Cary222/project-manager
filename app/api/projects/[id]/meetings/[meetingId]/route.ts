@@ -161,7 +161,10 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
           where: { id: docAssetId },
         });
       } catch (docCleanErr) {
-        console.warn("[MEETINGS_DELETE] 清理关联正式文档记录失败（继续执行）:", docCleanErr);
+        console.warn(
+          "[MEETINGS_DELETE] 清理关联正式文档记录失败（继续执行）:",
+          docCleanErr,
+        );
       }
     }
 
@@ -174,7 +177,10 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
         },
       });
     } catch (refCleanErr) {
-      console.warn("[MEETINGS_DELETE] 清理 FileReference 关系失败（继续执行）:", refCleanErr);
+      console.warn(
+        "[MEETINGS_DELETE] 清理 FileReference 关系失败（继续执行）:",
+        refCleanErr,
+      );
     }
 
     // 3. 删除 ProjectMeeting 记录
