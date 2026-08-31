@@ -2,7 +2,12 @@
 
 import { prisma } from "@/shared/db/client";
 import { Prisma } from "@prisma/client";
-import { resolveCredential, resolveCredentialWithFallback } from "./credentials/api-key-store";
+import {
+  resolveCredential,
+  resolveCredentialWithFallback,
+  getSystemCredentials,
+  getUserProviderRecords,
+} from "./credentials/api-key-store";
 import { getProxyFetch, AGNES_API_BASE_URL } from "./providers/agnes/proxy";
 import { resolveModelRuntimeConfig } from "./model-runtime-config";
 
@@ -67,47 +72,112 @@ export interface CallAgnesError {
  */
 export async function callAgnes(
   messages: ChatMessage[],
-  options?: CallAgnesOptions
+  options?: CallAgnesOptions,
 ): Promise<CallAgnesResult> {
   const { userId, preferredModelRef } = options ?? {};
 
+  // 1. 如果指定了 preferredModelRef，优先使用指定模型
   if (preferredModelRef && preferredModelRef !== "default") {
-    if (!userId) {
-      console.warn("[callAgnes] preferredModelRef set but userId missing, using Agnes");
-    } else {
+    if (userId) {
       try {
         const content = await callWithUserModel(userId, preferredModelRef, messages);
         return { content, model: preferredModelRef };
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
-        console.warn("[callAgnes] User model failed, falling back to Agnes:", reason);
-
-        try {
-          const fallbackContent = await callWithAgnes(messages);
-          return {
-            content: fallbackContent,
-            model: AGNES_MODEL,
-            // 附加在返回值里让调用方决定如何处理
-            // _fellBack: true, _fallbackReason: reason
-          };
-        } catch (fallbackErr) {
-          const fallbackReason = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-          console.error("[callAgnes] Both user model and Agnes failed:", {
-            userModel: preferredModelRef,
-            userModelError: reason,
-            agnesError: fallbackReason,
-          });
-          // 两级都失败：抛出合成错误，由调用方捕获并写入 _error
-          throw new Error(
-            `模型调用失败。首选模型（${preferredModelRef}）：${reason}；Agnes 回落后也失败：${fallbackReason}`
-          );
-        }
+        console.warn("[callAgnes] User model failed, falling back to default:", reason);
       }
     }
   }
 
-  const content = await callWithAgnes(messages);
-  return { content, model: AGNES_MODEL };
+  // 2. 尝试调用 Agnes
+  try {
+    const content = await callWithAgnes(messages);
+    return { content, model: AGNES_MODEL };
+  } catch (agnesErr) {
+    const agnesReason = agnesErr instanceof Error ? agnesErr.message : String(agnesErr);
+    console.warn("[callAgnes] Agnes failed, attempting auto-failover to available system/user models:", agnesReason);
+
+    // 3. Agnes 连接异常（如国内 ECONNRESET 等）时，自动容灾回落到已配置的可用模型（如 deepseek, qwen 等）
+    const fallbackRes = await tryFallbackToAnyAvailableModel(userId || "", messages);
+    if (fallbackRes) {
+      return fallbackRes;
+    }
+
+    throw new Error(`AI 模型总结调用失败: ${agnesReason}`);
+  }
+}
+
+/**
+ * 自动容灾降级：遍历已配置的其他可用文本模型（如 DeepSeek, Qwen 等）
+ */
+async function tryFallbackToAnyAvailableModel(
+  userId: string,
+  messages: ChatMessage[],
+): Promise<{ content: string; model: string } | null> {
+  try {
+    const systemCreds = await getSystemCredentials();
+    const userCreds = userId ? await getUserProviderRecords(userId) : [];
+    const candidateProviders = Array.from(
+      new Set([...userCreds.map((c) => c.provider), ...systemCreds.map((c) => c.provider)]),
+    );
+
+    for (const prov of candidateProviders) {
+      if (prov === AGNES_PROVIDER) continue;
+      try {
+        const cred = await resolveCredentialWithFallback(userId, prov);
+        if (!cred || !cred.apiKey) continue;
+
+        const baseURL = cred.baseURL.replace(/\/+$/, "");
+        const chatURL = `${baseURL}/chat/completions`;
+        const fetchFn = cred.transport === "proxy" ? (getProxyFetch() ?? globalThis.fetch) : globalThis.fetch;
+
+        let candidateModel = "deepseek-chat";
+        const lowerProv = prov.toLowerCase();
+        const lowerBase = baseURL.toLowerCase();
+
+        if (lowerProv.includes("token") || lowerBase.includes("token-plan") || lowerBase.includes("maas")) {
+          candidateModel = "qwen3.6-flash";
+        } else if (lowerProv.includes("deepseek") || lowerBase.includes("deepseek")) {
+          candidateModel = "deepseek-chat";
+        } else if (lowerProv.includes("openai") || lowerBase.includes("openai.com")) {
+          candidateModel = "gpt-4o-mini";
+        }
+
+        console.info(`[summarizer-fallback] 尝试容灾模型: prov=${prov}, model=${candidateModel}, url=${chatURL}`);
+
+        const res = await fetchFn(chatURL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${cred.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: candidateModel,
+            messages,
+            stream: false,
+            temperature: 0.3,
+            max_tokens: 2048,
+          }),
+          signal: AbortSignal.timeout(30_000),
+        });
+
+        if (res.ok) {
+          const data = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
+          const content = data.choices?.[0]?.message?.content;
+          if (typeof content === "string" && content.trim()) {
+            console.info(`[summarizer-fallback] 容灾成功！使用模型: ${prov}:${candidateModel}`);
+            return { content: content.trim(), model: `${prov}:${candidateModel}` };
+          }
+        }
+      } catch (fallbackErr) {
+        console.warn(`[summarizer-fallback] 模型 ${prov} 尝试失败:`, fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr));
+      }
+    }
+  } catch (err) {
+    console.error("[summarizer-fallback] 容灾调度过程异常:", err);
+  }
+
+  return null;
 }
 
 /**

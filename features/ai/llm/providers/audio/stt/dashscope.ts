@@ -79,7 +79,11 @@ async function normalizeAudioToWav(
         if (code === 0 && chunks.length > 0) {
           resolve(Buffer.concat(chunks));
         } else {
-          reject(new Error(`ffmpeg exited with code ${code}: ${errOutput.slice(-200)}`));
+          reject(
+            new Error(
+              `ffmpeg exited with code ${code}: ${errOutput.slice(-200)}`,
+            ),
+          );
         }
       });
       ff.on("error", (err) => reject(err));
@@ -93,7 +97,9 @@ async function normalizeAudioToWav(
       `[stt] ffmpeg 格式重采样未执行或失败 (${binary})，保留原格式推流:`,
       err instanceof Error ? err.message : String(err),
     );
-    const validFormat = ["mp3", "wav", "opus", "aac", "pcm"].includes(originalFormat)
+    const validFormat = ["mp3", "wav", "opus", "aac", "pcm"].includes(
+      originalFormat,
+    )
       ? originalFormat
       : "mp3";
     return { buffer: inputBuffer, format: validFormat };
@@ -128,15 +134,36 @@ export async function transcribeWithDashScope(
   // 1. 优先使用 WebSocket 流式识别协议（百炼 MaaS 专属空间与标准 DashScope 官方推荐，支持 qwen-audio-3.0-asr-flash-streaming）
   try {
     const wsModel = model || "qwen-audio-3.0-asr-flash-streaming";
-    return await transcribeWithWebSocket(audioBuffer, format, credential.apiKey, credential.baseURL, wsModel);
+    return await transcribeWithWebSocket(
+      audioBuffer,
+      format,
+      credential.apiKey,
+      credential.baseURL,
+      wsModel,
+    );
   } catch (wsError) {
-    console.warn("[stt] WebSocket ASR 尝试失败，开始尝试 HTTP 异步/同步 ASR 降级链路:", wsError instanceof Error ? wsError.message : String(wsError));
+    console.warn(
+      "[stt] WebSocket ASR 尝试失败，开始尝试 HTTP 异步/同步 ASR 降级链路:",
+      wsError instanceof Error ? wsError.message : String(wsError),
+    );
 
     const isMaaS = credential.baseURL.includes(".maas.aliyuncs.com");
     if (isMaaS) {
-      return transcribeAsyncMaaS(audioBuffer, format, voiceResult.modelName, credential.apiKey, credential.baseURL);
+      return transcribeAsyncMaaS(
+        audioBuffer,
+        format,
+        voiceResult.modelName,
+        credential.apiKey,
+        credential.baseURL,
+      );
     }
-    return transcribeSync(audioBuffer, format, voiceResult.modelName, credential.apiKey, credential.baseURL);
+    return transcribeSync(
+      audioBuffer,
+      format,
+      voiceResult.modelName,
+      credential.apiKey,
+      credential.baseURL,
+    );
   }
 }
 
@@ -151,16 +178,21 @@ export async function transcribeWithWebSocket(
   modelName: string = "qwen-audio-3.0-asr-flash-streaming",
 ): Promise<TranscribeResult> {
   // 预先将音频转为 16000Hz 单声道 wav 以彻底消除 sample_rate 不匹配错误
-  const { buffer: readyBuffer, format: readyFormat } = await normalizeAudioToWav(audioBuffer, format);
+  const { buffer: readyBuffer, format: readyFormat } =
+    await normalizeAudioToWav(audioBuffer, format);
 
   // 构建 WebSocket 端点
   let wsUrl = "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
-  const match = baseURL.match(/https:\/\/([a-zA-Z0-9_-]+)\.cn-beijing\.maas\.aliyuncs\.com/);
+  const match = baseURL.match(
+    /https:\/\/([a-zA-Z0-9_-]+)\.cn-beijing\.maas\.aliyuncs\.com/,
+  );
   if (match && match[1]) {
     wsUrl = `wss://${match[1]}.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference`;
   }
 
-  console.log(`[stt-ws] 开始 WebSocket 转录: url=${wsUrl}, model=${modelName}, format=${readyFormat}, bufferSize=${readyBuffer.length}`);
+  console.log(
+    `[stt-ws] 开始 WebSocket 转录: url=${wsUrl}, model=${modelName}, format=${readyFormat}, bufferSize=${readyBuffer.length}`,
+  );
 
   const taskId = "t" + Date.now().toString(16).padEnd(31, "0").slice(0, 31);
 
@@ -173,7 +205,11 @@ export async function transcribeWithWebSocket(
 
     const cleanup = () => {
       isFinished = true;
-      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      if (
+        ws &&
+        (ws.readyState === WebSocket.OPEN ||
+          ws.readyState === WebSocket.CONNECTING)
+      ) {
         try {
           ws.close();
         } catch (closeErr) {
@@ -199,7 +235,9 @@ export async function transcribeWithWebSocket(
     }, 300_000);
 
     ws.on("open", () => {
-      console.log(`[stt-ws] WebSocket 连接已建立，发送 run-task: taskId=${taskId}`);
+      console.log(
+        `[stt-ws] WebSocket 连接已建立，发送 run-task: taskId=${taskId}`,
+      );
       const runTask = {
         header: {
           action: "run-task",
@@ -239,7 +277,9 @@ export async function transcribeWithWebSocket(
       const event = msg.header?.event;
 
       if (event === "task-started") {
-        console.log("[stt-ws] 服务端已就绪 (task-started)，开始流式发送音频数据...");
+        console.log(
+          "[stt-ws] 服务端已就绪 (task-started)，开始流式发送音频数据...",
+        );
         let offset = 0;
         const chunkSize = 3200; // 约 100ms 音频帧 @ 16kHz
 
@@ -272,7 +312,11 @@ export async function transcribeWithWebSocket(
         sendNextChunk();
       } else if (event === "result-generated") {
         const sentenceObj = msg.payload?.output?.sentence;
-        if (sentenceObj && typeof sentenceObj === "object" && sentenceObj.text) {
+        if (
+          sentenceObj &&
+          typeof sentenceObj === "object" &&
+          sentenceObj.text
+        ) {
           currentSentence = sentenceObj.text;
           if (sentenceObj.sentence_end) {
             finalSentences.push(currentSentence);
@@ -280,8 +324,12 @@ export async function transcribeWithWebSocket(
           }
         } else if (typeof sentenceObj === "string" && sentenceObj) {
           currentSentence = sentenceObj;
-        } else if (msg.payload?.output && typeof msg.payload.output === "object") {
-          const directText = (msg.payload.output as Record<string, unknown>).text;
+        } else if (
+          msg.payload?.output &&
+          typeof msg.payload.output === "object"
+        ) {
+          const directText = (msg.payload.output as Record<string, unknown>)
+            .text;
           if (typeof directText === "string" && directText) {
             currentSentence = directText;
           }
@@ -321,7 +369,9 @@ export async function transcribeWithWebSocket(
     ws.on("close", (code, reason) => {
       clearTimeout(timeoutTimer);
       if (!isFinished) {
-        reject(new Error(`WebSocket 连接异常断开: code=${code}, reason=${reason}`));
+        reject(
+          new Error(`WebSocket 连接异常断开: code=${code}, reason=${reason}`),
+        );
       }
     });
   });
@@ -376,7 +426,9 @@ async function transcribeSync(
     });
 
     if (!response.ok) {
-      const errorData = (await response.json().catch(() => ({}))) as DashScopeError;
+      const errorData = (await response
+        .json()
+        .catch(() => ({}))) as DashScopeError;
       throw new Error(
         `ASR 请求失败: ${errorData.code ?? response.status} - ${errorData.message ?? response.statusText}`,
       );
@@ -412,19 +464,23 @@ async function transcribeAsyncMaaS(
   const apiBase = normalizeDashscopeBaseUrl(baseURL);
   const submitUrl = `${apiBase}/services/audio/asr/transcription`;
 
-  const candidateModels = Array.from(new Set([
-    modelName,
-    "qwen-audio-3.0-asr-flash-streaming",
-    "qwen3-asr-flash-filetrans",
-    "paraformer-v2",
-    "sensevoice-v1",
-  ]));
+  const candidateModels = Array.from(
+    new Set([
+      modelName,
+      "qwen-audio-3.0-asr-flash-streaming",
+      "qwen3-asr-flash-filetrans",
+      "paraformer-v2",
+      "sensevoice-v1",
+    ]),
+  );
 
   let taskId: string | null = null;
   let lastErrorText = "";
 
   for (const currentModel of candidateModels) {
-    console.log(`[stt] 尝试提交异步转写任务: url=${submitUrl}, model=${currentModel}`);
+    console.log(
+      `[stt] 尝试提交异步转写任务: url=${submitUrl}, model=${currentModel}`,
+    );
 
     const mimeType = formatToMimeType(format);
     const formData = new FormData();
@@ -434,9 +490,12 @@ async function transcribeAsyncMaaS(
       `audio.${format}`,
     );
     formData.append("model", currentModel);
-    formData.append("parameters", JSON.stringify({
-      language_hints: ["zh", "en"],
-    }));
+    formData.append(
+      "parameters",
+      JSON.stringify({
+        language_hints: ["zh", "en"],
+      }),
+    );
 
     const submitResponse = await fetch(submitUrl, {
       method: "POST",
@@ -449,15 +508,23 @@ async function transcribeAsyncMaaS(
     });
 
     if (submitResponse.ok) {
-      const submitData = (await submitResponse.json()) as { output?: { task_id: string }; request_id: string };
+      const submitData = (await submitResponse.json()) as {
+        output?: { task_id: string };
+        request_id: string;
+      };
       taskId = submitData.output?.task_id ?? null;
       if (taskId) {
-        console.log(`[stt] 任务提交成功: model=${currentModel}, task_id=${taskId}`);
+        console.log(
+          `[stt] 任务提交成功: model=${currentModel}, task_id=${taskId}`,
+        );
         break;
       }
     } else {
       lastErrorText = await submitResponse.text().catch(() => "");
-      console.warn(`[stt] 模型 ${currentModel} 提交失败 (${submitResponse.status}):`, lastErrorText);
+      console.warn(
+        `[stt] 模型 ${currentModel} 提交失败 (${submitResponse.status}):`,
+        lastErrorText,
+      );
       if (!lastErrorText.includes("Model not exist")) {
         break;
       }
@@ -494,7 +561,9 @@ async function transcribeAsyncMaaS(
     const statusData = (await statusResponse.json()) as TaskStatusResponse;
     const status = statusData.output?.task_status;
 
-    console.log(`[stt] 任务状态: ${status} (attempt ${attempt + 1}/${maxAttempts})`);
+    console.log(
+      `[stt] 任务状态: ${status} (attempt ${attempt + 1}/${maxAttempts})`,
+    );
 
     if (status === "SUCCESS") {
       transcriptionUrl = statusData.output?.transcription_url ?? null;
@@ -551,12 +620,25 @@ function formatToMimeType(format: SupportedAudioFormat): string {
 /**
  * 根据 MIME 类型或文件名推断音频格式
  */
-export function inferFormatFromMimeType(mimeType: string, filename?: string): SupportedAudioFormat {
+export function inferFormatFromMimeType(
+  mimeType: string,
+  filename?: string,
+): SupportedAudioFormat {
   const lowerMime = mimeType.toLowerCase();
   const lowerName = (filename ?? "").toLowerCase();
 
-  if (lowerMime.includes("mpeg") || lowerMime.includes("mp3") || lowerName.endsWith(".mp3")) return "mp3";
-  if (lowerMime.includes("m4a") || lowerMime.includes("x-m4a") || lowerName.endsWith(".m4a")) return "m4a";
+  if (
+    lowerMime.includes("mpeg") ||
+    lowerMime.includes("mp3") ||
+    lowerName.endsWith(".mp3")
+  )
+    return "mp3";
+  if (
+    lowerMime.includes("m4a") ||
+    lowerMime.includes("x-m4a") ||
+    lowerName.endsWith(".m4a")
+  )
+    return "m4a";
   if (lowerMime.includes("wav") || lowerName.endsWith(".wav")) return "wav";
   if (lowerMime.includes("webm") || lowerName.endsWith(".webm")) return "webm";
   if (lowerMime.includes("mp4") || lowerName.endsWith(".mp4")) return "mp4";

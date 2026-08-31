@@ -26,7 +26,13 @@ export type VoiceCapability = "tts" | "stt" | "realtime";
 
 // 模型 ID 关键词匹配（用于判断模型是否支持某种能力）
 const VOICE_MODEL_PATTERNS: Record<VoiceCapability, RegExp[]> = {
-  tts: [/\btts\b/i, /speech[-_]?synthesis/i, /audio[-_]?3[._-]?0[-_]?tts/i, /^qwen-audio-3\.0-tts/i, /cosyvoice/i],
+  tts: [
+    /\btts\b/i,
+    /speech[-_]?synthesis/i,
+    /audio[-_]?3[._-]?0[-_]?tts/i,
+    /^qwen-audio-3\.0-tts/i,
+    /cosyvoice/i,
+  ],
   stt: [
     /\basr\b/i,
     /transcri(be|ption)/i,
@@ -44,7 +50,10 @@ const VOICE_MODEL_PATTERNS: Record<VoiceCapability, RegExp[]> = {
 /**
  * 判断模型 ID 是否支持指定能力
  */
-export function modelSupportsCapability(modelId: string, capability: VoiceCapability): boolean {
+export function modelSupportsCapability(
+  modelId: string,
+  capability: VoiceCapability,
+): boolean {
   const patterns = VOICE_MODEL_PATTERNS[capability];
   return patterns.some((pattern) => pattern.test(modelId));
 }
@@ -99,11 +108,14 @@ async function resolveFromModelRef(
   // modelRef 格式: "provider:modelName" 或 "modelName"
   const colonIndex = modelRef.indexOf(":");
   const provider = colonIndex > 0 ? modelRef.substring(0, colonIndex) : null;
-  const modelName = colonIndex > 0 ? modelRef.substring(colonIndex + 1) : modelRef;
+  const modelName =
+    colonIndex > 0 ? modelRef.substring(colonIndex + 1) : modelRef;
 
   // 验证模型是否支持指定能力
   if (!modelSupportsCapability(modelName, capability)) {
-    console.warn(`[voice-credential] 模型 ${modelName} 不支持 ${capability} 能力`);
+    console.warn(
+      `[voice-credential] 模型 ${modelName} 不支持 ${capability} 能力`,
+    );
     return null;
   }
 
@@ -114,7 +126,9 @@ async function resolveFromModelRef(
     baseURL: process.env.DASHSCOPE_BASE_URL ?? "",
   });
   if (!cred) {
-    console.warn(`[voice-credential] 未找到 provider ${resolvedProvider} 的凭证`);
+    console.warn(
+      `[voice-credential] 未找到 provider ${resolvedProvider} 的凭证`,
+    );
     return null;
   }
 
@@ -182,11 +196,14 @@ async function resolveFromAvailableModels(
     }
 
     // Token Plan MaaS：使用已知的模型列表
-    const isMaaS = lowerBase.includes("token-plan") && lowerBase.includes(".maas.");
+    const isMaaS =
+      lowerBase.includes("token-plan") && lowerBase.includes(".maas.");
     if (isMaaS) {
       const knownModel = getKnownMaaSModel(capability);
       if (knownModel) {
-        console.log(`[voice-credential] Token Plan MaaS 使用已知模型: ${knownModel} (${capability})`);
+        console.log(
+          `[voice-credential] Token Plan MaaS 使用已知模型: ${knownModel} (${capability})`,
+        );
         return {
           credential: cred,
           modelName: knownModel,
@@ -207,7 +224,9 @@ async function resolveFromAvailableModels(
       // 查找支持指定能力的模型
       for (const model of models) {
         if (modelSupportsCapability(model.modelName, capability)) {
-          console.log(`[voice-credential] 找到支持 ${capability} 的模型: ${model.modelName} (${prov})`);
+          console.log(
+            `[voice-credential] 找到支持 ${capability} 的模型: ${model.modelName} (${prov})`,
+          );
           return {
             credential: cred,
             modelName: model.modelName,
@@ -216,10 +235,15 @@ async function resolveFromAvailableModels(
         }
       }
     } catch (err) {
-      console.warn(`[voice-credential] 从 ${prov} 获取模型列表失败:`, err instanceof Error ? err.message : String(err));
+      console.warn(
+        `[voice-credential] 从 ${prov} 获取模型列表失败:`,
+        err instanceof Error ? err.message : String(err),
+      );
       const fallbackModel = getKnownMaaSModel(capability);
       if (fallbackModel && isDashscopeLike) {
-        console.log(`[voice-credential] 回退到已知模型: ${fallbackModel} (${capability})`);
+        console.log(
+          `[voice-credential] 回退到已知模型: ${fallbackModel} (${capability})`,
+        );
         return {
           credential: cred,
           modelName: fallbackModel,
@@ -231,8 +255,11 @@ async function resolveFromAvailableModels(
 
   // 若动态发现未返回，但存在配置好的 DashScope/Token Plan 凭证，使用默认模型
   if (dashscopeLikeCred) {
-    const defaultModel = getKnownMaaSModel(capability) || getDefaultModelForCapability(capability);
-    console.log(`[voice-credential] 使用已配置的 DashScope/Token Plan 凭证默认模型: ${defaultModel}`);
+    const defaultModel =
+      getKnownMaaSModel(capability) || getDefaultModelForCapability(capability);
+    console.log(
+      `[voice-credential] 使用已配置的 DashScope/Token Plan 凭证默认模型: ${defaultModel}`,
+    );
     return {
       credential: dashscopeLikeCred,
       modelName: defaultModel,
@@ -269,11 +296,14 @@ async function resolveDashscopeFallback(
 /**
  * 从环境变量回退
  */
-function resolveEnvFallback(capability: VoiceCapability): VoiceCredentialResult | null {
+function resolveEnvFallback(
+  capability: VoiceCapability,
+): VoiceCredentialResult | null {
   const apiKey = process.env.DASHSCOPE_API_KEY;
   if (!apiKey) return null;
 
-  const baseURL = process.env.DASHSCOPE_BASE_URL || "https://dashscope.aliyuncs.com/api/v1";
+  const baseURL =
+    process.env.DASHSCOPE_BASE_URL || "https://dashscope.aliyuncs.com/api/v1";
   const defaultModel = getDefaultModelForCapability(capability);
 
   return {
@@ -295,7 +325,12 @@ function resolveEnvFallback(capability: VoiceCapability): VoiceCredentialResult 
  */
 function guessProviderFromModel(modelName: string): string {
   const lower = modelName.toLowerCase();
-  if (lower.includes("dashscope") || lower.includes("qwen") || lower.includes("tts") || lower.includes("asr")) {
+  if (
+    lower.includes("dashscope") ||
+    lower.includes("qwen") ||
+    lower.includes("tts") ||
+    lower.includes("asr")
+  ) {
     return "dashscope";
   }
   if (lower.includes("openai") || lower.includes("whisper")) {
