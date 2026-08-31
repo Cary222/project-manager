@@ -93,7 +93,22 @@ export async function transcribeWithDashScope(
 }
 
 /**
- * 标准 DashScope 同步 ASR（已弃用，Token Plan 不支持）
+ * 规范化 DashScope / Token Plan 基础地址，适配 /services 与 /tasks 端点
+ */
+function normalizeDashscopeBaseUrl(baseURL: string): string {
+  let cleaned = baseURL.trim().replace(/\/+$/, "");
+  if (cleaned.endsWith("/compatible-mode/v1")) {
+    cleaned = cleaned.replace(/\/compatible-mode\/v1$/, "/api/v1");
+  } else if (cleaned.endsWith("/compatible-mode")) {
+    cleaned = cleaned.replace(/\/compatible-mode$/, "/api/v1");
+  } else if (!cleaned.includes("/api/v1") && !cleaned.endsWith("/v1")) {
+    cleaned = `${cleaned}/api/v1`;
+  }
+  return cleaned;
+}
+
+/**
+ * 标准 DashScope 同步 ASR
  */
 async function transcribeSync(
   audioBuffer: Buffer,
@@ -102,6 +117,7 @@ async function transcribeSync(
   apiKey: string,
   baseURL: string
 ): Promise<TranscribeResult> {
+  const apiBase = normalizeDashscopeBaseUrl(baseURL);
   const mimeType = formatToMimeType(format);
 
   const formData = new FormData();
@@ -112,7 +128,7 @@ async function transcribeSync(
   );
   formData.append("model", modelName);
 
-  const url = `${baseURL}/audio/transcriptions`;
+  const url = `${apiBase}/audio/transcriptions`;
 
   try {
     const response = await fetch(url, {
@@ -163,9 +179,10 @@ async function transcribeAsyncMaaS(
   apiKey: string,
   baseURL: string
 ): Promise<TranscribeResult> {
+  const apiBase = normalizeDashscopeBaseUrl(baseURL);
   // Step 1: 提交转写任务（使用 multipart/form-data）
-  const submitUrl = `${baseURL}/services/audio/asr/transcription`;
-  console.log(`[stt] 提交异步转写任务: model=${modelName}`);
+  const submitUrl = `${apiBase}/services/audio/asr/transcription`;
+  console.log(`[stt] 提交异步转写任务: url=${submitUrl}, model=${modelName}`);
 
   const mimeType = formatToMimeType(format);
   const formData = new FormData();
@@ -203,7 +220,7 @@ async function transcribeAsyncMaaS(
   console.log(`[stt] 任务已提交: task_id=${taskId}`);
 
   // Step 3: 轮询任务状态
-  const taskUrl = `${baseURL}/tasks/${taskId}`;
+  const taskUrl = `${apiBase}/tasks/${taskId}`;
   const maxAttempts = 60; // 最多 60 次 × 2s = 2 分钟
   let transcriptionUrl: string | null = null;
 

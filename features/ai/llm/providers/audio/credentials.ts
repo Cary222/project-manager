@@ -26,8 +26,18 @@ export type VoiceCapability = "tts" | "stt" | "realtime";
 
 // 模型 ID 关键词匹配（用于判断模型是否支持某种能力）
 const VOICE_MODEL_PATTERNS: Record<VoiceCapability, RegExp[]> = {
-  tts: [/\btts\b/i, /speech[-_]?synthesis/i, /audio[-_]?3[._-]?0[-_]?tts/i, /^qwen-audio-3\.0-tts/i],
-  stt: [/\basr\b/i, /transcri(be|ption)/i, /speech[-_]?to[-_]?text/i, /^qwen3.*asr/i, /^fun-asr/i],
+  tts: [/\btts\b/i, /speech[-_]?synthesis/i, /audio[-_]?3[._-]?0[-_]?tts/i, /^qwen-audio-3\.0-tts/i, /cosyvoice/i],
+  stt: [
+    /\basr\b/i,
+    /transcri(be|ption)/i,
+    /speech[-_]?to[-_]?text/i,
+    /^qwen3.*asr/i,
+    /^fun-asr/i,
+    /^paraformer/i,
+    /^sensevoice/i,
+    /whisper/i,
+    /audio/i,
+  ],
   realtime: [/realtime/i, /^qwen-audio-3\.0-realtime/i],
 };
 
@@ -58,7 +68,7 @@ export interface VoiceCredentialResult {
 export async function resolveVoiceCredential(
   userId: string,
   capability: VoiceCapability,
-  modelRef?: string
+  modelRef?: string,
 ): Promise<VoiceCredentialResult | null> {
   // 如果指定了 modelRef，按生图模式处理
   if (modelRef) {
@@ -84,7 +94,7 @@ export async function resolveVoiceCredential(
 async function resolveFromModelRef(
   userId: string,
   capability: VoiceCapability,
-  modelRef: string
+  modelRef: string,
 ): Promise<VoiceCredentialResult | null> {
   // modelRef 格式: "provider:modelName" 或 "modelName"
   const colonIndex = modelRef.indexOf(":");
@@ -120,7 +130,7 @@ async function resolveFromModelRef(
  */
 async function resolveFromAvailableModels(
   userId: string,
-  capability: VoiceCapability
+  capability: VoiceCapability,
 ): Promise<VoiceCredentialResult | null> {
   // 收集所有已配置的 provider：使用统一的 CredentialService
   const providers = new Set<string>();
@@ -137,20 +147,42 @@ async function resolveFromAvailableModels(
     providers.add(record.provider);
   }
 
+  let dashscopeLikeCred: CredentialRecord | null = null;
+
   // 遍历每个 provider，查找支持该能力的模型
   for (const prov of providers) {
-    // 跳过非语音相关的 provider
-    if (!["openai", "dashscope", "anthropic"].includes(prov)) continue;
-
-    // 使用统一的三级降级链路获取凭证
     const cred = await resolveCredentialWithFallback(userId, prov, {
       apiKey: process.env.DASHSCOPE_API_KEY ?? "",
       baseURL: process.env.DASHSCOPE_BASE_URL ?? "",
     });
-    if (!cred) continue;
+    if (!cred || !cred.apiKey) continue;
 
-    // Token Plan MaaS：使用已知的模型列表（不依赖动态发现）
-    const isMaaS = cred.baseURL.includes("token-plan") && cred.baseURL.includes(".maas.");
+    const lowerProv = prov.toLowerCase();
+    const lowerBase = (cred.baseURL || "").toLowerCase();
+
+    // 检查是否可能为语音候选 provider (DashScope/Token Plan/OpenAI/Qwen/Aliyun 等)
+    const isDashscopeLike =
+      lowerProv.includes("dashscope") ||
+      lowerProv.includes("token") ||
+      lowerProv.includes("qwen") ||
+      lowerProv.includes("aliyun") ||
+      lowerBase.includes("dashscope") ||
+      lowerBase.includes("token-plan") ||
+      lowerBase.includes("aliyuncs.com");
+
+    const isVoiceCandidate =
+      isDashscopeLike ||
+      lowerProv.includes("openai") ||
+      lowerBase.includes("openai.com");
+
+    if (!isVoiceCandidate) continue;
+
+    if (isDashscopeLike && !dashscopeLikeCred) {
+      dashscopeLikeCred = cred;
+    }
+
+    // Token Plan MaaS：使用已知的模型列表
+    const isMaaS = lowerBase.includes("token-plan") && lowerBase.includes(".maas.");
     if (isMaaS) {
       const knownModel = getKnownMaaSModel(capability);
       if (knownModel) {
@@ -161,12 +193,9 @@ async function resolveFromAvailableModels(
           capability,
         };
       }
-      // Token Plan MaaS 不支持该能力，跳过此 provider
-      console.log(`[voice-credential] Token Plan MaaS 不支持 ${capability}，跳过`);
-      continue;
     }
 
-    // 标准 provider：从 API 动态发现
+    // 标准 provider：尝试从 API 动态发现
     try {
       const models = await discoverModelsFromAPI({
         provider: prov,
@@ -188,9 +217,8 @@ async function resolveFromAvailableModels(
       }
     } catch (err) {
       console.warn(`[voice-credential] 从 ${prov} 获取模型列表失败:`, err instanceof Error ? err.message : String(err));
-      // 如果动态发现失败，回退到已知模型
       const fallbackModel = getKnownMaaSModel(capability);
-      if (fallbackModel) {
+      if (fallbackModel && isDashscopeLike) {
         console.log(`[voice-credential] 回退到已知模型: ${fallbackModel} (${capability})`);
         return {
           credential: cred,
@@ -201,6 +229,17 @@ async function resolveFromAvailableModels(
     }
   }
 
+  // 若动态发现未返回，但存在配置好的 DashScope/Token Plan 凭证，使用默认模型
+  if (dashscopeLikeCred) {
+    const defaultModel = getKnownMaaSModel(capability) || getDefaultModelForCapability(capability);
+    console.log(`[voice-credential] 使用已配置的 DashScope/Token Plan 凭证默认模型: ${defaultModel}`);
+    return {
+      credential: dashscopeLikeCred,
+      modelName: defaultModel,
+      capability,
+    };
+  }
+
   return null;
 }
 
@@ -209,7 +248,7 @@ async function resolveFromAvailableModels(
  */
 async function resolveDashscopeFallback(
   userId: string,
-  capability: VoiceCapability
+  capability: VoiceCapability,
 ): Promise<VoiceCredentialResult | null> {
   // 使用统一的三级降级链路获取 dashscope 凭证
   const cred = await resolveCredentialWithFallback(userId, "dashscope", {
@@ -273,24 +312,21 @@ function getDefaultModelForCapability(capability: VoiceCapability): string {
     case "tts":
       return "qwen-audio-3.0-tts-plus";
     case "stt":
-      return "qwen-audio-3.0-asr-flash-filetrans";
+      return "qwen3-asr-flash-filetrans";
     case "realtime":
       return "qwen-audio-3.0-realtime-plus";
   }
 }
 
 /**
- * 获取 Token Plan MaaS 的已知模型（基于终端显示的模型列表）
- *
- * 注意：Token Plan MaaS (sk-sp- Key) 不支持 WebSocket Realtime 和 STT，
- * 因为其鉴权协议与标准 DashScope 不同。TTS 能力可用。
+ * 获取 Token Plan MaaS 的已知模型
  */
 function getKnownMaaSModel(capability: VoiceCapability): string | null {
   switch (capability) {
     case "tts":
       return "qwen-audio-3.0-tts-plus";
     case "stt":
-      return "paraformer-v3";
+      return "qwen3-asr-flash-filetrans";
     case "realtime":
       return "qwen-audio-3.0-realtime-plus";
     default:
