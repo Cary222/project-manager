@@ -93,12 +93,44 @@ export function initializeWorkAgent(): void {
 // ============================================================================
 
 const CODING_KEYWORDS = [
-  "重构", "refactor", "修复", "fix", "bug", "代码", "code",
-  "实现", "implement", "新增", "add feature", "功能",
-  "测试", "test", "单元测试", "接口", "api", "模块",
-  "读取", "read", "写入", "write", "创建", "create", "删除", "delete",
-  "文件", "file", "package.json", "查看", "检查", "check",
-  "修改", "modify", "更新", "update", "编辑", "edit",
+  "重构",
+  "refactor",
+  "修复",
+  "fix",
+  "bug",
+  "代码",
+  "code",
+  "实现",
+  "implement",
+  "新增",
+  "add feature",
+  "功能",
+  "测试",
+  "test",
+  "单元测试",
+  "接口",
+  "api",
+  "模块",
+  "读取",
+  "read",
+  "写入",
+  "write",
+  "创建",
+  "create",
+  "删除",
+  "delete",
+  "文件",
+  "file",
+  "package.json",
+  "查看",
+  "检查",
+  "check",
+  "修改",
+  "modify",
+  "更新",
+  "update",
+  "编辑",
+  "edit",
 ];
 
 function isCodingTask(input: string): boolean {
@@ -116,7 +148,9 @@ function isCodingTask(input: string): boolean {
  * Phase 2: 启动 Pi session，返回 handle（不处理完整事件流）
  * Phase 3: 接入真实 Pi SDK，返回完整事件流
  */
-async function executeCodingNode(state: WorkAgentState): Promise<Partial<WorkAgentState>> {
+async function executeCodingNode(
+  state: WorkAgentState,
+): Promise<Partial<WorkAgentState>> {
   const { runId, userInput } = state;
 
   try {
@@ -170,7 +204,9 @@ async function executeCodingNode(state: WorkAgentState): Promise<Partial<WorkAge
  * - 检测用户输入意图，路由到 workflow 或 coding。
  * - Phase 1: coding 类返回提示，workflow 类路由到对应 graph。
  */
-async function dispatchNode(state: WorkAgentState): Promise<Partial<WorkAgentState>> {
+async function dispatchNode(
+  state: WorkAgentState,
+): Promise<Partial<WorkAgentState>> {
   const input = state.userInput;
 
   // Step 1: 尝试 workflow 路由（关键词匹配）
@@ -182,7 +218,9 @@ async function dispatchNode(state: WorkAgentState): Promise<Partial<WorkAgentSta
     return {
       taskType: "workflow",
       workflowType: matchResult.workflowId,
-      workflowName: templates.find((t) => t.type === matchResult.workflowId)?.name ?? matchResult.workflowId,
+      workflowName:
+        templates.find((t) => t.type === matchResult.workflowId)?.name ??
+        matchResult.workflowId,
       status: "dispatched",
       updatedAt: Date.now(),
     };
@@ -210,7 +248,9 @@ async function dispatchNode(state: WorkAgentState): Promise<Partial<WorkAgentSta
 /**
  * Execute workflow node: 运行对应的 workflow graph。
  */
-async function executeWorkflowNode(state: WorkAgentState): Promise<Partial<WorkAgentState>> {
+async function executeWorkflowNode(
+  state: WorkAgentState,
+): Promise<Partial<WorkAgentState>> {
   const { workflowType, userId, runId } = state;
 
   try {
@@ -224,9 +264,11 @@ async function executeWorkflowNode(state: WorkAgentState): Promise<Partial<WorkA
     }
 
     // Get weekly report graph
-    const { getWeeklyReportGraph } = await import("./workflows/weekly-report/graph");
+    const { getWeeklyReportGraph } = await import(
+      "./workflows/weekly-report/graph"
+    );
     const workflowGraph = await getWeeklyReportGraph();
-    
+
     // Prepare workflow input (adapt from Work Agent state)
     const workflowInput = {
       userId,
@@ -246,7 +288,9 @@ async function executeWorkflowNode(state: WorkAgentState): Promise<Partial<WorkA
       return {
         status: "completed",
         artifacts: { reportId: result.reportId },
-        summary: result.reportId ? `周报已生成（ID: ${result.reportId}）` : "工作流已完成",
+        summary: result.reportId
+          ? `周报已生成（ID: ${result.reportId}）`
+          : "工作流已完成",
         updatedAt: Date.now(),
       };
     } else if (result.status === "cancelled") {
@@ -268,7 +312,10 @@ async function executeWorkflowNode(state: WorkAgentState): Promise<Partial<WorkA
         waitingForHuman: true,
         pendingApproval: {
           title: "周报审批",
-          description: result.draft?.highlights?.join(", ") ?? result.draft?.rawMarkdown?.slice(0, 100) ?? "请审阅周报草稿",
+          description:
+            result.draft?.highlights?.join(", ") ??
+            result.draft?.rawMarkdown?.slice(0, 100) ??
+            "请审阅周报草稿",
         },
         updatedAt: Date.now(),
       };
@@ -319,7 +366,9 @@ async function finishNode(): Promise<Partial<WorkAgentState>> {
 /**
  * Fail node: handle errors.
  */
-async function failNode(state: WorkAgentState): Promise<Partial<WorkAgentState>> {
+async function failNode(
+  state: WorkAgentState,
+): Promise<Partial<WorkAgentState>> {
   return {
     status: "failed",
     waitingForHuman: false,
@@ -335,15 +384,15 @@ async function failNode(state: WorkAgentState): Promise<Partial<WorkAgentState>>
 /**
  * After dispatch: route based on taskType.
  * - workflow → executeWorkflow
- * - coding → executeCoding (Phase 2: Pi SubAgent)
+ * - coding → END; the HTTP SSE route owns the only Pi session lifecycle
  * - unknown / error → END
+ *
+ * Keeping coding out of the graph prevents a second Pi session from being
+ * launched concurrently with handleCodingTask() in /api/ai/work/run.
  */
 function routeAfterDispatch(state: WorkAgentState): string {
   if (state.taskType === "workflow" && state.status === "dispatched") {
     return "executeWorkflow";
-  }
-  if (state.taskType === "coding") {
-    return "executeCoding";
   }
   return END;
 }

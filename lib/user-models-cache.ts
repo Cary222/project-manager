@@ -102,7 +102,7 @@ interface UserModelsCacheState {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
+   
   var __userModelsCacheState: UserModelsCacheState | undefined;
 }
 

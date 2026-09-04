@@ -10,6 +10,7 @@ import {
 const createSchema = z.object({
   title: z.string().optional(),
   firstMessage: z.string().optional(),
+  category: z.enum(["CHAT", "WORK"]).optional(),
   /**
    * C1 fix: 首条消息附带的图片资源 id（AiFileAsset.id）。
    * 与 firstMessage 一起持久化为 user message 的 INPUT attachments。
@@ -44,7 +45,7 @@ export async function POST(request: NextRequest) {
   try {
     const session = await requireSession();
     const body = await request.json();
-    const { title, firstMessage, inputImageIds } = createSchema.parse(body);
+    const { title, firstMessage, inputImageIds, category } = createSchema.parse(body);
 
     // C1 fix: 校验 inputImageIds 全部归当前用户所有（ownerId = userId）。
     // 校验失败返回 403/400，不创建对话，避免孤儿对话。
@@ -56,11 +57,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const defaultTitle = category === "WORK" ? "工作任务向导" : "新对话";
     const conversation = await prisma.$transaction(async (tx) => {
       const conv = await tx.aiConversation.create({
         data: {
           userId: session.user.id,
-          title: title ?? firstMessage ?? "新对话",
+          title: title ?? firstMessage ?? defaultTitle,
+          category: category ?? "CHAT",
         },
       });
       // C1 fix: 首条消息持久化（与 /messages 路由的 LangGraph 分支保持一致语义）

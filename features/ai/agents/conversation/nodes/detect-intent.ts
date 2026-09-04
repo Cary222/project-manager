@@ -5,8 +5,12 @@ import {
   parseQueryType,
   extractUserIdentifier,
   detectActivityWindow,
+  resolveTemporalWindow,
+  extractId,
+  isImplicitTicketReference,
   stripLeadInVerbs,
   type QueryType,
+  type ResolvedTimeWindow,
 } from "@/features/ai/core/resolvers/query-parser";
 import type { ExtractedUser, ActivityWindow } from "@/features/ai/types/structured";
 
@@ -19,37 +23,78 @@ import type { ExtractedUser, ActivityWindow } from "@/features/ai/types/structur
 const WORKFLOW_PATTERNS: { pattern: RegExp; workflowType: string; keyword: string; confidence: number }[] = [
   // 周报相关
   {
-    pattern: /(?:帮我)?生成(?:本周|这周|本周)?(?:的)?(?:周报|一周(?:工作)?总结)/i,
+    pattern: /(?:帮我)?生成(?:本周|这周|上周)?(?:的)?(?:周报|一周(?:工作)?总结)/i,
     workflowType: "weekly_report",
     keyword: "生成周报",
     confidence: 0.95,
   },
   {
-    pattern: /(?:帮我)?(?:提交|发布|上交|推送|更新)(?:本周|这周|本周)?(?:的)?(?:周报|一周(?:工作)?总结)/i,
+    pattern: /(?:帮我)?(?:提交|发布|上交|推送|更新)(?:本周|这周|上周)?(?:的)?(?:周报|一周(?:工作)?总结)/i,
     workflowType: "weekly_report",
     keyword: "提交周报",
     confidence: 0.95,
   },
   {
-    pattern: /(?:帮我)?(?:写|做|做一下)(?:本周|这周|本周)?(?:的)?(?:周报|一周总结)/i,
+    pattern: /(?:帮我)?(?:写|写一下|做|做一下)(?:本周|这周|上周)?(?:的)?(?:周报|一周总结)/i,
     workflowType: "weekly_report",
     keyword: "写周报",
     confidence: 0.9,
   },
   {
-    pattern: /(?:帮我)?整理(?:本周|这周|本周)?(?:的)?(?:工作(?:内容|总结|汇报)|周报)/i,
+    pattern: /(?:帮我)?整理(?:本周|这周|上周)?(?:的)?(?:工作(?:内容|总结|汇报)|周报)/i,
     workflowType: "weekly_report",
     keyword: "整理工作内容",
     confidence: 0.85,
   },
   {
-    pattern: /(?:帮我)?汇总(?:本周|这周|本周)?(?:的)?(?:进度|工作|周报)/i,
+    pattern: /(?:帮我)?汇总(?:本周|这周|上周)?(?:的)?(?:进度|工作|周报)/i,
     workflowType: "weekly_report",
     keyword: "汇总进度",
     confidence: 0.8,
   },
-];
 
+  // 项目进展相关
+  {
+    pattern: /(?:帮我)?(?:查看|汇总|统计|分析|生成|了解)?(?:项目|模块|系统)?(?:的)?(?:进展|进度|大盘|概况|统计)/i,
+    workflowType: "project_progress",
+    keyword: "项目进展汇总",
+    confidence: 0.9,
+  },
+  {
+    pattern: /(?:项目|模块)(?:当前)?(?:有什么|的)?(?:最新进展|活跃工单|进度如何)/i,
+    workflowType: "project_progress",
+    keyword: "项目最新进展",
+    confidence: 0.85,
+  },
+
+  // 会议纪要相关
+  {
+    pattern: /(?:帮我)?(?:整理|生成|做|写|上传|转写|总结)?(?:本次|上周|这周|周会|例会|项目)?(?:的)?(?:会议(?:纪要|记录|总结)|周会纪要|录音整理)/i,
+    workflowType: "meeting_minutes",
+    keyword: "整理会议纪要",
+    confidence: 0.9,
+  },
+  {
+    pattern: /(?:录音|语音|音频)(?:文件)?(?:转写|提炼|生成纪要)/i,
+    workflowType: "meeting_minutes",
+    keyword: "会议录音转写",
+    confidence: 0.85,
+  },
+
+  // Coding 任务开发相关
+  {
+    pattern: /(?:针对|根据)?工单\s*#?\d+\s*(?:编写|开发|修复|改代码|实现)/i,
+    workflowType: "coding",
+    keyword: "工单开发任务",
+    confidence: 0.95,
+  },
+  {
+    pattern: /(?:帮我)?(?:修|修复|解决)(?:这个)?(?:bug|缺陷|报错|线上问题)|(?:编写|实现|开发|重构)(?:一个)?.*?(?:功能|代码|模块|接口|页面)/i,
+    workflowType: "coding",
+    keyword: "Coding代码任务",
+    confidence: 0.85,
+  },
+];
 // Cached workflow registry lookup (populated on first match detection)
 type CachedWorkflow = { type: string; name: string; description: string };
 let _cachedWorkflows: CachedWorkflow[] | null = null;
@@ -99,6 +144,7 @@ export async function detectWorkflowMatch(message: string): Promise<WorkflowMatc
 
   return {
     type: matchedPattern.workflowType,
+    // SAFETY: Cached workflow metadata conforms to WorkflowMatch workflow property shape
     workflow: workflow as unknown as WorkflowMatch["workflow"],
     confidence: matchedPattern.confidence,
     matchedKeyword: matchedPattern.keyword,
@@ -391,6 +437,17 @@ export async function detectIntent(
 
   console.log(`[detectIntent] content="${content}"`);
 
+  // ── 工单指代消解与焦点更新 ──────────────────────────────────────────────
+  const explicitTicketId = extractId(content);
+  let resolvedTicket: { id: string; ticketNo: number } | null = state.lastMentionedTicket ?? null;
+  if (explicitTicketId) {
+    const ticketNo = parseInt(explicitTicketId, 10);
+    if (!Number.isNaN(ticketNo)) {
+      resolvedTicket = { id: "", ticketNo };
+    }
+  } else if (isImplicitTicketReference(content) && state.lastMentionedTicket) {
+    resolvedTicket = state.lastMentionedTicket;
+  }
   // ── 推断"他/她/这个用户"等代词的上下文 ───────────────────────────────
   // 如果当前消息是纯代词或泛指性问题，从对话历史中推断最近讨论的用户
   // 但如果消息明确包含新用户引用（如"张工"、"李工"），应该更新上下文
@@ -406,7 +463,7 @@ export async function detectIntent(
   const isSelfReference = /^我/.test(content) && !/^[^我]{2,}工/.test(content);
   if (isSelfReference) {
     // 只返回模式检测，不更新 lastMentionedUser
-    return { mode: detectMode(content), ...detectParserFields(content) };
+    return { mode: detectMode(content), lastMentionedTicket: resolvedTicket, ...detectParserFields(content) };
   }
 
   // 检测消息是否明确包含新用户引用（如"张工"、"李工"、"王经理"）
@@ -422,6 +479,7 @@ export async function detectIntent(
     return {
       mode: detectMode(content),
       lastMentionedUser: { id: "", name: newUserName },
+      lastMentionedTicket: resolvedTicket,
       ...detectParserFields(content),
     };
   }
@@ -446,10 +504,11 @@ export async function detectIntent(
         return {
           mode: detectMode(content),
           lastMentionedUser: { id: "", name: mentionedName },
+          lastMentionedTicket: resolvedTicket,
           ...detectParserFields(content),
         };
-      }
     }
+        }
   } else if (isPronounOnly && hasGoodContext) {
     console.log(`[detectIntent] keeping existing lastMentionedUser for pronoun: ${existingName}`);
   }
@@ -473,6 +532,7 @@ export async function detectIntent(
         reason: `检测到工作流「${workflowMatch.workflow.name}」，是否启动？`,
         query: content,
       },
+      lastMentionedTicket: resolvedTicket,
       ...detectParserFields(content),
     };
   }
@@ -480,6 +540,7 @@ export async function detectIntent(
   return {
     mode,
     workflowMatch,
+    lastMentionedTicket: resolvedTicket,
     ...detectParserFields(content),
   };
 }
@@ -494,13 +555,16 @@ function detectParserFields(content: string): {
   queryType: QueryType;
   extractedUser: ExtractedUser | undefined;
   activityWindow: ActivityWindow | undefined;
+  resolvedTimeWindow: ResolvedTimeWindow | undefined;
 } {
   const queryType = parseQueryType(content);
   const extractedUser = extractUserIdentifier(content);
-  const activityWindow = detectActivityWindow(content);
+  const resolvedTimeWindow = resolveTemporalWindow(content);
+  const activityWindow = resolvedTimeWindow?.window ?? detectActivityWindow(content);
   return {
     queryType,
     extractedUser,
     activityWindow,
+    resolvedTimeWindow,
   };
 }

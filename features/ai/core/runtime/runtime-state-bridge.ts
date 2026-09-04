@@ -100,6 +100,8 @@ export function clearPendingHumanAction(conversationId: string): void {
  */
 export interface ConversationContext {
   lastMentionedUser?: { id: string; name: string } | null;
+  lastMentionedTicket?: { id: string; ticketNo: number; title?: string } | null;
+  lastMentionedProject?: { id: string; name: string } | null;
 }
 
 const conversationContextStore = new Map<string, ConversationContext>();

@@ -100,7 +100,7 @@ function reset() {
 }
 
 // 模拟 prisma 抛错（覆盖 background-jobs.ts 的 try/catch）
-let prismaShouldThrow = false;
+const prismaShouldThrow = false;
 const originalFindUnique = mockPrismaFindUnique;
 function mockPrismaFindUniqueWithThrow(id: string): { userId: string } | null {
   if (prismaShouldThrow) throw new Error("simulated DB error");

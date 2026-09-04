@@ -142,9 +142,10 @@ export async function createPiRuntime(
   options?: PiRuntimeOptions
 ): Promise<PiRuntime> {
   if (mode === "sdk") {
+    void options;
     // 动态导入 SDK transport（避免循环依赖）
     const { PiSdkRuntime } = await import("./transports/sdk");
-    return new PiSdkRuntime(options);
+    return new PiSdkRuntime();
   }
   
   if (mode === "rpc") {

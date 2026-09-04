@@ -5,3 +5,6 @@ export { WorkflowStatusCard } from "./WorkflowStatusCard";
 export { WorkflowStatus } from "./WorkflowStatus";
 export { WorkflowThinking } from "./WorkflowThinking";
 export { WorkflowMatchCard, type WorkflowMatchCardProps } from "./WorkflowMatchCard";
+export { WorkDashboard } from "./WorkDashboard";
+export { MeetingMinutesWorkflow } from "./MeetingMinutesWorkflow";
+export { SwitchToWorkModal, type SwitchToWorkModalProps } from "./SwitchToWorkModal";

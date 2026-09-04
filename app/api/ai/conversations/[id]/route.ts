@@ -13,10 +13,17 @@ const patchSchema = z
   .object({
     title: z.string().min(1).max(200).optional(),
     tags: z.array(z.string().min(1).max(50)).max(20).optional(),
+    category: z.enum(["CHAT", "WORK"]).optional(),
   })
-  .refine((data) => data.title !== undefined || data.tags !== undefined, {
-    message: "Must provide at least one of: title, tags",
-  });
+  .refine(
+    (data) =>
+      data.title !== undefined ||
+      data.tags !== undefined ||
+      data.category !== undefined,
+    {
+      message: "Must provide at least one of: title, tags, category",
+    }
+  );
 
 export async function GET(
   _request: NextRequest,
@@ -77,11 +84,14 @@ export async function PATCH(
       );
     }
 
-    // Branch: tags-only update (used by the per-tag × button in the sidebar)
-    if (parsed.tags !== undefined) {
+    // Branch: tags or category update
+    if (parsed.tags !== undefined || parsed.category !== undefined) {
+      const updateData: { tags?: string[]; category?: string } = {};
+      if (parsed.tags !== undefined) updateData.tags = parsed.tags;
+      if (parsed.category !== undefined) updateData.category = parsed.category;
       const updated = await prisma.aiConversation.update({
         where: { id },
-        data: { tags: parsed.tags },
+        data: updateData,
       });
       return NextResponse.json({ data: updated, error: null });
     }

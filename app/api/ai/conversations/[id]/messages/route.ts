@@ -937,9 +937,9 @@ async function handleLangGraphRequest(
   injectSearchKnowledgeContext(session.user.id, conversationId);
   injectSearchStructuredContext(session.user.id);
 
-  // Override mode from API if forceSearch is set. A pending confirmation keeps
-  // the original mode when the client omits it on the follow-up message.
-  const resolvedMode = forceSearch ? "search" : (pendingState?.mode ?? mode);
+  // 保持客户端传递的原始 mode（auto / web / chat / search / image / video）
+  // 只有当处于人机确认恢复阶段且客户端未显式传参时，使用 pendingState.mode 兜底
+  const resolvedMode = pendingState?.mode ?? mode;
 
   const responseStream = new ReadableStream({
     async start(controller) {
@@ -1146,6 +1146,7 @@ async function handleLangGraphRequest(
 
           console.log(`[Timeline] about to iterate graphStream`);
           let chunkCount = 0;
+          let lastNodeEndTime = Date.now();
           for await (const chunk of graphStream) {
             chunkCount++;
             console.log(`[Timeline] chunk #${chunkCount}:`, Object.keys(chunk));
@@ -1153,13 +1154,13 @@ async function handleLangGraphRequest(
             for (const [nodeName, nodeOutput] of Object.entries(typedChunk)) {
               console.log(`[Timeline] node=${nodeName}`);
 
-              // ── Timeline: Node START ────────────────────────────────────────────
-              // Capture the true start time BEFORE awaiting the node output.
-              // The for-await loop delivers the output after the node has finished,
-              // so we must record startTime externally to get accurate durations.
-              const nodeStartTime = Date.now();
-              // Task appears in the timeline immediately — this is the "log stream"
-              // effect: steps pop in one by one, not pre-rendered.
+              // ── Timeline: Node Timing ───────────────────────────────────────────
+              // The node actually started when the previous step finished (or at graph start).
+              const nodeStartTime = lastNodeEndTime;
+              const nodeEndTime = Date.now();
+              lastNodeEndTime = nodeEndTime;
+
+              // Task appears in the timeline with accurate start time
               const execId = onNodeStart(nodeName, nodeStartTime, (cmd) => {
                 console.log(
                   `[Timeline] create task cmd:`,
@@ -1169,7 +1170,7 @@ async function handleLangGraphRequest(
                 timelineStore!.applyCommand(cmd);
               });
               console.log(
-                `[Timeline] execId=${execId} startTime=${nodeStartTime}`,
+                `[Timeline] execId=${execId} startTime=${nodeStartTime} endTime=${nodeEndTime}`,
               );
 
               // ── Tool events: fire AFTER node_start so UI shows "正在查询..." ───
@@ -1200,11 +1201,11 @@ async function handleLangGraphRequest(
               }
 
               // ── Timeline: Node END ────────────────────────────────────────────
-              // Update task with final status + detail (e.g. "找到 12 条记录")
+              // Update task with final status, accurate endTime + detail
               onNodeEnd(execId, nodeOutput, (cmd) => {
                 console.log(`[Timeline] update task cmd:`, cmd.op, cmd.id);
                 timelineStore!.applyCommand(cmd);
-              });
+              }, nodeEndTime);
 
               // Capture Human-in-Loop: pending human action from disambiguateIntentNode
               // Decision is now embedded in pendingHumanAction by disambiguateIntentNode.
@@ -1308,6 +1309,7 @@ async function handleLangGraphRequest(
                         .replace(/「[^」]+」/, "")
                         .replace(/。是否启动\？/, "")
                         .trim() || "即将启动工作流",
+                    goalPrompt: wfa.query || message,
                   });
                   capturedPendingHumanAction = {
                     pendingHumanAction: {
@@ -1570,6 +1572,7 @@ async function handleLangGraphRequest(
               workflowType,
               workflowName,
               description: description || "即将启动工作流",
+              goalPrompt: message,
             });
           }
         }

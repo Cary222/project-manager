@@ -2,7 +2,7 @@
 
 import { Component, Suspense, type CSSProperties, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
-import { AppShell as PiWebAppShell } from "@/features/ai/ui/ai-workspace/AppShell";
+import { PiWebUiBridge } from "@/features/ai/pi-integration/PiWebUiBridge";
 import { AppShell as SiteAppShell } from "@/shared/ui/AppShell";
 import {
   I18nProvider,
@@ -70,7 +70,7 @@ function AiWorkspaceInner() {
   const embedded = searchParams.get("fullscreen") !== "1";
 
   if (!embedded) {
-    return <PiWebAppShell />;
+    return <PiWebUiBridge />;
   }
 
   return (
@@ -87,7 +87,7 @@ function AiWorkspaceInner() {
         className="h-[calc(100dvh-6rem)] overflow-hidden rounded-2xl border border-ink-200 shadow-sm sm:h-[calc(100dvh-7rem)]"
         style={{ "--app-viewport-height": "100%" } as CSSProperties}
       >
-        <PiWebAppShell />
+        <PiWebUiBridge />
       </div>
     </SiteAppShell>
   );

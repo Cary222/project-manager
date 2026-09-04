@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/shared/lib/permissions";
 import { resolveSessionPath } from "@/lib/session-reader";
 import { startRpcSession, getRpcSession, setRpcSessionTools } from "@/lib/rpc-manager";
+import { requireOwnedPiSessionIfEnabled } from "@/features/ai/pi-integration/pi-session-ownership";
 
 // POST /api/agent/[id] - Send a command to an existing session
 export async function POST(
@@ -15,6 +16,14 @@ export async function POST(
   }
 
   const { id } = await params;
+  try {
+    await requireOwnedPiSessionIfEnabled((await requireSession()).user.id, id);
+  } catch (error) {
+    if (error instanceof Error && error.message === "SESSION_NOT_FOUND") {
+      return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+    return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+  }
   let commandType: string | undefined;
   let promptAccepted = false;
 

@@ -1,11 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, Suspense } from "react";
+import { useCallback, useEffect, useState, Suspense } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AiChatPanel } from "./AiChatPanel";
 import { AiConversationSidebar, type ConversationCategory } from "./AiConversationSidebar";
-import { WorkModePanel } from "../work/WorkModePanel";
-import { WorkflowStatus } from "../work/WorkflowStatus";
+import { AiWelcomeView } from "./AiWelcomeView";
+import { AiWorkspaceLayout } from "./layout/AiWorkspaceLayout";
+import { AiRightInspectorPanel } from "./AiRightInspectorPanel";
+import { WorkDashboard } from "@/features/ai/ui/ai-work/WorkDashboard";
+import type { WorkRoute } from "@/features/ai/agents/work/runtime/work-run-ref";
+import type { AiUserProfile } from "./UserProfilePanel";
+import type { AiMode, ChatToolMode } from "@/features/ai/types/modes";
+import type { ReasoningLevel } from "@/features/ai/llm/model-reasoning";
 
 type ChatMode = "conversation" | "work";
 
@@ -14,42 +20,72 @@ function AiChatPageInner() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  // Chat mode: default to work if URL says so, otherwise conversation
-  const [mode, setMode] = useState<ChatMode>(() => {
-    return searchParams.get("m") === "work" ? "work" : "conversation";
-  });
+  // Mode: conversation vs work
+  const mode: ChatMode = searchParams.get("m") === "work" ? "work" : "conversation";
 
-  // Active conversation ID: initialize from URL query string
+  // Active conversation ID from URL
   const [activeConversationId, setActiveConversationId] = useState<string | null>(() => {
     return searchParams.get("c") || null;
   });
 
+  // Pending initial message to send when starting chat from WelcomeView
+  const [pendingInitialMessage, setPendingInitialMessage] = useState<string | null>(null);
+  const [pendingInitialImages, setPendingInitialImages] = useState<
+    { id: string; url: string; name: string }[] | undefined
+  >(undefined);
+
+  // Panel collapse states (three-panel folding)
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [rightPanelOpen, setRightPanelOpen] = useState(true);
+
   // Category filter for conversation sidebar
   const [conversationCategory, setConversationCategory] = useState<ConversationCategory>("ALL");
 
-  // Selected workflow run — controls the right-side detail panel
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  // Synchronized AI Model across WelcomeView, ChatPanel, and RightInspectorPanel
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("preferredModel");
+      if (saved) return saved;
+    }
+    return "agnes:agnes-2.5-flash";
+  });
 
-  // Tracks IDs of conversations that were just freshly created in this
-  // session, so AiChatPanel knows to auto-greet them (AI proactively says
-  // hi based on the user's profile).
-  const [pendingGreetingIds, setPendingGreetingIds] = useState<Set<string>>(new Set());
+  const handleModelChange = useCallback((model: string) => {
+    setSelectedModel(model);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("preferredModel", model);
+    }
+  }, []);
 
-  // Bootstrap flag: makes sure the "auto-pick most recent" effect runs at
-  // most once per mount. Without it, React StrictMode (and any future
-  // re-render that re-creates the effect deps) would re-fetch and could
-  // re-trigger the "no conversations → auto-create" path twice.
-  const [bootstrapped, setBootstrapped] = useState(false);
+  // User profile for right inspector (loaded on mount so it's ready immediately)
+  const [userProfile, setUserProfile] = useState<AiUserProfile | null>(null);
+  const [aiMode, setAiMode] = useState<AiMode>("auto");
+  const [chatToolMode, setChatToolMode] = useState<ChatToolMode>("chat");
+  const [thinkingLevel, setThinkingLevel] = useState<ReasoningLevel>("high");
+  const [clearTrigger, setClearTrigger] = useState(0);
 
-  // Keep a ref to handleNewConversation so the bootstrap effect can call it
-  // without listing it as a dep (which would re-run on every render).
-  const handleNewConversationRef = useRef<(() => Promise<void>) | null>(null);
+  const handleClearConversation = useCallback(() => {
+    setClearTrigger((prev) => prev + 1);
+  }, []);
 
-  // Sync activeId → URL. Only call router.replace when the query string
-  // actually changes; otherwise the new searchParams reference triggers
-  // this effect again on every render and we end up in a replace loop that
-  // re-fetches the page (and re-runs every child effect) once a second.
   useEffect(() => {
+    let ignore = false;
+    fetch("/api/ai/profile")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (!ignore && json?.data?.profile) {
+          setUserProfile(json.data.profile as AiUserProfile);
+        }
+      })
+      .catch((err) => console.error("[AiChatPage] loadProfile error:", err));
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  // Sync activeConversationId → URL
+  useEffect(() => {
+    if (mode === "work") return;
     const currentC = searchParams.get("c");
     if (currentC === activeConversationId) return;
 
@@ -62,247 +98,263 @@ function AiChatPageInner() {
     const newQuery = params.toString();
     const newUrl = newQuery ? `${pathname}?${newQuery}` : pathname;
     router.replace(newUrl, { scroll: false });
-  }, [activeConversationId, pathname, router, searchParams]);
+  }, [activeConversationId, mode, pathname, router, searchParams]);
 
-  // Bootstrap: when the user lands on /ai without ?c=, pick the most recent
-  // conversation (server already sorts by lastMessageAt desc) — or, if they
-  // have no conversations yet, kick off a new one with the AI greeting.
-  useEffect(() => {
-    if (bootstrapped) return;
-    // If the URL already pins a conversation, don't override it.
-    if (searchParams.get("c")) {
-      setBootstrapped(true);
-      return;
-    }
-
-    void (async () => {
-      try {
-        const res = await fetch("/api/ai/conversations");
-        if (!res.ok) {
-          setBootstrapped(true);
-          return;
-        }
-        const json = await res.json();
-        const list: Array<{ id: string }> = Array.isArray(json?.data)
-          ? json.data
-          : [];
-        if (list.length > 0) {
-          // list[0] is the most recently active conversation.
-          setActiveConversationId(list[0].id);
-        } else {
-          // No conversations yet — create one and let AiChatPanel greet.
-          await handleNewConversationRef.current?.();
-        }
-      } catch (err) {
-        console.error("[AiChatPage] bootstrap error:", err);
-      } finally {
-        setBootstrapped(true);
-      }
-    })();
-    // Intentionally only depend on `bootstrapped` so this runs once.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bootstrapped]);
-
+  // Handle selecting a conversation from the sidebar
   const handleSelect = useCallback((id: string | null) => {
+    setPendingInitialMessage(null);
+    setPendingInitialImages(undefined);
     setActiveConversationId(id);
   }, []);
 
+  // When a new conversation is created by AiChatPanel
   const handleConversationCreated = useCallback((id: string) => {
     setActiveConversationId(id);
+    setPendingInitialMessage(null);
+    setPendingInitialImages(undefined);
   }, []);
 
-  // AiChatPanel 报 404 → 清掉失效 id，避免下次重渲染再次请求
+  // When a conversation is deleted or 404s
   const handleConversationMissing = useCallback((id: string) => {
     setActiveConversationId((current) => (current === id ? null : current));
   }, []);
 
-  // "New chat" button handler: create an empty conversation, mark it for
-  // greeting, and switch to it.
-  const handleNewConversation = useCallback(async () => {
-    try {
-      const res = await fetch("/api/ai/conversations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      if (!res.ok) return;
-      const json = await res.json();
-      const id = json?.data?.id as string | undefined;
-      if (!id) return;
-      setPendingGreetingIds((prev) => {
-        const next = new Set(prev);
-        next.add(id);
-        return next;
-      });
-      setActiveConversationId(id);
-    } catch {
-      // silently ignore — user can retry
+  // "New chat" button in sidebar: resets to Welcome page
+  const handleNewConversation = useCallback(() => {
+    setActiveConversationId(null);
+    setPendingInitialMessage(null);
+    setPendingInitialImages(undefined);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("c");
+    params.delete("goal");
+    params.delete("route");
+    if (mode === "work") {
+      params.delete("m");
     }
-  }, []);
+    const newQuery = params.toString();
+    router.replace(newQuery ? `${pathname}?${newQuery}` : pathname, { scroll: false });
+  }, [mode, pathname, router, searchParams]);
 
-  // Keep the ref pointing at the latest handleNewConversation so the
-  // bootstrap effect always calls the freshest version.
-  useEffect(() => {
-    handleNewConversationRef.current = handleNewConversation;
-  }, [handleNewConversation]);
-
-  const handleGreetingConsumed = useCallback((id: string) => {
-    setPendingGreetingIds((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  }, []);
-
-  const handleSwitchToWorkMode = useCallback(() => {
-    setMode("work");
-    setSelectedRunId(null);
-  }, []);
-
-  // 工作流结束跳转周报页：同一 runId 在浏览器会话内只跳一次
-  // 跨页面刷新也持久化：避免用户进入工作模式时所有已完成 run 都触发跳转
-  const NAVIGATED_RUN_IDS_KEY = "pm:navigatedRunIds";
-  const navigatedRunIdsRef = useRef<Set<string> | null>(null);
-  if (navigatedRunIdsRef.current === null) {
-    let initial = new Set<string>();
-    if (typeof window !== "undefined") {
-      try {
-        const raw = sessionStorage.getItem(NAVIGATED_RUN_IDS_KEY);
-        if (raw) initial = new Set(JSON.parse(raw) as string[]);
-      } catch {
-        // ignore
+  // Switching between Chat and Work modes
+  const handleSwitchToWorkMode = useCallback(
+    (workflowType?: string, goalPrompt?: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("m", "work");
+      params.delete("c");
+      if (goalPrompt) {
+        params.set("goal", goalPrompt);
+      } else {
+        params.delete("goal");
       }
-    }
-    navigatedRunIdsRef.current = initial;
-  }
-  const recordNavigated = useCallback((runId: string) => {
-    const set = navigatedRunIdsRef.current;
-    if (!set) return;
-    set.add(runId);
-    try {
-      sessionStorage.setItem(
-        NAVIGATED_RUN_IDS_KEY,
-        JSON.stringify(Array.from(set)),
-      );
-    } catch {
-      // ignore quota / private mode
-    }
-  }, []);
-  const handleWorkflowApproved = useCallback(
-    (runId: string, reportId: string) => {
-      const set = navigatedRunIdsRef.current;
-      if (!set || set.has(runId)) return;
-      recordNavigated(runId);
-      router.push(`/reports/weekly-reports/${reportId}?from=/ai&mode=work`);
+      if (workflowType) {
+        params.set("route", workflowType);
+      } else {
+        params.delete("route");
+      }
+      const newQuery = params.toString();
+      router.replace(`${pathname}?${newQuery}`, { scroll: false });
     },
-    [router, recordNavigated],
-  );
-  const handleWorkflowDone = useCallback(
-    (runId: string, reportId: string) => {
-      const set = navigatedRunIdsRef.current;
-      if (!set || set.has(runId)) return;
-      recordNavigated(runId);
-      router.push(`/reports/weekly-reports/${reportId}?from=/ai&mode=work`);
-    },
-    [router, recordNavigated],
+    [pathname, router, searchParams]
   );
 
-  return (
-    <div className="flex h-[calc(100vh-8rem)] flex-row rounded-2xl border border-ink-200 bg-white shadow-soft">
-      {mode === "conversation" ? (
-        <AiConversationSidebar
-          activeId={activeConversationId}
-          onSelect={handleSelect}
-          onNewConversation={handleNewConversation}
-          onSwitchToWorkMode={handleSwitchToWorkMode}
-          category={conversationCategory}
-          onCategoryChange={setConversationCategory}
-        />
-      ) : (
-        <WorkModePanel
-          onSelectRun={(runId, conversationId) => {
-            setSelectedRunId(runId);
-            // If workflow is linked to a conversation, switch to conversation mode
-            if (conversationId) {
-              setMode("conversation");
-              setActiveConversationId(conversationId);
-            }
-          }}
-        />
+  const handleSwitchToConversation = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("m");
+    params.delete("goal");
+    params.delete("route");
+    if (activeConversationId) {
+      params.set("c", activeConversationId);
+    }
+    const newQuery = params.toString();
+    const newUrl = newQuery ? `${pathname}?${newQuery}` : pathname;
+    router.replace(newUrl, { scroll: false });
+  }, [activeConversationId, pathname, router, searchParams]);
+
+  // Handle start chat from WelcomeView
+  const handleStartChat = useCallback(
+    async (message: string, modelName: string, images?: { id: string; url: string; name: string }[]) => {
+      if (modelName) handleModelChange(modelName);
+      if (mode === "work") {
+        handleSwitchToConversation();
+      }
+      let newConvId: string | null = null;
+      try {
+        const res = await fetch("/api/ai/conversations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: message.slice(0, 30) || "新对话",
+            category: "CHAT",
+          }),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data?.id) {
+            newConvId = json.data.id;
+            setActiveConversationId(newConvId);
+          }
+        }
+      } catch (err) {
+        console.error("[AiChatPage] create conversation error:", err);
+      }
+      setPendingInitialMessage(message);
+      setPendingInitialImages(images);
+    },
+    [handleModelChange, handleSwitchToConversation, mode]
+  );
+
+  // Handle start work from WelcomeView
+  const handleStartWork = useCallback(
+    (goal: string, route?: WorkRoute, modelName?: string) => {
+      if (modelName) handleModelChange(modelName);
+      handleSwitchToWorkMode(route, goal);
+    },
+    [handleModelChange, handleSwitchToWorkMode]
+  );
+
+  // Determine whether to show the Welcome View
+  const isWorkMode = mode === "work";
+  const hasActiveChat = Boolean(activeConversationId || pendingInitialMessage);
+  const showWelcomeView = !isWorkMode && !hasActiveChat;
+
+  // Top Bar Center Header Info
+  const topBarCenter = (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="font-semibold text-ink-800">
+        {isWorkMode ? "⚡ Work 办公工作台" : showWelcomeView ? "新对话" : "💬 对话详情"}
+      </span>
+      {isWorkMode && (
+        <span className="rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700">
+          Agent 确定性调度
+        </span>
       )}
-      <main className="min-w-0 flex-1 overflow-hidden">
-        {mode === "conversation" ? (
+    </div>
+  );
+
+  // Top Bar Right Actions
+  const topBarRight = (
+    <div className="flex items-center gap-2">
+      {isWorkMode ? (
+        <button
+          type="button"
+          onClick={handleSwitchToConversation}
+          className="flex items-center gap-1 rounded-lg border border-ink-200 bg-white px-2.5 py-1 text-xs font-medium text-ink-700 hover:bg-ink-50 transition"
+        >
+          <span>切换至 Chat</span>
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => handleSwitchToWorkMode()}
+          className="flex items-center gap-1 rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 transition"
+        >
+          <span>进入 Work 模式</span>
+        </button>
+      )}
+    </div>
+  );
+
+  // Common Left Sidebar component
+  const sidebarContent = (
+    <AiConversationSidebar
+      activeId={activeConversationId}
+      onSelect={handleSelect}
+      onCollapse={() => setSidebarOpen(false)}
+      onNewConversation={handleNewConversation}
+      onSwitchToWorkMode={() => handleSwitchToWorkMode()}
+      category={conversationCategory}
+      onCategoryChange={setConversationCategory}
+    />
+  );
+
+  // 1. Work Mode: WorkDashboard provides mainPanel and previewPanel to AiWorkspaceLayout
+  if (isWorkMode) {
+    return (
+      <div className="h-[calc(100vh-8rem)] w-full overflow-hidden rounded-2xl border border-ink-200 bg-white shadow-soft">
+        <WorkDashboard
+          onSwitchToConversation={handleSwitchToConversation}
+          initialGoal={searchParams.get("goal") ?? undefined}
+          initialRoute={(searchParams.get("route") as WorkRoute) ?? undefined}
+          onTogglePreviewPanel={() => setRightPanelOpen((prev) => !prev)}
+        >
+          {({ mainPanel, previewPanel }) => (
+            <AiWorkspaceLayout
+              sidebarOpen={sidebarOpen}
+              onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+              rightPanelOpen={rightPanelOpen}
+              onToggleRightPanel={() => setRightPanelOpen((prev) => !prev)}
+              topBarCenter={topBarCenter}
+              topBarRight={topBarRight}
+              sidebar={sidebarContent}
+              rightPanel={previewPanel}
+            >
+              {mainPanel}
+            </AiWorkspaceLayout>
+          )}
+        </WorkDashboard>
+      </div>
+    );
+  }
+
+  // 2. Chat / Welcome Mode: AiWorkspaceLayout hosts AiRightInspectorPanel in the right panel slot
+  return (
+    <div className="h-[calc(100vh-8rem)] w-full overflow-hidden rounded-2xl border border-ink-200 bg-white shadow-soft">
+      <AiWorkspaceLayout
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+        rightPanelOpen={rightPanelOpen}
+        onToggleRightPanel={() => setRightPanelOpen((prev) => !prev)}
+        topBarCenter={topBarCenter}
+        topBarRight={topBarRight}
+        sidebar={sidebarContent}
+        rightPanel={
+          <AiRightInspectorPanel
+            mode="chat"
+            conversationId={activeConversationId}
+            selectedModel={selectedModel}
+            onModelChange={handleModelChange}
+            userProfile={userProfile}
+            onUserProfileChange={setUserProfile}
+            onClose={() => setRightPanelOpen(false)}
+            aiMode={aiMode}
+            onAiModeChange={setAiMode}
+            chatToolMode={chatToolMode}
+            onChatToolModeChange={setChatToolMode}
+            onSwitchToWorkMode={() => handleSwitchToWorkMode()}
+            onClearConversation={handleClearConversation}
+          />
+        }
+      >
+        {showWelcomeView ? (
+          <AiWelcomeView
+            initialMode="chat"
+            selectedModel={selectedModel}
+            onModelChange={handleModelChange}
+            onStartChat={handleStartChat}
+            onStartWork={handleStartWork}
+          />
+        ) : (
           <AiChatPanel
             variant="page"
             conversationId={activeConversationId}
+            selectedModel={selectedModel}
+            onModelChange={handleModelChange}
+            aiMode={aiMode}
+            onAiModeChange={setAiMode}
+            chatToolMode={chatToolMode}
+            onChatToolModeChange={setChatToolMode}
+            thinkingLevel={thinkingLevel}
+            onThinkingLevelChange={setThinkingLevel}
+            clearTrigger={clearTrigger}
+            initialMessage={pendingInitialMessage}
+            initialImages={pendingInitialImages}
             onConversationCreated={handleConversationCreated}
-            autoGreet={pendingGreetingIds.has(activeConversationId ?? "")}
-            onGreetingConsumed={handleGreetingConsumed}
-            onSwitchToWorkMode={handleSwitchToWorkMode}
+            onSwitchToWorkMode={() => handleSwitchToWorkMode()}
             onStartWorkflow={handleSwitchToWorkMode}
             onConversationMissing={handleConversationMissing}
           />
-        ) : selectedRunId ? (
-          <div
-            className="flex h-full flex-col p-6"
-            data-testid="workflow-detail-panel"
-          >
-            <button
-              onClick={() => {
-                setSelectedRunId(null);
-                setMode("work");
-              }}
-              className="mb-4 flex w-fit items-center gap-1.5 text-sm text-ink-500 transition-colors hover:text-ink-800"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="15 18 9 12 15 6" />
-              </svg>
-              返回列表
-            </button>
-            <div className="flex-1 overflow-y-auto">
-              <WorkflowStatus
-                runId={selectedRunId}
-                onApproved={(runId, reportId) => handleWorkflowApproved(runId, reportId)}
-                onDone={(runId, snap) => {
-                  if (snap?.reportId) {
-                    handleWorkflowDone(runId, snap.reportId);
-                  }
-                }}
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="flex h-full items-center justify-center text-ink-500">
-            <div className="text-center">
-              <svg
-                className="mx-auto mb-4 h-12 w-12 text-ink-300"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
-                />
-              </svg>
-              <p className="text-sm font-medium">工作流面板</p>
-              <p className="mt-1 text-xs text-ink-400">在左侧发起和管理工作流</p>
-              <button
-                onClick={() => {
-                  setMode("conversation");
-                  setActiveConversationId(null);
-                }}
-                className="mt-4 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700"
-              >
-                发起对话
-              </button>
-            </div>
-          </div>
         )}
-      </main>
+      </AiWorkspaceLayout>
     </div>
   );
 }

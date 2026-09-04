@@ -35,7 +35,6 @@ export function buildProxyAwareFetch(): typeof fetch | undefined {
   const proxyUrl = process.env.HTTPS_PROXY ?? process.env.HTTP_PROXY;
   if (!proxyUrl) return undefined;
 
-  // Dynamic import: undici is Node.js only, never runs in browser
   const { ProxyAgent } = require("undici") as typeof import("undici");
   const proxyAgent = new ProxyAgent({ uri: proxyUrl });
 
@@ -143,13 +142,14 @@ export async function proxyFetch(
       : JSON.stringify(init.body);
     
     // Step 1: Extract image URLs from __IMAGES__ marker
-    let parsed: any;
+    let parsed: { messages?: Array<{ role?: string; content?: unknown }> } | undefined;
     try {
       parsed = JSON.parse(bodyStr);
       
       // Process each message to extract image URLs
-      if (parsed.messages && Array.isArray(parsed.messages)) {
-        for (const msg of parsed.messages) {
+      if (parsed?.messages && Array.isArray(parsed.messages)) {
+        const messages: Array<{ role?: string; content?: any }> = parsed.messages;
+        for (const msg of messages) {
           if (msg.role === "user" && typeof msg.content === "string") {
             const match = msg.content.match(/\n\n__IMAGES__:(\[.*\])$/);
             if (match) {
@@ -157,7 +157,7 @@ export async function proxyFetch(
               const textContent = msg.content.replace(/\n\n__IMAGES__:.*$/, "");
               
               // Convert to multimodal format
-              const contentParts: any[] = [
+              const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
                 { type: "text", text: textContent }
               ];
               
@@ -197,7 +197,7 @@ export async function proxyFetch(
  * Agnes API (apihub.agnes-ai.com) always routes through proxy if configured.
  * All other providers (user-configured DeepSeek, OpenRouter, etc.) connect directly.
  */
-export function buildProviderFetch(providerId: string): typeof fetch | undefined {
+export function buildProviderFetch(_providerId: string): typeof fetch | undefined {
   // Agnes uses "openai" as its provider ID (for createOpenAI compatibility)
   // but we identify it by its baseURL, not the providerId string.
   // When the baseURL matches Agnes API, route through the proxy.

@@ -34,6 +34,12 @@ export function getWindowStart(
       utc.setUTCDate(utc.getUTCDate() - day);
       return utc;
     }
+    case "last_week": {
+      const utc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      const day = (utc.getUTCDay() + 6) % 7;
+      utc.setUTCDate(utc.getUTCDate() - day - 7);
+      return utc;
+    }
     case "this_month": {
       return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     }
@@ -54,6 +60,7 @@ export function formatWindowLabel(window: ActivityWindow | undefined): string | 
     today: "今天",
     yesterday: "昨天",
     this_week: "本周",
+    last_week: "上周",
     this_month: "本月",
     recent: "最近",
   };

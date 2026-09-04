@@ -105,8 +105,19 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
       );
     }
 
-    await prisma.workflowRun.delete({ where: { id } });
+    // 1. 如果该工作流关联了周报产物 (WeeklyReport)，一并级联删除
+    const reportId = (run.metadata as Record<string, unknown> | null)?.reportId as string | undefined;
+    if (reportId) {
+      await prisma.weeklyReport.deleteMany({
+        where: { id: reportId, userId: session.user.id },
+      });
+    }
+    await prisma.weeklyReport.deleteMany({
+      where: { workflowRunId: id, userId: session.user.id },
+    });
 
+    // 2. 删除 WorkflowRun 记录
+    await prisma.workflowRun.delete({ where: { id } });
     return NextResponse.json({ data: { deleted: true }, error: null });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "unknown";

@@ -76,4 +76,4 @@ export const DISAMBIGUATION_THRESHOLDS = {
 } as const;
 
 /** Activity window types for time-based queries */
-export type ActivityWindow = "today" | "yesterday" | "this_week" | "this_month" | "recent";
+export type ActivityWindow = "today" | "yesterday" | "this_week" | "last_week" | "this_month" | "recent";

@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     }
 
     const name = body.name.trim();
-    const module = await prisma.module.upsert({
+    const mod = await prisma.module.upsert({
       where: {
         responsibilityId_name: {
           responsibilityId: body.responsibilityId,
@@ -39,13 +39,13 @@ export async function POST(request: Request) {
 
     await createModerationLog({
       action: ModerationAction.CREATE_MODULE,
-      targetId: module.id,
+      targetId: mod.id,
       targetType: "Module",
       actorId: session.user.id,
-      reason: `创建模块: ${module.name}`,
+      reason: `创建模块: ${mod.name}`,
     });
 
-    return NextResponse.json({ module });
+    return NextResponse.json({ module: mod });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
     const status = message === "FORBIDDEN" ? 403 : 401;

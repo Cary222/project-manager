@@ -2,6 +2,7 @@ import { AppShell } from "@/shared/ui/AppShell";
 import { BackPageHeader } from "@/shared/ui/headers";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { listMyExpenses } from "@/features/reports/monthly-expenses/lib/monthly-expense-store";
 import { MonthlyExpenseList } from "@/features/reports/monthly-expenses/ui/MonthlyExpenseList";
 
@@ -38,12 +39,12 @@ export default async function MonthlyExpensesPage() {
                 记录你的每月报销，支持多种报销类型
               </p>
             </div>
-            <a
+            <Link
               href="/reports/monthly-expenses/new"
               className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700 focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:outline-none"
             >
               新建报销
-            </a>
+            </Link>
           </div>
 
           <MonthlyExpenseList initialExpenses={expenses} />

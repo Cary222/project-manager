@@ -50,7 +50,9 @@ export interface TaskRecord {
   id: string;
   /** Parent task ID (for sub-task trees). null for root tasks. */
   parentId: string | null;
-  /** Short user-facing label shown in the log stream (e.g. "理解问题") */
+  /** LangGraph node name (e.g. "detectIntent") */
+  nodeName?: string;
+  /** Short user-facing label shown in the log stream (e.g. "理解") */
   stepLabel: string;
   /** Full user-facing title (e.g. "正在理解你的问题") */
   title: string;

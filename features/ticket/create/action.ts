@@ -48,16 +48,16 @@ export async function createTicketAction(input: CreateTicketInput): Promise<Crea
     const projectId = input.projectId;
     const moduleId = input.moduleId;
 
-    const module = await prisma.module.findUnique({
+    const mod = await prisma.module.findUnique({
       where: { id: moduleId },
       include: { responsibility: { select: { kind: true } } },
     });
-    if (!module) {
+    if (!mod) {
       return { ok: false, error: "module not found" };
     }
     await requireDesignResponsibility(
       session.user.id,
-      module.responsibility.kind,
+      mod.responsibility.kind,
       session.user.role as UserRole
     );
 
@@ -265,7 +265,7 @@ export async function createModuleAction(input: CreateModuleInput): Promise<Crea
       return { ok: false, error: "name and responsibilityId are required" };
     }
 
-    const module = await prisma.module.create({
+    const mod = await prisma.module.create({
       data: {
         responsibilityId: input.responsibilityId,
         name: input.name.trim(),
@@ -273,7 +273,7 @@ export async function createModuleAction(input: CreateModuleInput): Promise<Crea
       select: { id: true, name: true },
     });
 
-    return { ok: true, module };
+    return { ok: true, module: mod };
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
     return { ok: false, error: message };

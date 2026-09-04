@@ -10,7 +10,7 @@ export async function GET(request: Request, { params }: { params: Params }) {
   try {
     await requireRoot();
     const { id } = await params;
-    const module = await prisma.module.findUnique({
+    const mod = await prisma.module.findUnique({
       where: { id },
       include: {
         tickets: {
@@ -18,10 +18,10 @@ export async function GET(request: Request, { params }: { params: Params }) {
         },
       },
     });
-    if (!module) {
+    if (!mod) {
       return NextResponse.json({ error: "Module not found" }, { status: 404 });
     }
-    return NextResponse.json({ module });
+    return NextResponse.json({ module: mod });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
     const status = message === "FORBIDDEN" ? 403 : 401;
@@ -85,20 +85,20 @@ export async function PUT(request: Request, { params }: { params: Params }) {
       }
     }
 
-    const module = await prisma.module.update({
+    const mod = await prisma.module.update({
       where: { id },
       data: updateData,
     });
 
     await createModerationLog({
       action: ModerationAction.UPDATE_MODULE,
-      targetId: module.id,
+      targetId: mod.id,
       targetType: "Module",
       actorId: session.user.id,
-      reason: `更新模块: ${module.name}`,
+      reason: `更新模块: ${mod.name}`,
     });
 
-    return NextResponse.json({ module });
+    return NextResponse.json({ module: mod });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
     const status = message === "FORBIDDEN" ? 403 : 401;

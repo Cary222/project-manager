@@ -1109,6 +1109,16 @@ function ExtensionDialog({
       onRespond(request, { value });
     }
   };
+  const isMultilineTitle = request.title.includes("\n");
+  const firstMeaningfulLine = isMultilineTitle
+    ? request.title
+        .split("\n")
+        .map((l) => l.trim())
+        .find((l) => l && !l.match(/^[=\-*#_\s]+$/))
+      || request.title.split("\n")[0]?.trim()
+      || t("chat.extensionRequest")
+    : request.title;
+  const headerTitle = isMultilineTitle ? firstMeaningfulLine : request.title;
 
   return (
     <div
@@ -1127,8 +1137,8 @@ function ExtensionDialog({
         role="dialog"
         aria-modal="true"
         style={{
-          width: "min(560px, 100%)",
-          maxHeight: "min(760px, 100%)",
+          width: "min(620px, 100%)",
+          maxHeight: "min(760px, calc(100vh - 40px))",
           display: "flex",
           flexDirection: "column",
           border: "1px solid var(--border)",
@@ -1139,91 +1149,146 @@ function ExtensionDialog({
         }}
       >
         <div style={{ flexShrink: 0, padding: "12px 14px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ color: "var(--text)", fontSize: 14, fontWeight: 650 }}>{request.title}</div>
+          <div
+            title={headerTitle}
+            style={{
+              color: "var(--text)",
+              fontSize: 14,
+              fontWeight: 650,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {headerTitle}
+          </div>
           <div style={{ marginTop: 3, color: "var(--text-dim)", fontSize: 11, fontFamily: "var(--font-mono)" }}>{t("chat.extensionRequest")}</div>
         </div>
 
         <div
           style={{
             padding: 14,
-            ...(request.method === "select"
-              ? { flex: "1 1 auto", minHeight: 0, overflowY: "auto" }
-              : {}),
+            flex: "1 1 auto",
+            minHeight: 0,
+            overflowY: "auto",
           }}
         >
           {request.method === "confirm" && (
-            <div style={{ color: "var(--text-muted)", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{request.message}</div>
+            <div style={{ color: "var(--text-muted)", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+              {isMultilineTitle && (
+                <div style={{ fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>
+                  {request.title}
+                </div>
+              )}
+              {request.message}
+            </div>
           )}
           {request.method === "select" && (
-            <div style={{ display: "grid", gap: 8 }}>
-              {request.options.map((option) => (
-                <button
-                  key={option}
-                  onClick={() => onRespond(request, { value: option })}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {(isMultilineTitle || request.title.length > 80) && (
+                <div
                   style={{
-                    width: "100%",
-                    padding: "9px 10px",
-                    borderRadius: 7,
-                    border: "1px solid var(--border)",
-                    background: "var(--bg-panel)",
                     color: "var(--text)",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    fontSize: 13,
-                    overflowWrap: "anywhere",
+                    fontSize: 12,
+                    lineHeight: 1.55,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    fontFamily: isMultilineTitle ? "var(--font-mono)" : "inherit",
+                    background: "var(--bg-panel)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 6,
+                    padding: "10px 12px",
+                    maxHeight: 280,
+                    overflowY: "auto",
                   }}
                 >
-                  {option}
-                </button>
-              ))}
+                  {request.title}
+                </div>
+              )}
+              <div style={{ display: "grid", gap: 8, flexShrink: 0 }}>
+                {request.options.map((option) => (
+                  <button
+                    key={option}
+                    onClick={() => onRespond(request, { value: option })}
+                    style={{
+                      width: "100%",
+                      padding: "9px 10px",
+                      borderRadius: 7,
+                      border: "1px solid var(--border)",
+                      background: "var(--bg-panel)",
+                      color: "var(--text)",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      fontSize: 13,
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           {request.method === "input" && (
-            <input
-              autoFocus
-              value={value}
-              placeholder={request.placeholder}
-              onChange={(e) => setValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submitValue();
-                if (e.key === "Escape") onRespond(request, { cancelled: true });
-              }}
-              style={{
-                width: "100%",
-                padding: "9px 10px",
-                borderRadius: 7,
-                border: "1px solid var(--border)",
-                background: "var(--bg-panel)",
-                color: "var(--text)",
-                outline: "none",
-                fontSize: 13,
-              }}
-            />
+            <>
+              {isMultilineTitle && (
+                <div style={{ marginBottom: 10, fontSize: 13, color: "var(--text-muted)", whiteSpace: "pre-wrap" }}>
+                  {request.title}
+                </div>
+              )}
+              <input
+                autoFocus
+                value={value}
+                placeholder={request.placeholder}
+                onChange={(e) => setValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") submitValue();
+                  if (e.key === "Escape") onRespond(request, { cancelled: true });
+                }}
+                style={{
+                  width: "100%",
+                  padding: "9px 10px",
+                  borderRadius: 7,
+                  border: "1px solid var(--border)",
+                  background: "var(--bg-panel)",
+                  color: "var(--text)",
+                  outline: "none",
+                  fontSize: 13,
+                }}
+              />
+            </>
           )}
           {request.method === "editor" && (
-            <textarea
-              autoFocus
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") onRespond(request, { cancelled: true });
-                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submitValue();
-              }}
-              style={{
-                width: "100%",
-                minHeight: 220,
-                padding: 10,
-                borderRadius: 7,
-                border: "1px solid var(--border)",
-                background: "var(--bg-panel)",
-                color: "var(--text)",
-                outline: "none",
-                resize: "vertical",
-                fontSize: 13,
-                lineHeight: 1.55,
-                fontFamily: "var(--font-mono)",
-              }}
-            />
+            <>
+              {isMultilineTitle && (
+                <div style={{ marginBottom: 10, fontSize: 13, color: "var(--text-muted)", whiteSpace: "pre-wrap" }}>
+                  {request.title}
+                </div>
+              )}
+              <textarea
+                autoFocus
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") onRespond(request, { cancelled: true });
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submitValue();
+                }}
+                style={{
+                  width: "100%",
+                  minHeight: 220,
+                  padding: 10,
+                  borderRadius: 7,
+                  border: "1px solid var(--border)",
+                  background: "var(--bg-panel)",
+                  color: "var(--text)",
+                  outline: "none",
+                  resize: "vertical",
+                  fontSize: 13,
+                  lineHeight: 1.55,
+                  fontFamily: "var(--font-mono)",
+                }}
+              />
+            </>
           )}
         </div>
 

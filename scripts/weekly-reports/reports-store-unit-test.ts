@@ -176,7 +176,7 @@ async function main() {
     const diff = weekEnd.getTime() - weekStart.getTime();
     const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-    let ok = Math.abs(diff - (WEEK_MS - 1)) <= 1;
+    const ok = Math.abs(diff - (WEEK_MS - 1)) <= 1;
     if (!ok) { fail("getWeekRange diff", `diff=${diff}`); failed++; }
     else { pass("getWeekRange: diff ≈ 7 days"); passed++; }
 

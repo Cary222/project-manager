@@ -59,7 +59,7 @@ export function extractUserIdentifier(content: string): ExtractedUser | undefine
   // 干扰后续多 token 场景下 tokens[0] 的取值（否则会把"帮忙查"误当成用户名）。
   const withoutLeadIn = stripLeadInVerbs(content);
 
-  let cleaned = withoutLeadIn
+  const cleaned = withoutLeadIn
     .replace(excludePhraseRegex, " ") // 先移除词组
     .replace(stopRegex, " ")
     .replace(excludeRegex, " ")
@@ -205,12 +205,13 @@ export function parseQueryType(content: string): QueryType {
  * Detect people-centric activity queries that are best served by structured data.
  */
 export function isUserActivityQuery(content: string): boolean {
-  const time = "(?:最近|近期|这周|本周|近来|今天|今日|昨天|昨日|前天|上周|这阵子|近几天|前几天)";
-  const activity = "(?:在做什么|在干什么|在干嘛|在干啥|干嘛|干啥|做了什么|干了什么|做了啥|干了啥|做什么|干什么|开发什么|工作近况|工作内容|工作时间|进展|进度|动态)";
+  const time = "(?:最近|近期|这周|本周|近来|今天|今日|昨天|昨日|前天|上周|上一周|上礼拜|这阵子|近几天|前几天|本月|这个月)";
+  const activity = "(?:在做什么|在干什么|在干嘛|在干啥|干嘛|干啥|做了什么|干了什么|做了啥|干了啥|做什么|干什么|开发什么|工作近况|工作内容|工作时间|工作总结|产出|完成(?:了)?什么|完成了哪些|进展|进度|动态)";
 
   return new RegExp(`${time}.{0,12}${activity}`, "i").test(content)
     || new RegExp(`${activity}.{0,12}${time}`, "i").test(content)
-    || /[\u4e00-\u9fa5A-Za-z0-9_.\-@]{1,60}\s*(?:在干嘛|在干啥|在做什么|干嘛|干啥|干了什么|做了啥|做了什么|进展|进度|最近动态)/i.test(content);
+    || /[\u4e00-\u9fa5A-Za-z0-9_.\-@]{1,60}\s*(?:在干嘛|在干啥|在做什么|干嘛|干啥|干了什么|做了啥|做了什么|完成了什么|产出|进展|进度|最近动态)/i.test(content)
+    || /(?:上周|本周|最近|昨天|这周).{0,10}(?:干了|做了|完成|产出|开发|工作)/i.test(content);
 }
 
 /**
@@ -222,15 +223,85 @@ export function isDeepContentQuery(content: string): boolean {
 
 /**
  * Detect the activity time window implied by the user message.
- * Returns one of: "today" | "yesterday" | "this_week" | "this_month" | "recent".
- * Returning undefined means "no time filter — show all recent activity".
+ * Returns one of: "today" | "yesterday" | "this_week" | "last_week" | "this_month" | "recent".
  */
 export function detectActivityWindow(content: string): ActivityWindow | undefined {
-  if (/(今天|今日|今早|今晩)/.test(content)) return "today";
+  if (/(上周|上一周|上礼拜)/.test(content)) return "last_week";
+  if (/(今天|今日|今早|今晚)/.test(content)) return "today";
   if (/(昨天|昨日)/.test(content)) return "yesterday";
   if (/(前天)/.test(content)) return "yesterday";
-  if (/(本周|这周|这礼拜)/.test(content)) return "this_week";
-  if (/(本月|这个月)/.test(content)) return "this_month";
+  if (/(本周|这周|这礼拜|当前周)/.test(content)) return "this_week";
+  if (/(本月|这个月|当月)/.test(content)) return "this_month";
   if (/(最近|近期|近来|这阵子|近几天|前几天)/.test(content)) return "recent";
   return undefined;
+}
+
+export interface ResolvedTimeWindow {
+  window: ActivityWindow;
+  startTime: Date;
+  endTime: Date;
+  label: string;
+}
+
+/**
+ * 将自然语言相对时间窗口解析为标准的绝对时间范围（精确到毫秒）
+ */
+export function resolveTemporalWindow(content: string, now: Date = new Date()): ResolvedTimeWindow | undefined {
+  const window = detectActivityWindow(content);
+  if (!window) return undefined;
+
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const d = now.getDate();
+
+  switch (window) {
+    case "today": {
+      const startTime = new Date(y, m, d, 0, 0, 0, 0);
+      const endTime = new Date(y, m, d, 23, 59, 59, 999);
+      return { window, startTime, endTime, label: "今天" };
+    }
+    case "yesterday": {
+      const startTime = new Date(y, m, d - 1, 0, 0, 0, 0);
+      const endTime = new Date(y, m, d - 1, 23, 59, 59, 999);
+      return { window, startTime, endTime, label: "昨天" };
+    }
+    case "this_week": {
+      const day = now.getDay();
+      const diffToMonday = day === 0 ? 6 : day - 1;
+      const startTime = new Date(y, m, d - diffToMonday, 0, 0, 0, 0);
+      const endTime = new Date(y, m, d - diffToMonday + 6, 23, 59, 59, 999);
+      return { window, startTime, endTime, label: "本周" };
+    }
+    case "last_week": {
+      const day = now.getDay();
+      const diffToMonday = day === 0 ? 6 : day - 1;
+      const thisMonday = new Date(y, m, d - diffToMonday, 0, 0, 0, 0);
+      const startTime = new Date(thisMonday.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const endTime = new Date(thisMonday.getTime() - 1);
+      return { window, startTime, endTime, label: "上周" };
+    }
+    case "this_month": {
+      const startTime = new Date(y, m, 1, 0, 0, 0, 0);
+      const nextMonthFirst = new Date(y, m + 1, 1, 0, 0, 0, 0);
+      const endTime = new Date(nextMonthFirst.getTime() - 1);
+      return { window, startTime, endTime, label: "本月" };
+    }
+    case "recent": {
+      const startTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      return { window, startTime, endTime: new Date(now), label: "近期" };
+    }
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * 识别消息中是否包含对上下文工单/任务的隐式指代
+ */
+export function isImplicitTicketReference(content: string): boolean {
+  const trimmed = content.trim();
+  return (
+    /(?:这个|该|上个|刚刚的|当前的|上文的)?(?:工单|ticket|任务|缺陷|bug|issue)/i.test(trimmed) ||
+    /(?:把|针对|关于|问下|查下)?(?:它|这个|该任务)(?:的|是谁|负责|状态|改|写|修)?/i.test(trimmed)
+  );
 }

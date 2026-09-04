@@ -1,6 +1,7 @@
 import { AppShell } from "@/shared/ui/AppShell";
 import { SimplePageHeader } from "@/shared/ui/headers";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { getUserProfileAction, getTeamMembersAction } from "@/features/profile/lib/profile-actions";
 import { ProfileProjectList } from "@/features/team/ui/ProfileProjectList";
@@ -32,7 +33,7 @@ export default async function TeamPage({ searchParams }: Props) {
       <div className="space-y-8 pm-fade-in">
         {/* 分段切换器 */}
         <div className="flex gap-1 rounded-lg border border-ink-200 bg-white p-1 w-fit">
-          <a
+          <Link
             href="/team"
             className={`rounded-md px-4 py-1.5 text-sm font-medium transition ${
               currentView === "all"
@@ -41,8 +42,8 @@ export default async function TeamPage({ searchParams }: Props) {
             }`}
           >
             全部成员
-          </a>
-          <a
+          </Link>
+          <Link
             href="/team?view=projects"
             className={`rounded-md px-4 py-1.5 text-sm font-medium transition ${
               currentView === "projects"
@@ -51,7 +52,7 @@ export default async function TeamPage({ searchParams }: Props) {
             }`}
           >
             按项目
-          </a>
+          </Link>
         </div>
 
         {currentView === "projects" ? (

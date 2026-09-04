@@ -79,7 +79,7 @@ export async function POST(
     // 如果选择了程序模块（传入的是程序模块 ID），则在 Bug 职责下创建同名模块
     if (!targetModuleId && body.newModuleName) {
       // 先检查 Bug 职责下是否已有同名模块
-      let existingModule = await prisma.module.findFirst({
+      const existingModule = await prisma.module.findFirst({
         where: {
           responsibilityId: bugResponsibility.id,
           name: body.newModuleName,

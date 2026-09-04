@@ -1,0 +1,106 @@
+/* Three-Panel Collapsible Layout styles (inspired by pi-web) */
+
+.ai-sidebar-container {
+  position: relative;
+  overflow: hidden;
+  height: 100%;
+  flex-shrink: 0;
+  transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ai-sidebar-container.ai-sidebar-open {
+  width: var(--sidebar-width, 260px);
+  min-width: var(--sidebar-width, 260px);
+}
+
+.ai-sidebar-container.ai-sidebar-closed {
+  width: 0 !important;
+  min-width: 0 !important;
+  border-right: none !important;
+}
+
+/* Maintain fixed child width so inner elements don't reflow or shrink during collapse animation */
+.ai-sidebar-container > * {
+  width: var(--sidebar-width, 260px);
+  min-width: var(--sidebar-width, 260px);
+  height: 100%;
+}
+
+.ai-sidebar-container.ai-sidebar-resizing,
+.ai-sidebar-container.ai-sidebar-resizing > * {
+  transition: none !important;
+}
+
+/* Right Inspector Panel */
+.ai-right-panel-container {
+  position: relative;
+  overflow: hidden;
+  height: 100%;
+  flex-shrink: 0;
+  transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ai-right-panel-container.ai-right-panel-open {
+  width: var(--right-panel-width, 360px);
+  min-width: var(--right-panel-width, 360px);
+}
+
+.ai-right-panel-container.ai-right-panel-closed {
+  width: 0 !important;
+  min-width: 0 !important;
+  border-left: none !important;
+}
+
+.ai-right-panel-container > * {
+  width: var(--right-panel-width, 360px);
+  min-width: var(--right-panel-width, 360px);
+  height: 100%;
+}
+
+.ai-right-panel-container.ai-right-panel-resizing,
+.ai-right-panel-container.ai-right-panel-resizing > * {
+  transition: none !important;
+}
+
+/* Drag Handles */
+.ai-panel-resize-handle {
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s ease;
+  z-index: 10;
+  flex-shrink: 0;
+  height: 100%;
+}
+
+.ai-panel-resize-handle:hover,
+.ai-panel-resize-handle.is-resizing {
+  background: #3b82f6; /* brand-500 */
+}
+
+/* Mobile drawer backdrop */
+@media (max-width: 768px) {
+  .ai-sidebar-mobile-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 40;
+    backdrop-filter: blur(2px);
+    transition: opacity 0.2s ease;
+  }
+
+  .ai-sidebar-container {
+    position: fixed !important;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    background: white;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.15);
+  }
+
+  .ai-sidebar-container.ai-sidebar-closed {
+    transform: translateX(-100%);
+    box-shadow: none;
+  }
+}

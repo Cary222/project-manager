@@ -2,6 +2,7 @@ import { AppShell } from "@/shared/ui/AppShell";
 import { BackPageHeader } from "@/shared/ui/headers";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { listMyWeeklyReports } from "@/features/weekly-reports/lib/weekly-report-store";
 import { WeeklyReportList } from "@/features/reports/weekly-reports/ui/WeeklyReportList";
 
@@ -38,12 +39,12 @@ export default async function WeeklyReportsPage() {
                 提交后 AI 将自动生成结构化总结
               </p>
             </div>
-            <a
+            <Link
               href="/reports/weekly-reports/new"
               className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-brand-700 focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:outline-none"
             >
               新建周报
-            </a>
+            </Link>
           </div>
 
           <WeeklyReportList initialReports={reports} />

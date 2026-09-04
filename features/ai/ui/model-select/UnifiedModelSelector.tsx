@@ -42,6 +42,14 @@ export interface UnifiedModelSelectorProps {
   toolMode?: string;
   /** 默认模型 ref（显示 Default 标记）。 */
   defaultModelRef?: string;
+  /** 下拉框对齐方向：'right' (默认) | 'left' | 'center' | 'full' */
+  align?: "left" | "right" | "center" | "full";
+  /** 是否占满父容器宽度 */
+  fullWidth?: boolean;
+  /** 自定义外层容器类名 */
+  className?: string;
+  /** 自定义下拉面板宽度/定位类名 */
+  dropdownClassName?: string;
 }
 
 function getRequiredCapabilities(category?: AiTaskCategory): string[] | null {
@@ -56,6 +64,10 @@ export function UnifiedModelSelector({
   category = "chat",
   autoMode = false,
   defaultModelRef,
+  align = "right",
+  fullWidth = false,
+  className,
+  dropdownClassName,
 }: UnifiedModelSelectorProps) {
   const { status } = useSession();
   const isLoggedIn = status === "authenticated";
@@ -193,19 +205,32 @@ export function UnifiedModelSelector({
   }, [visibleModels]);
 
   return (
-    <div className="relative" ref={containerRef}>
+    <div className={`relative ${fullWidth ? "w-full" : ""} ${className ?? ""}`} ref={containerRef}>
       <button
+        type="button"
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-medium text-ink-700 transition-colors duration-150 hover:border-ink-300 hover:bg-ink-50"
+        className={`flex items-center justify-between gap-2 rounded-xl border border-ink-200 bg-white px-3 py-2 text-xs font-medium text-ink-700 transition-colors duration-150 hover:border-brand-400 hover:bg-ink-50 shadow-sm ${
+          fullWidth ? "w-full" : ""
+        }`}
       >
-        <span>{displayText}</span>
+        <span className="truncate">{displayText}</span>
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="6 9 12 15 18 9" />
         </svg>
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-[420px] max-w-[calc(100vw-24px)] overflow-hidden rounded-xl border border-ink-200 bg-white shadow-lg">
+        <div
+          className={`absolute top-full z-50 mt-1 overflow-hidden rounded-xl border border-ink-200 bg-white shadow-2xl ${
+            align === "full"
+              ? "left-0 right-0 w-full min-w-full"
+              : align === "left"
+                ? "left-0 w-[300px] sm:w-[340px] max-w-[calc(100vw-24px)]"
+                : align === "center"
+                  ? "left-1/2 -translate-x-1/2 w-[300px] sm:w-[340px] max-w-[calc(100vw-24px)]"
+                  : "right-0 w-[320px] sm:w-[380px] max-w-[calc(100vw-24px)]"
+          } ${dropdownClassName ?? ""}`}
+        >
           {/* 工具栏：搜索 + 筛选 */}
           <div className="flex flex-col gap-2 border-b border-ink-100 p-2.5">
             <input

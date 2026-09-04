@@ -47,6 +47,8 @@ export function AiChatInput({
   const [uploadingImage, setUploadingImage] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const isComposingRef = useRef(false);
+  const lastCompositionEndAtRef = useRef(0);
 
   // Image 模式参考图上传 state（用于 I2I）
   const [referenceImages, setReferenceImages] = useState<{ id: string; url: string; name: string }[]>(
@@ -364,9 +366,25 @@ export function AiChatInput({
     [message, images, disabled, onSend, taskCategory, referenceImages, onReferenceImagesChange, onChatImagesChange]
   );
 
+  const handleCompositionStart = useCallback(() => {
+    isComposingRef.current = true;
+  }, []);
+
+  const handleCompositionEnd = useCallback(() => {
+    isComposingRef.current = false;
+    lastCompositionEndAtRef.current = Date.now();
+  }, []);
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      const isComposing =
+        isComposingRef.current ||
+        e.nativeEvent.isComposing ||
+        e.keyCode === 229 ||
+        Date.now() - lastCompositionEndAtRef.current < 100;
+
       if (e.key === "Enter" && !e.shiftKey) {
+        if (isComposing) return;
         e.preventDefault();
         handleSubmit();
       }
@@ -517,6 +535,8 @@ export function AiChatInput({
             value={message}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
             onPaste={handlePaste}
             placeholder={placeholder}
             disabled={disabled || isVoiceChatActive}

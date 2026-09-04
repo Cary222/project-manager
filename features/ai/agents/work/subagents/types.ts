@@ -45,6 +45,13 @@ export interface SubAgentInput {
   policy?: PolicyConfig;
   /** 用户 ID（用于获取用户 API key 配置） */
   userId?: string;
+  /** LLM Provider（显式指定时优先使用） */
+  provider?: string;
+  /** 显式指定模型 */
+  model?: {
+    provider: string;
+    name: string;
+  };
 }
 
 export interface PolicyConfig {

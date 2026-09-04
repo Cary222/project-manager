@@ -15,7 +15,7 @@ async function main() {
     >`SELECT tablename FROM pg_tables WHERE schemaname = 'pm'`;
     console.log("Tables in pm schema:", tables.map((t) => t.tablename));
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     await (prisma as any).$executeRawUnsafe(
       `ALTER TABLE "aiChatMessage" ADD COLUMN IF NOT EXISTS "metadata" jsonb`
     );

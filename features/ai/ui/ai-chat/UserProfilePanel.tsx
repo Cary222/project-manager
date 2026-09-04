@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { IconCheck, IconChevronDown, IconEdit, IconPlus, IconSparkles, IconX } from "@/shared/ui/icons";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -16,6 +16,7 @@ export interface AiUserProfile {
 export interface UserProfilePanelProps {
   profile: AiUserProfile | null;
   onChange?: (next: AiUserProfile) => void;
+  defaultCollapsed?: boolean;
 }
 
 // ─── ProfileField ─────────────────────────────────────────────────────────────
@@ -125,16 +126,13 @@ function EditableProfileField({
 export function UserProfilePanel({
   profile,
   onChange,
+  defaultCollapsed = false,
 }: UserProfilePanelProps) {
-  const [collapsed, setCollapsed] = useState(true);
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<AiUserProfile>(profile ?? {});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!editing) setDraft(profile ?? {});
-  }, [profile, editing]);
 
   const updateField = (field: keyof AiUserProfile, next: string[]) => {
     setDraft((d) => ({ ...d, [field]: next }));
@@ -171,34 +169,70 @@ export function UserProfilePanel({
     setSaveError(null);
   };
 
-  if (!profile) {
+  if (!profile && !editing) {
     return (
-      <div className="border-b border-ink-100 px-5 py-3">
-        <div className="flex items-center gap-2 rounded-xl border border-dashed border-ink-200 bg-ink-50/50 px-4 py-3">
-          <IconSparkles className="h-4 w-4 shrink-0 text-brand-400" />
-          <p className="text-xs text-ink-400">
-            还没有画像，多和小星聊几句后会自动生成
-          </p>
+      <div className="p-3">
+        <div className="flex flex-col items-center justify-center gap-2.5 rounded-xl border border-dashed border-ink-200 bg-ink-50/50 p-5 text-center">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+            <IconSparkles className="h-4 w-4" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-ink-800">暂无用户画像</p>
+            <p className="mt-1 text-[11px] text-ink-400 max-w-[200px] leading-relaxed">
+              多和小星聊几句后会自动生成画像，也可现在手动定义。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(profile ?? {});
+              setEditing(true);
+              setCollapsed(false);
+            }}
+            className="mt-1 inline-flex items-center gap-1 rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-xs font-medium text-brand-700 shadow-2xs hover:bg-brand-50 transition"
+          >
+            <IconEdit className="h-3.5 w-3.5" />
+            手动编辑画像
+          </button>
         </div>
       </div>
     );
   }
 
   const hasAnyField =
-    profile.roles?.length ||
-    profile.interests?.length ||
-    profile.expertise?.length ||
-    profile.recentTopics?.length ||
-    Object.keys(profile.preferences ?? {}).length > 0;
+    Boolean(
+      profile?.roles?.length ||
+      profile?.interests?.length ||
+      profile?.expertise?.length ||
+      profile?.recentTopics?.length ||
+      Object.keys(profile?.preferences ?? {}).length > 0
+    );
 
   if (!hasAnyField && !editing) {
     return (
-      <div className="border-b border-ink-100 px-5 py-3">
-        <div className="flex items-center gap-2 rounded-xl border border-dashed border-ink-200 bg-ink-50/50 px-4 py-3">
-          <IconSparkles className="h-4 w-4 shrink-0 text-brand-400" />
-          <p className="text-xs text-ink-400">
-            还没有画像，多和小星聊几句后会自动生成
-          </p>
+      <div className="p-3">
+        <div className="flex flex-col items-center justify-center gap-2.5 rounded-xl border border-dashed border-ink-200 bg-ink-50/50 p-5 text-center">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+            <IconSparkles className="h-4 w-4" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-ink-800">画像暂未包含字段</p>
+            <p className="mt-1 text-[11px] text-ink-400 max-w-[200px] leading-relaxed">
+              可手动添加你的角色、关注领域与技术偏好。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(profile ?? {});
+              setEditing(true);
+              setCollapsed(false);
+            }}
+            className="mt-1 inline-flex items-center gap-1 rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-xs font-medium text-brand-700 shadow-2xs hover:bg-brand-50 transition"
+          >
+            <IconEdit className="h-3.5 w-3.5" />
+            手动编辑画像
+          </button>
         </div>
       </div>
     );
@@ -225,6 +259,7 @@ export function UserProfilePanel({
             <button
               type="button"
               onClick={() => {
+                setDraft(profile ?? {});
                 setEditing(true);
                 setCollapsed(false);
               }}
@@ -278,13 +313,13 @@ export function UserProfilePanel({
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-              <ProfileField label="角色" value={profile.roles} />
-              <ProfileField label="兴趣" value={profile.interests} />
-              <ProfileField label="专业领域" value={profile.expertise} />
+              <ProfileField label="角色" value={profile?.roles} />
+              <ProfileField label="兴趣" value={profile?.interests} />
+              <ProfileField label="专业领域" value={profile?.expertise} />
               <div className="col-span-2">
-                <ProfileField label="近期话题" value={profile.recentTopics} />
+                <ProfileField label="近期话题" value={profile?.recentTopics} />
               </div>
-              {profile.preferences &&
+              {profile?.preferences &&
                 Object.entries(profile.preferences).map(([key, val]) => (
                   <ProfileField key={key} label={key} value={val} />
                 ))}

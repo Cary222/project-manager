@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/shared/db/client";
 import { requireProjectEditor } from "@/shared/lib/permissions";
 import { sha256Hex } from "@/shared/lib/hash";
-import { recordFileReference } from "@/features/knowledge/lib/file-reference";
 import { enqueueIndexJob } from "@/worker/lib/jobs";
 import {
   renderMeetingSummaryMarkdown,
@@ -76,7 +75,7 @@ export async function POST(_request: Request, { params }: RouteParams) {
       data: {
         uploaderId: userId,
         originalName: fileName,
-        mimeType: "text/markdown; charset=utf-8",
+        mimeType: "text/markdown",
         size: bytes.length,
         bytes,
         hash,

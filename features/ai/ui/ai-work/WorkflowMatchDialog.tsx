@@ -32,8 +32,6 @@ export function WorkflowMatchDialog({
   onConfirm,
   onCancel,
 }: WorkflowMatchDialogProps) {
-  if (!isOpen) return null;
-
   const handleConfirm = useCallback(() => {
     onConfirm();
   }, [onConfirm]);

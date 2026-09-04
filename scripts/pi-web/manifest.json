@@ -1,0 +1,11 @@
+{
+  "upstreamRepo": "https://github.com/agegr/pi-web.git",
+  "lockedUpstream": {
+    "tag": "v0.8.11",
+    "commit": "28bab3c25f5f6770c9b0b745ebbfec1c27f7b948"
+  },
+  "vendorRoot": "vendor/pi-web",
+  "patchRoot": "patches/pi-web",
+  "activeRoot": "features/ai/ui/ai-workspace",
+  "files": []
+}

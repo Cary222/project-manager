@@ -35,6 +35,7 @@ function nextId(): string {
  */
 export function createTaskCmd(data: {
   id: string;
+  nodeName?: string;
   stepLabel: string;
   title: string;
   category: TaskRecord["category"];
@@ -46,6 +47,7 @@ export function createTaskCmd(data: {
     task: {
       id: data.id,
       parentId: null,
+      nodeName: data.nodeName,
       stepLabel: data.stepLabel,
       title: data.title,
       status: data.status,
@@ -287,6 +289,7 @@ export function onNodeStart(
   onCommand(
     createTaskCmd({
       id: executionId,
+      nodeName,
       stepLabel,
       title,
       category,
@@ -308,6 +311,7 @@ export function onNodeEnd(
   executionId: string,
   nodeOutput: Record<string, unknown>,
   onCommand: (cmd: ReturnType<typeof updateTaskCmd>) => void,
+  endTime?: number,
 ): void {
   let finalStatus: TaskStatus = "success";
   let errorMessage: string | undefined;
@@ -338,7 +342,7 @@ export function onNodeEnd(
 
   const updates: Partial<TaskRecord> = {
     status: finalStatus,
-    endTime: Date.now(),
+    endTime: typeof endTime === "number" && Number.isFinite(endTime) ? endTime : Date.now(),
   };
 
   const detail = extractDetail(nodeOutput);

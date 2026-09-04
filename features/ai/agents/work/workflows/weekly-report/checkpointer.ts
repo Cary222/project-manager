@@ -11,14 +11,14 @@ type GlobalCheckpoint = typeof globalThis & {
   __workflow_checkpointer_setup?: Promise<void>;
 };
 
-function usePostgres(): boolean {
+function shouldUsePostgres(): boolean {
   if (process.env.WORKFLOW_CHECKPOINT === "postgres") return true;
   if (process.env.WORKFLOW_CHECKPOINT === "memory") return false;
   return process.env.NODE_ENV === "production";
 }
 
 async function createCheckpointer(): Promise<BaseCheckpointSaver> {
-  if (!usePostgres()) {
+  if (!shouldUsePostgres()) {
     return new MemorySaver();
   }
 

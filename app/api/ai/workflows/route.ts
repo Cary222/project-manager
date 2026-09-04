@@ -10,9 +10,10 @@ import {
 import { WEEKLY_REPORT_WORKFLOW_TYPE } from "@/features/ai/agents/work/workflows/weekly-report/graph";
 import { startWorkflowAsync } from "@/features/ai/agents/work/workflows/weekly-report/approval";
 import { getWeekRange } from "@/features/weekly-reports/lib/week";
+import { generateProjectProgressSummary } from "@/features/ai/agents/work/workflows/project-progress/generate-progress-summary";
 
 // Supported workflow types
-const WORKFLOW_TYPES = ["weekly_report"] as const;
+const WORKFLOW_TYPES = ["weekly_report", "project-progress"] as const;
 type SupportedWorkflowType = typeof WORKFLOW_TYPES[number];
 
 const startSchema = z.object({
@@ -130,6 +131,18 @@ async function startWorkflow(
       workflowRunId: result.runId,
       threadId: result.threadId,
     });
+  } else if (workflowType === "project-progress") {
+    void (async () => {
+      try {
+        await generateProjectProgressSummary(result.runId, options.userId);
+      } catch (e) {
+        console.error("[project-progress] generation failed:", e);
+        await prisma.workflowRun.update({
+          where: { id: result.runId },
+          data: { status: "failed", metadata: { error: e instanceof Error ? e.message : "汇总失败" } },
+        });
+      }
+    })();
   }
 
   return { ...result, conversationId: options.conversationId };

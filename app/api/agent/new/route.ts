@@ -6,6 +6,8 @@ import { requireSession } from "@/shared/lib/permissions";
 import { allowFileRoot } from "@/lib/file-access";
 import { invalidateSessionListCache } from "@/lib/session-reader";
 import { startRpcSession } from "@/lib/rpc-manager";
+import { createPiSessionOwnership } from "@/features/ai/pi-integration/pi-session-ownership";
+import { isPiOwnershipEnabled } from "@/features/ai/pi-integration/feature-flags";
 
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
@@ -22,8 +24,9 @@ function parseThinkingLevel(value: unknown): ThinkingLevel | undefined {
 // type:"ensure_session" only creates the runtime so clients can query commands.
 // Returns pi's real session id plus the model/thinking state selected at startup.
 export async function POST(req: Request) {
+  let userId: string;
   try {
-    await requireSession();
+    userId = (await requireSession()).user.id;
   } catch {
     return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
   }
@@ -71,6 +74,20 @@ export async function POST(req: Request) {
       ...(explicitThinkingLevel ? { thinkingLevel: explicitThinkingLevel } : {}),
     });
 
+    if (isPiOwnershipEnabled()) {
+      // Saga: the Pi runtime/session file and PostgreSQL cannot share a transaction.
+      // Do not expose the real session ID until its ProjectHub owner projection exists.
+      try {
+        await createPiSessionOwnership({
+          piSessionId: realSessionId,
+          userId,
+          source: "workspace",
+        });
+      } catch (error) {
+        await session.shutdown().catch(() => undefined);
+        throw error;
+      }
+    }
     allowFileRoot(cwd);
     invalidateSessionListCache();
 

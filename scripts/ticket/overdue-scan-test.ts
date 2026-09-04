@@ -32,14 +32,14 @@ async function cleanupTestData(prefix = "TEST_OVERDUE") {
 
 async function createTestTicket(title: string, deadline: Date | null, status: TicketStatus) {
   // Find or create a test project
-  let project = await prisma.project.findFirst({ take: 1 });
+  const project = await prisma.project.findFirst({ take: 1 });
   if (!project) {
     throw new Error("No project found in database. Please seed the database first.");
   }
 
   // Find or create a test module
-  let module = await prisma.module.findFirst({ take: 1 });
-  if (!module) {
+  const mod = await prisma.module.findFirst({ take: 1 });
+  if (!mod) {
     throw new Error("No module found in database. Please seed the database first.");
   }
 

@@ -86,6 +86,15 @@ export function useSpeechInput(
     voiceSession.stopSession();
   }, [clearTimers, voiceSession]);
 
+  // stopRecording must be declared before startRecording
+  // because startRecording's timeout callback references it.
+  const stopRecording = useCallback(() => {
+    clearTimers();
+    setStatus("transcribing");
+    // 提交音频缓冲并触发识别
+    voiceSession.finishInput();
+  }, [clearTimers, voiceSession]);
+
   const startRecording = useCallback(async () => {
     try {
       reset();
@@ -109,14 +118,7 @@ export function useSpeechInput(
       setStatus("error");
       onError?.(message);
     }
-  }, [reset, timeoutMs, onError, voiceSession]);
-
-  const stopRecording = useCallback(() => {
-    clearTimers();
-    setStatus("transcribing");
-    // 提交音频缓冲并触发识别
-    voiceSession.finishInput();
-  }, [clearTimers, voiceSession]);
+  }, [reset, timeoutMs, onError, voiceSession, stopRecording]);
 
   return {
     status,

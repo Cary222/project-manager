@@ -268,7 +268,9 @@ export function WorkflowStatusCard({ run, onDone, onDeleted }: WorkflowStatusCar
 function workflowTypeLabel(type: string): string {
   const labels: Record<string, string> = {
     weekly_report: "周报生成",
+    "project-progress": "项目进展汇总",
     project_summary: "项目摘要",
+    coding: "Coding Task",
   };
   return labels[type] ?? type;
 }

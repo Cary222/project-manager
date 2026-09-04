@@ -118,25 +118,41 @@ function StepRow({
   isExpanded,
   onToggle,
   now,
+  nextTask,
 }: {
   task: TaskRecord;
   isExpanded: boolean;
   onToggle: () => void;
   now: number;
+  nextTask?: TaskRecord;
 }) {
   const isRunning = task.status === "running";
+  const isPending = task.status === "pending";
 
-  const endTime =
-    task.endTime && task.endTime < now - 5 * 60 * 1000
-      ? now
-      : task.endTime;
-
-  const duration = isRunning
-    ? now - task.startTime
-    : endTime !== undefined
-      ? endTime - task.startTime
-      : undefined;
-
+  const duration = (() => {
+    if (isPending) return undefined;
+    if (isRunning) {
+      return typeof task.startTime === "number" && task.startTime > 0
+        ? Math.max(0, now - task.startTime)
+        : undefined;
+    }
+    if (
+      typeof task.endTime === "number" &&
+      typeof task.startTime === "number" &&
+      task.endTime >= task.startTime
+    ) {
+      return task.endTime - task.startTime;
+    }
+    if (
+      typeof task.startTime === "number" &&
+      nextTask &&
+      typeof nextTask.startTime === "number" &&
+      nextTask.startTime >= task.startTime
+    ) {
+      return nextTask.startTime - task.startTime;
+    }
+    return undefined;
+  })();
   const hasDetail = Boolean(task.detail);
   const hasLogs = Array.isArray((task as any).logs) && (task as any).logs.length > 0;
   const isExpandable = hasDetail || hasLogs;
@@ -288,18 +304,21 @@ export function AiThinkingStream({
 
   const isRunning = tasks.some((t) => t.status === "running" || t.status === "pending");
 
-  const totalMs = persistedTotalMs !== undefined
-    ? persistedTotalMs
-    : (() => {
-        if (tasks.length === 0) return 0;
-        const starts = tasks.map((t) => t.startTime).filter((v) => Number.isFinite(v));
-        const ends = tasks
-          .map((t) => t.endTime ?? (t.status === "running" ? Date.now() : undefined))
-          .filter((v): v is number => v !== undefined && Number.isFinite(v));
-        if (starts.length === 0) return 0;
-        if (ends.length === 0) return Date.now() - Math.min(...starts);
-        return Math.max(...ends) - Math.min(...starts);
-      })();
+  const totalMs =
+    persistedTotalMs !== undefined && Number.isFinite(persistedTotalMs) && persistedTotalMs > 0
+      ? persistedTotalMs
+      : (() => {
+          if (tasks.length === 0) return 0;
+          const validStarts = tasks
+            .map((t) => t.startTime)
+            .filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v > 0);
+          const validEnds = tasks
+            .map((t) => (t.status === "running" ? now : t.endTime))
+            .filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v > 0);
+          if (validStarts.length === 0) return 0;
+          if (validEnds.length === 0) return Math.max(0, now - Math.min(...validStarts));
+          return Math.max(0, Math.max(...validEnds) - Math.min(...validStarts));
+        })();
 
   const doneCount = tasks.filter((t) => t.status === "success").length;
   const errorCount = tasks.filter((t) => t.status === "error").length;
@@ -398,6 +417,7 @@ export function AiThinkingStream({
             isExpanded={expandedIds.has(task.id)}
             onToggle={() => toggleExpand(task.id)}
             now={now}
+            nextTask={idx < tasks.length - 1 ? tasks[idx + 1] : undefined}
           />
         </div>
       ))}

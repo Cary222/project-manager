@@ -46,16 +46,16 @@ export async function POST(request: Request) {
     const projectId = body.projectId;
     const moduleId = body.moduleId;
 
-    const module = await prisma.module.findUnique({
+    const foundModule = await prisma.module.findUnique({
       where: { id: moduleId },
       include: { responsibility: { select: { kind: true } } },
     });
-    if (!module) {
+    if (!foundModule) {
       return NextResponse.json({ error: "module not found" }, { status: 404 });
     }
     await requireDesignResponsibility(
       session.user.id,
-      module.responsibility.kind,
+      foundModule.responsibility.kind,
       session.user.role as UserRole
     );
     const ticketNo = await allocateTicketNo();

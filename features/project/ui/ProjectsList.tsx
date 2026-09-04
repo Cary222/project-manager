@@ -103,7 +103,7 @@ function ProjectsTable({
   const projects = useMemo(() => data?.projects ?? [], [data]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let result = q
+    const result = q
       ? projects.filter(
           (p) =>
             p.name.toLowerCase().includes(q) ||

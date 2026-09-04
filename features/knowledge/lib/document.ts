@@ -109,26 +109,45 @@ export function decodeTextBytes(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("utf-8");
 }
 
-export async function extractDocumentText(
-  fileAsset: { id: string; mimeType: string; bytes: Buffer; originalName?: string },
-): Promise<{
+export async function extractDocumentText(fileAsset: {
+  id: string;
+  mimeType: string;
+  bytes: Buffer;
+  originalName?: string;
+}): Promise<{
   text: string;
   pageCount?: number;
   metadata?: Record<string, unknown>;
 }> {
-  // Prisma Bytes 静态类型是 Uint8Array；显式转 Buffer 后再按 UTF-8 解码。
+  const baseMime = (fileAsset.mimeType || "")
+    .split(";")[0]
+    .trim()
+    .toLowerCase();
+
+  // 纯文本、Markdown、CSV、JSON 等直接按 UTF-8 解码，无需调用外部服务
   if (
-    fileAsset.mimeType === "text/markdown" ||
-    fileAsset.mimeType === "text/plain"
+    baseMime === "text/markdown" ||
+    baseMime === "text/plain" ||
+    baseMime === "text/csv" ||
+    baseMime === "text/html" ||
+    baseMime === "text/x-markdown" ||
+    baseMime === "application/json" ||
+    baseMime.startsWith("text/")
   ) {
     return { text: decodeTextBytes(fileAsset.bytes) };
   }
 
-  // 其余类型走 embedding 服务的 /extract-text（JSON body + data URL）
+  // 其余类型（PDF、Office 文档、图片 OCR）走 embedding 服务的 /extract-text
   return extractTextViaService(fileAsset, fileAsset.originalName);
 }
 
 const SUPPORTED_MIME_TYPES = new Set([
+  // 文本与 Markdown
+  "text/plain",
+  "text/markdown",
+  "text/x-markdown",
+  "text/csv",
+  "text/html",
   // Office 文档
   "application/pdf",
   "application/msword",
@@ -180,8 +199,14 @@ function getUserFriendlyErrorMessage(code: string, fileName: string): string {
 async function extractTextViaService(
   fileAsset: { id: string; mimeType: string; bytes: Buffer },
   originalName?: string,
-): Promise<{ text: string; pageCount?: number; metadata?: Record<string, unknown> }> {
-  const baseUrl = (process.env.EMBEDDING_API_URL ?? "http://localhost:5000").trim();
+): Promise<{
+  text: string;
+  pageCount?: number;
+  metadata?: Record<string, unknown>;
+}> {
+  const baseUrl = (
+    process.env.EMBEDDING_API_URL ?? "http://localhost:5000"
+  ).trim();
   const mimeType = normalizeMimeType(fileAsset.mimeType);
   const name = originalName || `file.${getExtension(mimeType)}`;
 
@@ -235,10 +260,14 @@ async function extractTextViaService(
  */
 function normalizeMimeType(mimeType: string): string {
   const wpsMap: Record<string, string> = {
-    "application/wpsoffice": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/wps-office.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/wps-office.pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    "application/wps-office.xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/wpsoffice":
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/wps-office.docx":
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/wps-office.pptx":
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/wps-office.xlsx":
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   };
   return wpsMap[mimeType] ?? mimeType;
 }
@@ -249,8 +278,10 @@ function normalizeMimeType(mimeType: string): string {
 function getExtension(mimeType: string): string {
   const extMap: Record<string, string> = {
     "application/pdf": "pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+      "docx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+      "pptx",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
     "image/png": "png",
     "image/jpeg": "jpg",
@@ -279,11 +310,18 @@ function getExtension(mimeType: string): string {
 export async function processFileAssetJob(fileAssetId: string): Promise<void> {
   const fileAsset = await prisma.fileAsset.findUnique({
     where: { id: fileAssetId },
-    select: { id: true, mimeType: true, bytes: true, status: true, originalName: true },
+    select: {
+      id: true,
+      mimeType: true,
+      bytes: true,
+      status: true,
+      originalName: true,
+    },
   });
 
   if (!fileAsset) throw new Error(`FILE_NOT_FOUND: ${fileAssetId}`);
-  if (fileAsset.status === "DELETED") throw new Error(`FILE_DELETED: ${fileAssetId}`);
+  if (fileAsset.status === "DELETED")
+    throw new Error(`FILE_DELETED: ${fileAssetId}`);
 
   // Step 1: Upsert Document (status: PROCESSING)
   const document = await prisma.document.upsert({
@@ -304,7 +342,11 @@ export async function processFileAssetJob(fileAssetId: string): Promise<void> {
 
   try {
     // Step 2: 提取文本
-    const { text, pageCount, metadata: extractedMetadata } = await extractDocumentText({
+    const {
+      text,
+      pageCount,
+      metadata: extractedMetadata,
+    } = await extractDocumentText({
       id: fileAsset.id,
       mimeType: fileAsset.mimeType,
       originalName: fileAsset.originalName,
@@ -324,7 +366,10 @@ export async function processFileAssetJob(fileAssetId: string): Promise<void> {
         data: {
           status: "READY",
           extractedText: "",
-          metadata: { extractionStatus: "EMPTY", reason: "OCR_NO_TEXT" } as Prisma.InputJsonValue,
+          metadata: {
+            extractionStatus: "EMPTY",
+            reason: "OCR_NO_TEXT",
+          } as Prisma.InputJsonValue,
           error: Prisma.DbNull,
           updatedAt: new Date(),
         },
@@ -345,7 +390,9 @@ export async function processFileAssetJob(fileAssetId: string): Promise<void> {
     // Step 5: 事务内写 SearchDocument + Document READY
     await prisma.$transaction(async (tx) => {
       // 清旧 chunks（同一 documentId 的）
-      await tx.searchDocument.deleteMany({ where: { documentId: document.id } });
+      await tx.searchDocument.deleteMany({
+        where: { documentId: document.id },
+      });
 
       // 写新 chunks（embedding 先跳过，用 $executeRaw 后续更新）
       const savedChunks = [];
@@ -372,7 +419,11 @@ export async function processFileAssetJob(fileAssetId: string): Promise<void> {
 
       // 用 $executeRaw 批量写 embedding（绕过 Prisma Unsupported 限制）
       for (let i = 0; i < savedChunks.length; i++) {
-        await upsertSearchDocumentEmbedding(tx, savedChunks[i].id, embeddings[i]);
+        await upsertSearchDocumentEmbedding(
+          tx,
+          savedChunks[i].id,
+          embeddings[i],
+        );
       }
 
       // Document → READY

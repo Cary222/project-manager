@@ -7,6 +7,7 @@
  * 3. 资源监控：内存 / CPU / 并发数
  * 4. 告警机制：异常情况告警
  */
+import { totalmem } from "node:os";
 
 // ============================================================================
 // 日志级别
@@ -263,7 +264,7 @@ export interface ResourceMetrics {
 
 export function getResourceMetrics(): ResourceMetrics {
   const memUsage = process.memoryUsage();
-  const totalMemoryMB = require("os").totalmem() / 1024 / 1024;
+  const totalMemoryMB = totalmem() / 1024 / 1024;
   const usedMemoryMB = memUsage.heapUsed / 1024 / 1024;
   
   return {

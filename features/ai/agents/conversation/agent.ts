@@ -3,7 +3,7 @@ import type { BaseMessage } from "@langchain/core/messages";
 import type { TaskType, UserRoutingConfig } from "@/features/ai/llm/providers/types";
 import type { AgentMode } from "./state";
 import type { DisambiguationCandidate } from "./types";
-import type { QueryType } from "@/features/ai/core/resolvers/query-parser";
+import type { QueryType, ResolvedTimeWindow } from "@/features/ai/core/resolvers/query-parser";
 import type { ExtractedUser, ActivityWindow } from "@/features/ai/types/structured";
 import type { WorkflowDefinition } from "@/features/ai/runtime/types";
 
@@ -140,6 +140,11 @@ const AgentStateAnnotation = Annotation.Root({
     value: (current, update) => update === undefined ? current : update,
     default: () => null,
   }),
+  /** 最近讨论的工单（用于"它/这个工单"等代词指代） */
+  lastMentionedTicket: Annotation<{ id: string; ticketNo: number; title?: string } | null>({
+    value: (current, update) => (update === undefined ? current : update),
+    default: () => null,
+  }),
   /** Structured query type (ticket/project/user/commit/weekly_report/note/ambiguous). */
   queryType: Annotation<QueryType | null>({
     value: (current, update) => update === undefined ? current : update,
@@ -153,6 +158,11 @@ const AgentStateAnnotation = Annotation.Root({
   /** Activity time window (today/yesterday/this_week/this_month/recent). */
   activityWindow: Annotation<ActivityWindow | null>({
     value: (current, update) => update === undefined ? current : update,
+    default: () => null,
+  }),
+  /** Structured temporal window with exact timestamps */
+  resolvedTimeWindow: Annotation<ResolvedTimeWindow | null>({
+    value: (current, update) => (update === undefined ? current : update),
     default: () => null,
   }),
   /** Model selection context (provider + model chosen for this turn). */

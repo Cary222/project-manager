@@ -52,36 +52,36 @@ export function buildStepPlan(mode: AiMode): NodeTemplate[] {
   switch (mode) {
     case "search":
       return [
-        { nodeName: "detectIntent", nodeLabel: "意图识别" },
-        { nodeName: "modelSelect", nodeLabel: "选择模型" },
-        { nodeName: "searchKnowledge", nodeLabel: "知识检索", toolName: "searchKnowledge" },
-        { nodeName: "searchStructured", nodeLabel: "数据库查询", toolName: "searchStructured" },
-        { nodeName: "decision", nodeLabel: "分析问题" },
-        { nodeName: "generateResponse", nodeLabel: "生成回答" },
+        { nodeName: "detectIntent", nodeLabel: "理解" },
+        { nodeName: "modelSelect", nodeLabel: "模型" },
+        { nodeName: "searchKnowledge", nodeLabel: "检索", toolName: "searchKnowledge" },
+        { nodeName: "searchStructured", nodeLabel: "查询", toolName: "searchStructured" },
+        { nodeName: "decision", nodeLabel: "分析" },
+        { nodeName: "generateResponse", nodeLabel: "生成" },
       ];
     case "web":
       return [
-        { nodeName: "detectIntent", nodeLabel: "意图识别" },
-        { nodeName: "modelSelect", nodeLabel: "选择模型" },
-        { nodeName: "webSearch", nodeLabel: "联网搜索", toolName: "webSearch" },
-        { nodeName: "decision", nodeLabel: "分析问题" },
-        { nodeName: "generateResponse", nodeLabel: "生成回答" },
+        { nodeName: "detectIntent", nodeLabel: "理解" },
+        { nodeName: "modelSelect", nodeLabel: "模型" },
+        { nodeName: "webSearch", nodeLabel: "搜索", toolName: "webSearch" },
+        { nodeName: "decision", nodeLabel: "分析" },
+        { nodeName: "generateResponse", nodeLabel: "生成" },
       ];
     case "chat":
       return [
-        { nodeName: "detectIntent", nodeLabel: "意图识别" },
-        { nodeName: "modelSelect", nodeLabel: "选择模型" },
-        { nodeName: "generateResponse", nodeLabel: "生成回答" },
+        { nodeName: "detectIntent", nodeLabel: "理解" },
+        { nodeName: "modelSelect", nodeLabel: "模型" },
+        { nodeName: "generateResponse", nodeLabel: "生成" },
       ];
     case "auto":
     default:
       return [
-        { nodeName: "detectIntent", nodeLabel: "意图识别" },
-        { nodeName: "modelSelect", nodeLabel: "选择模型" },
-        { nodeName: "searchKnowledge", nodeLabel: "知识检索", toolName: "searchKnowledge" },
-        { nodeName: "searchStructured", nodeLabel: "数据库查询", toolName: "searchStructured" },
-        { nodeName: "decision", nodeLabel: "分析问题" },
-        { nodeName: "generateResponse", nodeLabel: "生成回答" },
+        { nodeName: "detectIntent", nodeLabel: "理解" },
+        { nodeName: "modelSelect", nodeLabel: "模型" },
+        { nodeName: "searchKnowledge", nodeLabel: "检索", toolName: "searchKnowledge" },
+        { nodeName: "searchStructured", nodeLabel: "查询", toolName: "searchStructured" },
+        { nodeName: "decision", nodeLabel: "分析" },
+        { nodeName: "generateResponse", nodeLabel: "生成" },
       ];
   }
 }

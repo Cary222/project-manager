@@ -52,6 +52,7 @@ model User {
   policyAuditLogs        PolicyAuditLog[]        @relation("PolicyAuditLogs")
   subAgentRuns           SubAgentRun[]           @relation("SubAgentRuns")
   createdMeetings        ProjectMeeting[]        @relation("MeetingCreator")
+  piSessionOwnerships   PiSessionOwnership[]      @relation("PiSessionOwner")
 
   @@schema("pm")
 }
@@ -1149,6 +1150,27 @@ model SubAgentRun {
   @@index([status, startedAt(sort: Desc)])
   @@index([agentType, startedAt(sort: Desc)])
   @@index([sessionId])
+  @@schema("pm")
+}
+
+/// Persistent ProjectHub owner projection for Pi's file-backed sessions.
+/// This is intentionally distinct from SubAgentRun: one session may have many executions.
+model PiSessionOwnership {
+  id          String   @id @default(cuid())
+  piSessionId String   @unique
+  userId      String
+  projectId   String?
+  ticketId    String?
+  source      String
+  deletedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation("PiSessionOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt(sort: Desc)])
+  @@index([projectId])
+  @@index([ticketId])
   @@schema("pm")
 }
 

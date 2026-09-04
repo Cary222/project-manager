@@ -46,16 +46,19 @@ export interface UserProfile {
 
 export async function createConversation(
   userId: string,
-  firstMessage?: string
+  firstMessage?: string,
+  category?: "CHAT" | "WORK"
 ): Promise<ConversationListItem> {
+  const defaultTitle = category === "WORK" ? "工作任务向导" : "新对话";
   const title = firstMessage
     ? firstMessage.slice(0, 20) + (firstMessage.length > 20 ? "..." : "")
-    : "新对话";
+    : defaultTitle;
 
   const conversation = await prisma.aiConversation.create({
     data: {
       userId,
       title,
+      category: category ?? "CHAT",
     },
   });
 

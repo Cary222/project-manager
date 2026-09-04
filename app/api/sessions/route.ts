@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/shared/lib/permissions";
+import { isPiOwnershipEnabled } from "@/features/ai/pi-integration/feature-flags";
+import { listOwnedPiSessionIds } from "@/features/ai/pi-integration/pi-session-ownership";
 import {
   attachSessionProjectInfo,
   listAllSessions,
@@ -15,18 +17,29 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   try {
-    await requireSession();
+    const authSession = await requireSession();
     const force = new URL(req.url).searchParams.get("force") === "1";
     const [persistedSessions, runtimeSessions] = await Promise.all([
       listAllSessions({ force }),
       attachSessionProjectInfo(getRpcSessionInfos()),
     ]);
-    const sessions = mergeSessionLists(persistedSessions, runtimeSessions);
+    const allSessions = mergeSessionLists(persistedSessions, runtimeSessions);
+    const ownedIds = isPiOwnershipEnabled()
+      ? await listOwnedPiSessionIds(authSession.user.id)
+      : null;
+    const sessions = ownedIds
+      ? allSessions.filter((session) => ownedIds.has(session.id))
+      : allSessions;
+    const runningSessionIds = getRunningRpcSessionIds();
     return NextResponse.json(
       {
         sessions,
-        runningSessionIds: getRunningRpcSessionIds(),
-        completionNotificationSuppressedSessionIds: getCompletionNotificationSuppressedRpcSessionIds(),
+        runningSessionIds: ownedIds
+          ? runningSessionIds.filter((sessionId) => ownedIds.has(sessionId))
+          : runningSessionIds,
+        completionNotificationSuppressedSessionIds: getCompletionNotificationSuppressedRpcSessionIds().filter(
+          (sessionId) => !ownedIds || ownedIds.has(sessionId),
+        ),
       },
       { headers: { "Cache-Control": "no-store" } },
     );

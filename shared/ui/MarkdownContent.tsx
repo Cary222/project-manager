@@ -162,7 +162,7 @@ export function MarkdownContent({ content, collapsible = false, collapsedHeight 
                 if (!srcStr) return null;
                 const altStr = String(alt ?? "");
                 return (
-                  // eslint-disable-next-line @next/next/no-img-element
+                   
                   <a
                     href={srcStr}
                     target="_blank"

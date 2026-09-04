@@ -386,6 +386,8 @@ export function ChatReviewPanel({
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const isComposingRef = useRef(false);
+  const lastCompositionEndAtRef = useRef(0);
 
   // ── 注入初始 approve 气泡（draft 首次出现时，父组件轮询到草稿后自动触发）──
   // draft 每次因 revise 而更新内容时（highlights/tasks/nextPlan/rawMarkdown/_error 任一变化），
@@ -417,7 +419,7 @@ export function ChatReviewPanel({
           );
       return [...withoutOldPending, msg];
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [draft]);
 
   // ── 所有 action（approve / revise / cancel）的统一处理器 ──────────────────
@@ -558,9 +560,25 @@ export function ChatReviewPanel({
     [messages, workflowRunId, isSending]
   );
 
+  const handleCompositionStart = useCallback(() => {
+    isComposingRef.current = true;
+  }, []);
+
+  const handleCompositionEnd = useCallback(() => {
+    isComposingRef.current = false;
+    lastCompositionEndAtRef.current = Date.now();
+  }, []);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      const isComposing =
+        isComposingRef.current ||
+        e.nativeEvent.isComposing ||
+        e.keyCode === 229 ||
+        Date.now() - lastCompositionEndAtRef.current < 100;
+
       if (e.key === "Enter" && !e.shiftKey) {
+        if (isComposing) return;
         e.preventDefault();
         void sendMessage(input);
       }
@@ -643,6 +661,8 @@ export function ChatReviewPanel({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
             placeholder="告诉 AI 如何调整周报...（Enter 发送，Shift+Enter 换行）"
             rows={2}
             disabled={isSending}
