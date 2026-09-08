@@ -1,125 +1,141 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
-import { useVoiceSession } from "./use-voice-session";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-export type SpeechInputStatus =
-  | "idle"
-  | "recording"
-  | "transcribing"
-  | "error";
+export type SpeechInputStatus = "idle" | "recording" | "transcribing" | "error";
 
 export interface UseSpeechInputOptions {
-  /** 录音超时时间（毫秒），默认 60 秒 */
   timeoutMs?: number;
-  /** 识别完成回调 */
   onTranscribe?: (text: string) => void;
-  /** 错误回调 */
   onError?: (error: string) => void;
 }
 
 export interface UseSpeechInputReturn {
-  /** 录音状态 */
   status: SpeechInputStatus;
-  /** 已录制时长（秒） */
   duration: number;
-  /** 识别结果文本 */
   transcript: string;
-  /** 开始录音 */
   startRecording: () => Promise<void>;
-  /** 停止录音并触发识别 */
   stopRecording: () => void;
-  /** 重置状态 */
   reset: () => void;
-  /** 主动设置识别结果（用于外部填充） */
   setTranscript: (text: string) => void;
 }
 
+function formatForMimeType(mimeType: string): "webm" | "mp4" | "wav" {
+  if (mimeType.includes("mp4")) return "mp4";
+  if (mimeType.includes("wav")) return "wav";
+  return "webm";
+}
+
 /**
- * 语音输入 Hook（封装 useVoiceSession 实现）
- *
- * 使用 Realtime WebSocket API 进行实时语音转文字
- * - startRecording → 启动 WebSocket 会话，开始麦克风采集
- * - stopRecording → 提交音频缓冲，触发 response.create
+ * 录音完成后调用文件转写 API，而不是 Realtime WebSocket。
+ * 会议转录和普通语音输入共享同一 STT 凭证解析与模型选择链路；Realtime 模型是另一项可选能力。
  */
 export function useSpeechInput(
-  options: UseSpeechInputOptions = {}
+  options: UseSpeechInputOptions = {},
 ): UseSpeechInputReturn {
   const { timeoutMs = 60_000, onTranscribe, onError } = options;
-
   const [status, setStatus] = useState<SpeechInputStatus>("idle");
   const [duration, setDuration] = useState(0);
-  const [transcript, setTranscriptState] = useState("");
-
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [transcript, setTranscript] = useState("");
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-  // 内部使用 useVoiceSession (input 模式)
-  const voiceSession = useVoiceSession({
-    mode: "input",
-    onTranscript: (text) => {
-      setTranscriptState(text);
-      onTranscribe?.(text);
-    },
-    onError: (error) => {
-      setStatus("error");
-      onError?.(error);
-    },
-  });
-
-  const clearTimers = useCallback(() => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
+  const clearRecording = useCallback(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timerRef.current = null;
+    timeoutRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    recorderRef.current = null;
   }, []);
 
   const reset = useCallback(() => {
-    clearTimers();
+    abortRef.current?.abort();
+    recorderRef.current?.stop();
+    clearRecording();
     setStatus("idle");
     setDuration(0);
-    setTranscriptState("");
-    voiceSession.stopSession();
-  }, [clearTimers, voiceSession]);
-
-  // stopRecording must be declared before startRecording
-  // because startRecording's timeout callback references it.
-  const stopRecording = useCallback(() => {
-    clearTimers();
-    setStatus("transcribing");
-    // 提交音频缓冲并触发识别
-    voiceSession.finishInput();
-  }, [clearTimers, voiceSession]);
+    setTranscript("");
+  }, [clearRecording]);
 
   const startRecording = useCallback(async () => {
+    if (recorderRef.current || status === "transcribing") return;
     try {
-      reset();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      streamRef.current = stream;
+      recorderRef.current = recorder;
       setStatus("recording");
       setDuration(0);
-
-      // 启动语音会话
-      await voiceSession.startSession();
-
-      // 启动计时器
-      timerRef.current = setInterval(() => {
-        setDuration((prev) => prev + 1);
-      }, 1000);
-
-      // 超时保护
-      timeoutRef.current = setTimeout(() => {
-        void stopRecording();
-      }, timeoutMs);
+      setTranscript("");
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) chunks.push(event.data);
+      };
+      recorder.onstop = () => {
+        clearRecording();
+        if (!chunks.length) {
+          setStatus("idle");
+          return;
+        }
+        void (async () => {
+          const controller = new AbortController();
+          abortRef.current = controller;
+          try {
+            setStatus("transcribing");
+            const blob = new Blob(chunks, { type: recorder.mimeType });
+            const audio = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onerror = () => reject(new Error("无法读取录音"));
+              reader.onload = () =>
+                resolve(String(reader.result).split(",")[1] ?? "");
+              reader.readAsDataURL(blob);
+            });
+            const response = await fetch("/api/ai/audio/transcribe", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              signal: controller.signal,
+              body: JSON.stringify({
+                audio,
+                format: formatForMimeType(blob.type),
+              }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(payload.error ?? "语音转写失败");
+            const text = String(payload.data?.text ?? "").trim();
+            if (!text) throw new Error("未识别到语音内容");
+            setTranscript(text);
+            onTranscribe?.(text);
+            setStatus("idle");
+          } catch (error) {
+            if (error instanceof Error && error.name === "AbortError") return;
+            const message =
+              error instanceof Error ? error.message : "语音转写失败";
+            setStatus("error");
+            onError?.(message);
+          }
+        })();
+      };
+      recorder.start();
+      timerRef.current = setInterval(
+        () => setDuration((value) => value + 1),
+        1000,
+      );
+      timeoutRef.current = setTimeout(() => recorder.stop(), timeoutMs);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "启动录音失败";
+      const message = error instanceof Error ? error.message : "无法访问麦克风";
       setStatus("error");
       onError?.(message);
     }
-  }, [reset, timeoutMs, onError, voiceSession, stopRecording]);
+  }, [clearRecording, onError, onTranscribe, status, timeoutMs]);
 
+  const stopRecording = useCallback(() => recorderRef.current?.stop(), []);
+
+  useEffect(() => () => reset(), [reset]);
   return {
     status,
     duration,
@@ -127,6 +143,6 @@ export function useSpeechInput(
     startRecording,
     stopRecording,
     reset,
-    setTranscript: setTranscriptState,
+    setTranscript,
   };
 }

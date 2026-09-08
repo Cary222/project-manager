@@ -202,7 +202,7 @@ try {
 
 ```bash
 # 1. 启动 dev server
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm run dev
 # 期望：Local: http://localhost:3003
 
@@ -220,7 +220,7 @@ npm run dev
 ### 6.1 单元 / 脚本验证
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 ./node_modules/.bin/tsx --env-file=.env.local scripts/profile-actions-unit-test.ts
 ```
 

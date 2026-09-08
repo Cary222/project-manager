@@ -62,7 +62,7 @@ is_background: true
 ### 2. 必跑命令(第一件事)
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npx tsc --noEmit 2>&1 | head -100
 ```
 

@@ -46,8 +46,8 @@ describe("Timeline step-by-step timing and historical duration calculation", () 
   it("ensures buildStepPlan matches NODE_STEP_LABELS to prevent duplicate steps", () => {
     const templates = buildStepPlan("auto");
     const labels = templates.map((t) => t.nodeLabel);
-    // Should be ["理解", "模型", "检索", "查询", "分析", "生成"]
-    expect(labels).toEqual(["理解", "模型", "检索", "查询", "分析", "生成"]);
+    // Should be ["理解", "模型", "检索", "查询", "生成"]
+    expect(labels).toEqual(["理解", "模型", "检索", "查询", "生成"]);
   });
 
   it("merges backend tasks cleanly over placeholders without producing duplicate steps", () => {

@@ -143,7 +143,7 @@ import { resolveUser } from "@/features/ai/core/resolvers/user-resolver";
 
 ```bash
 # 1. 安装依赖
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm install
 
 # 2. 启动开发服务器
@@ -160,7 +160,7 @@ curl -s http://localhost:3003/api/auth/session | head -c 100
 ### 6.1 单元测试
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npx vitest run features/ai --reporter=verbose
 ```
 

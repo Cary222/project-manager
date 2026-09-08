@@ -133,7 +133,7 @@ SIRV_CLIENT_SECRET=your_client_secret
 SIRV_ACCOUNT=your_account_name
 
 # 2. 安装依赖
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm install
 
 # 3. 启动开发服务器
@@ -150,7 +150,7 @@ npm run build && npm run start
 ### 6.1 Sirv 上传测试脚本
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npx tsx scripts/test-sirv-upload.ts
 ```
 

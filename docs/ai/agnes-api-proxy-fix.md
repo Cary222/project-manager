@@ -117,7 +117,7 @@ export const agnes = createOpenAI({
 
 ```bash
 # 1. 重启 dev server（修改代码后必须重启）
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 kill $(lsof -ti:3003) 2>/dev/null; sleep 1
 npm run dev > /dev/null 2>&1 &
 sleep 5

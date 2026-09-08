@@ -8,6 +8,7 @@ import {
 } from "./ProjectMeetingDetailModal";
 import { useToast } from "@/shared/lib/use-toast";
 import { IconBook } from "@/shared/ui/icons";
+import { meetingUploadFileName } from "@/features/project/lib/meeting-upload";
 
 interface Props {
   project: {
@@ -320,7 +321,7 @@ function CreateMeetingModal({
       const formData = new FormData();
       formData.append("title", title.trim());
       formData.append("meetingDate", meetingDate);
-      formData.append("file", file);
+      formData.append("file", file, meetingUploadFileName(file));
 
       setUploadProgress(60);
 

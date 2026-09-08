@@ -22,6 +22,8 @@ export interface UseVoiceSessionOptions {
   onAiResponse?: (text: string) => void;
   /** 错误回调 */
   onError?: (error: string) => void;
+  /** Realtime 回复生命周期（用于界面显示聆听、思考、播报状态） */
+  onResponseState?: (state: "thinking" | "speaking" | "listening") => void;
 }
 
 export interface UseVoiceSessionReturn {
@@ -124,8 +126,7 @@ function parseVoiceEvent(
 export function useVoiceSession(
   options: UseVoiceSessionOptions = {}
 ): UseVoiceSessionReturn {
-  const { mode = "output", onTranscript, onAiResponse, onError } = options;
-
+  const { mode = "output", onTranscript, onAiResponse, onError, onResponseState } = options;
   const [status, setStatus] = useState<VoiceSessionStatus>("idle");
   const [transcript, setTranscript] = useState("");
   const [aiResponse, setAiResponse] = useState("");
@@ -189,6 +190,7 @@ export function useVoiceSession(
       ws.onopen = async () => {
         setStatus("connected");
         console.log("[useVoiceSession] WebSocket 已连接，发送 session.update");
+        onResponseState?.("listening");
 
         // 发送 session 配置
         send({
@@ -279,6 +281,14 @@ export function useVoiceSession(
               // 配置已发送，无需额外处理
               break;
 
+            case "response.created":
+              onResponseState?.("thinking");
+              break;
+
+            case "input_audio_buffer.speech_started":
+              onResponseState?.("listening");
+              break;
+
             case "conversation.item.input_audio_transcription.completed":
               if (msg.text) {
                 setTranscript((prev) => prev + msg.text);
@@ -287,6 +297,7 @@ export function useVoiceSession(
               break;
 
             case "response.audio.delta":
+              onResponseState?.("speaking");
               if (msg.audioDelta && pcmPlayerRef.current) {
                 pcmPlayerRef.current.playChunk(msg.audioDelta);
               }
@@ -359,7 +370,7 @@ export function useVoiceSession(
       setStatus("error");
       onError?.(msg);
     }
-  }, [mode, onTranscript, onAiResponse, onError, send]);
+  }, [mode, onTranscript, onAiResponse, onError, onResponseState, send]);
 
   /**
    * 停止语音会话

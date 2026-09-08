@@ -103,6 +103,36 @@
       "skillPath": ".claude/skills/llm-streaming-response-handler/SKILL.md",
       "computedHash": "be2e51c55bb48af07641e03cd45b9701f3c79523134ca1d6f58cd25d46b39b41"
     },
+    "neo4j-document-import-skill": {
+      "source": "neo4j-contrib/neo4j-skills",
+      "sourceType": "github",
+      "skillPath": "neo4j-document-import-skill/SKILL.md",
+      "computedHash": "e7f8c5c20d05a01be85235655427ff5264308123f139ece6439ca38fb2cc36b1"
+    },
+    "neo4j-graphrag-skill": {
+      "source": "neo4j-contrib/neo4j-skills",
+      "sourceType": "github",
+      "skillPath": "neo4j-graphrag-skill/SKILL.md",
+      "computedHash": "64a0594bfb1174560eb9f928f45c145c39cc28abe6ecfba355af5651f194915c"
+    },
+    "neo4j-modeling-skill": {
+      "source": "neo4j-contrib/neo4j-skills",
+      "sourceType": "github",
+      "skillPath": "neo4j-modeling-skill/SKILL.md",
+      "computedHash": "5b0e8d32c98e335591c48870c6b7eb9358daa516f0a345990b049b26fc850223"
+    },
+    "neo4j-nvl-skill": {
+      "source": "neo4j-contrib/neo4j-skills",
+      "sourceType": "github",
+      "skillPath": "neo4j-nvl-skill/SKILL.md",
+      "computedHash": "faf9555c6fc6e487aed11049c821dc95db789aec5371fccc9c1fc8e0171bc841"
+    },
+    "neo4j-vector-index-skill": {
+      "source": "neo4j-contrib/neo4j-skills",
+      "sourceType": "github",
+      "skillPath": "neo4j-vector-index-skill/SKILL.md",
+      "computedHash": "7a2eed7f61e4d33d9a85f335a00645d28ae4055165aa5fbe761af9681f7df88a"
+    },
     "openai-whisper": {
       "source": "openclaw/openclaw",
       "sourceType": "github",

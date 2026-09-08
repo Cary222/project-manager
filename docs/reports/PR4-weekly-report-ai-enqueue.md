@@ -259,7 +259,7 @@ if (runPr4) {
 
 ```bash
 # 1. 启动 dev server
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm run dev
 
 # 2. 浏览器手测

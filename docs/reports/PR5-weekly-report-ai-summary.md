@@ -362,7 +362,7 @@ export function WeeklyReportRegenerateButton({ reportId }: Props) {
 
 ```bash
 # 1. 装新依赖
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm install
 
 # 2. 启动 dev server（已有 schema 无需重新 prisma generate）
@@ -384,7 +384,7 @@ npm run dev
 ### 6.1 单元测试
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 ./node_modules/.bin/tsx --env-file=.env.local scripts/weekly-report-bg-job-unit-test.ts
 ```
 

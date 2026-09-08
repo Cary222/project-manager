@@ -134,30 +134,6 @@ export async function queryCommit(input: CommitQueryInput, viewerUserId?: string
       };
     }
 
-    // >= 5 条时触发 HIL
-    if (commits.length >= DISAMBIGUATION_THRESHOLDS.commit) {
-      const commitCandidates = commits.map((c) => ({
-        id: c.id,
-        label: `${c.commitSha.slice(0, 7)} ${c.subject}（${new Date(c.committedAt).toLocaleDateString("zh-CN")}）`,
-        summary: `${c.author} | 分支 ${c.branches.join(", ") || "无"}`,
-      }));
-      return {
-        summary: `找到 ${resolved.user.name}${windowLabel ? ` ${windowLabel}内 ` : " "}${commits.length} 条提交，请选择：`,
-        sources: [],
-        attribution: {
-          kind: "disambiguation" as const,
-          entityType: "commit" as const,
-          candidates: commitCandidates,
-          count: commits.length,
-        },
-        decision: {
-          type: "human" as const,
-          reason: `找到 ${commits.length} 条提交，需要人工选择`,
-          entityType: "commit",
-          candidates: commitCandidates,
-        },
-      };
-    }
 
     const lines = [`${resolved.user.name}${windowLabel ? ` ${windowLabel}` : ""} 的提交（共 ${commits.length} 条）：`];
     const sources: SourceReference[] = commits.map((c, i) => ({

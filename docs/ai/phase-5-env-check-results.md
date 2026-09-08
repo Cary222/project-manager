@@ -107,7 +107,7 @@ const modelRuntime = await ModelRuntime.create({
 
 ```bash
 # 方案 A: 从本地推送到远程
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 git add scripts/phase-0-pi-spike/
 git commit -m "Add Phase 0 Pi SDK verification scripts"
 git push origin main

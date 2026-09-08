@@ -116,7 +116,7 @@ ws.onopen = async () => {
 ### 方案：重启服务
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm run build
 ```
 

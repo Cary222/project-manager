@@ -35,7 +35,7 @@ Cannot find module '../../app/api/ai/chat/route.js'
 
 待修清单：
 
-1. `rm -rf /Users/vastgui/Desktop/project-manager/.next`（本地开发环境）
+1. `rm -rf /Volumes/WorkStation/project-manager/.next`（本地开发环境）
 2. CI/CD 流程中若执行 `tsc --noEmit`，需在该步骤前加 `rm -rf .next` 或 `npm run clean`（如果存在该 script）
 
 ---

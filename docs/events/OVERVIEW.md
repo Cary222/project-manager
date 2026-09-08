@@ -311,7 +311,7 @@ model ActivityLog {
 
 ```bash
 # 1. 切到项目根目录
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 
 # 2. 应用 schema 变更（首次部署需要）
 npx prisma migrate dev --schema=prisma/schema.prisma --name add_activity_log
@@ -336,7 +336,7 @@ psql "$DATABASE_URL" -c "SELECT action, \"actorName\", \"targetName\", \"dwellMs
 
 ```bash
 # 1. 计算函数（纯函数，可直接 node 验证）
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npx tsx -e "
 import { computeDwellMetrics } from './shared/lib/events/compute';
 console.log(computeDwellMetrics('page.view', { dwellMs: 5000 }));   // { dwellMs: 5000, isValidView: true }

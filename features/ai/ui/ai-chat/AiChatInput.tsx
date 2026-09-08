@@ -17,8 +17,6 @@ import {
   IconUpload,
   IconPlus,
 } from "@/shared/ui/icons";
-import { useSpeechInput } from "../hooks/use-speech-input";
-import { useVoiceSession } from "../hooks/use-voice-session";
 import { toast } from "sonner";
 import {
   compressImage,
@@ -96,6 +94,17 @@ interface AiChatInputProps {
   thinkingLevel?: ReasoningLevel;
   /** 思考强度变更回调 */
   onThinkingLevelChange?: (level: ReasoningLevel) => void;
+  /** 语音输入与语音对话的父级控制器（共享当前聊天的模型发送链路） */
+  voiceInputStatus?: "idle" | "recording" | "transcribing" | "error";
+  voiceInputDuration?: number;
+  voiceChatActive?: boolean;
+  voiceChatConnecting?: boolean;
+  voiceChatRecording?: boolean;
+  onVoiceInput?: () => void;
+  onVoiceChat?: () => void;
+  voiceInputText?: string;
+  onVoiceInputTextConsumed?: () => void;
+  onStopVoiceChat?: () => void;
 }
 
 export function AiChatInput({
@@ -111,6 +120,16 @@ export function AiChatInput({
   selectedModel,
   thinkingLevel: propThinkingLevel,
   onThinkingLevelChange,
+  voiceInputStatus = "idle",
+  voiceInputDuration = 0,
+  voiceChatActive = false,
+  voiceChatConnecting = false,
+  voiceChatRecording = false,
+  onVoiceInput,
+  onVoiceChat,
+  onStopVoiceChat,
+  voiceInputText,
+  onVoiceInputTextConsumed,
 }: AiChatInputProps) {
   const [message, setMessage] = useState("");
   const [images, setImages] = useState<
@@ -147,6 +166,15 @@ export function AiChatInput({
   );
   const currentThinking = propThinkingLevel ?? internalThinking;
 
+  useEffect(() => {
+    if (!voiceInputText) return;
+    const timer = setTimeout(() => {
+      setMessage((previous) => previous + (previous ? " " : "") + voiceInputText);
+      textareaRef.current?.focus();
+      onVoiceInputTextConsumed?.();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [voiceInputText, onVoiceInputTextConsumed]);
   // 点击外部关闭思考强度下拉菜单
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -201,75 +229,8 @@ export function AiChatInput({
   >(initialReferenceImages ?? []);
   const [uploadingReference, setUploadingReference] = useState(false);
 
-  // 语音输入（STT）状态
-  const [isVoiceInputRecording, setIsVoiceInputRecording] = useState(false);
-
-  // ── STT Hook ────────────────────────────────────────────────────────────────
-  const {
-    status: speechStatus,
-    duration: speechDuration,
-    startRecording: startSpeechRecording,
-    stopRecording: stopSpeechRecording,
-    reset: resetSpeechInput,
-  } = useSpeechInput({
-    timeoutMs: 60_000,
-    onTranscribe: (text) => {
-      setMessage((prev) => prev + text);
-      setIsVoiceInputRecording(false);
-      textareaRef.current?.focus();
-    },
-    onError: (error) => {
-      console.error("[AiChatInput] STT error:", error);
-      setIsVoiceInputRecording(false);
-    },
-  });
-
-  // ── Voice Chat Hook ───────────────────────────────────────────────────────
-  const {
-    startSession: startVoiceChat,
-    stopSession: stopVoiceChat,
-    status: voiceChatStatus,
-  } = useVoiceSession({
-    onTranscript: (text) => {
-      setMessage((prev) => prev + (prev ? " " : "") + text);
-    },
-    onAiResponse: (text) => {
-      // AI 回复完成后自动发送
-      if (text.trim()) {
-        onSend(text);
-      }
-    },
-    onError: (error) => {
-      console.error("[AiChatInput] Voice chat error:", error);
-    },
-  });
-
-  const isVoiceChatActive = voiceChatStatus === "connected";
-
-  // ── 语音输入处理 ──────────────────────────────────────────────────────────
-  const handleVoiceInput = useCallback(async () => {
-    if (isVoiceInputRecording || speechStatus === "recording") {
-      await stopSpeechRecording();
-      setIsVoiceInputRecording(false);
-    } else {
-      setIsVoiceInputRecording(true);
-      await startSpeechRecording();
-    }
-  }, [
-    isVoiceInputRecording,
-    speechStatus,
-    startSpeechRecording,
-    stopSpeechRecording,
-  ]);
-
-  // ── 语音对话处理 ──────────────────────────────────────────────────────────
-  const handleVoiceChat = useCallback(async () => {
-    if (voiceChatStatus === "connecting" || voiceChatStatus === "connected") {
-      stopVoiceChat();
-    } else {
-      await startVoiceChat();
-    }
-  }, [isVoiceChatActive, voiceChatStatus, startVoiceChat, stopVoiceChat]);
+  // 语音入口状态由父组件持有：它需要将转录交给已有的聊天 SSE 链路，
+  // 并在完整回复落库/显示后再调用既有 TTS 端点。
 
   // ── 图片处理 ──────────────────────────────────────────────────────────────
   const compressImageBlob = useCallback(
@@ -483,7 +444,6 @@ export function AiChatInput({
         textareaRef.current.style.height = "auto";
       }
 
-      resetSpeechInput();
 
       onSend(
         trimmed,
@@ -498,7 +458,6 @@ export function AiChatInput({
       disabled,
       onSend,
       onChatImagesChange,
-      resetSpeechInput,
     ],
   );
 
@@ -564,10 +523,18 @@ export function AiChatInput({
   };
 
   const hasContent = message.trim().length > 0 || images.length > 0;
-  const isRecording = speechStatus === "recording";
-  const isTranscribing = speechStatus === "transcribing";
-  const isVoiceChatConnecting = voiceChatStatus === "connecting";
-
+  const isRecording = voiceInputStatus === "recording";
+  const isTranscribing = voiceInputStatus === "transcribing";
+  const isVoiceChatConnecting = voiceChatConnecting;
+  const isVoiceChatActive = voiceChatActive;
+  const handleVoiceChatButton = voiceChatRecording
+    ? onVoiceChat
+    : isVoiceChatActive
+      ? onStopVoiceChat
+      : onVoiceChat;
+  const voiceChatButtonLabel = isVoiceChatActive
+    ? "停止语音对话"
+    : "语音对话";
   const getVoiceInputButtonClass = (): string => {
     if (isGenerating) {
       return "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-ink-200 bg-ink-50 text-ink-300 transition disabled:cursor-not-allowed";
@@ -721,14 +688,11 @@ export function AiChatInput({
               <div className="flex items-center gap-1 text-xs text-red-500 mr-1">
                 <span className="flex h-2 w-2 animate-pulse rounded-full bg-red-500" />
                 <span className="tabular-nums font-mono font-medium">
-                  {formatDuration(speechDuration)}
+                  {formatDuration(voiceInputDuration)}
                 </span>
                 <button
                   type="button"
-                  onClick={() => {
-                    void stopSpeechRecording();
-                    setIsVoiceInputRecording(false);
-                  }}
+                  onClick={onVoiceInput}
                   className="flex h-4 w-4 items-center justify-center rounded-full bg-red-100 text-red-500 hover:bg-red-200"
                   aria-label="停止录音"
                 >
@@ -742,7 +706,7 @@ export function AiChatInput({
               <div className="flex items-center gap-1 text-xs text-brand-600 mr-1">
                 <span className="flex h-2 w-2 animate-pulse rounded-full bg-brand-500" />
                 <span className="font-medium">
-                  {isVoiceChatConnecting ? "连接中..." : "对话中"}
+                  {isVoiceChatConnecting ? "处理中..." : voiceChatRecording ? "聆听中..." : "播报中..."}
                 </span>
               </div>
             )}
@@ -880,21 +844,8 @@ export function AiChatInput({
             </button>
             <button
               type="button"
-              onClick={handleVoiceChat}
-              disabled={isVoiceChatActive || isVoiceChatConnecting}
-              className={getVoiceChatButtonClass()}
-              title="语音对话"
-              aria-label="语音对话"
-            >
-              <IconMicWave />
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              type="button"
-              onClick={handleVoiceInput}
-              disabled={isVoiceChatActive || isVoiceChatConnecting}
+              onClick={onVoiceInput}
+              disabled={isVoiceChatActive || isVoiceChatConnecting || isTranscribing}
               className={getVoiceInputButtonClass()}
               title={isRecording ? "停止录音" : "语音输入"}
               aria-label={isRecording ? "停止录音" : "语音输入"}
@@ -903,11 +854,34 @@ export function AiChatInput({
             </button>
             <button
               type="button"
-              onClick={handleVoiceChat}
-              disabled={isVoiceChatActive || isVoiceChatConnecting}
+              onClick={handleVoiceChatButton}
+              disabled={isVoiceChatConnecting || isRecording || isTranscribing}
               className={getVoiceChatButtonClass()}
-              title={isVoiceChatActive ? "停止语音对话" : "语音对话"}
-              aria-label={isVoiceChatActive ? "停止语音对话" : "语音对话"}
+              title={voiceChatButtonLabel}
+              aria-label={voiceChatButtonLabel}
+            >
+              <IconMicWave />
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={onVoiceInput}
+              disabled={isVoiceChatActive || isVoiceChatConnecting || isTranscribing}
+              className={getVoiceInputButtonClass()}
+              title={isRecording ? "停止录音" : "语音输入"}
+              aria-label={isRecording ? "停止录音" : "语音输入"}
+            >
+              {isRecording ? <IconX /> : <IconMic />}
+            </button>
+            <button
+              type="button"
+              onClick={handleVoiceChatButton}
+              disabled={isVoiceChatConnecting || isRecording || isTranscribing}
+              className={getVoiceChatButtonClass()}
+              title={voiceChatButtonLabel}
+              aria-label={voiceChatButtonLabel}
             >
               <IconMicWave />
             </button>

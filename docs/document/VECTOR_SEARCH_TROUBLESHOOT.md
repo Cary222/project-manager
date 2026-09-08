@@ -437,7 +437,7 @@ WHERE metadata IS NULL;
 
 ```bash
 # 本地跑 CLI 搜索（带 viewer）
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 source .env.local
 npm run search:search "BLE_UUID_SUMMARY" -- --limit=5
 
@@ -522,7 +522,7 @@ ORDER BY d."updatedAt" DESC;
 2. **批量补 embedding**：
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 source .env.local
 # 找出所有无 embedding 的 PKM 笔记 noteId，逐个补
 npm run search:embed
@@ -630,7 +630,7 @@ git-sync 和 ticket 更新触发同步索引时，embedding 服务抖动会导�
 **P0 — 立即执行**：
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 source .env.local
 npm run search:embed
 ```

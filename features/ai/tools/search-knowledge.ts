@@ -10,10 +10,12 @@ import { speculationCache } from "@/features/ai/search/speculation-cache";
  * through toolsContext.
  */
 let currentViewerUserId: string | null = null;
+let currentViewerRole: string | null = null;
 let currentConversationId: string | null = null;
 
-export function setSearchKnowledgeViewer(userId: string | null) {
+export function setSearchKnowledgeViewer(userId: string | null, role: string | null = null) {
   currentViewerUserId = userId;
+  currentViewerRole = role;
 }
 
 export function setSearchKnowledgeConversationId(conversationId: string | null) {
@@ -62,6 +64,8 @@ export const searchKnowledge = tool({
       const result = await retrieveContext(query, {
         limit,
         userId: currentViewerUserId,
+        viewerRole: currentViewerRole,
+        useGraph: true,
       });
       console.log(`[searchKnowledge.execute] query="${query.slice(0,40)}" results=${Array.isArray(result.results) ? result.results.length : typeof result.results} contextLen=${result.contextText.length} typeof_result=${typeof result} constructor=${result?.constructor?.name} keys=${result ? Object.keys(result).join(',') : 'null'}`);
 

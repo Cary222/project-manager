@@ -257,7 +257,7 @@ export default async function ProjectDocumentDetailPage({ params }: Params) {
 
 ```bash
 # === 本地（开发机） ===
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm install
 npx prisma generate
 npm run build

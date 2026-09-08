@@ -204,31 +204,6 @@ export async function queryTicket(
   const lines = [`找到 ${tickets.length} 个工单（显示前 ${Math.min(tickets.length, 20)} 个）：`];
   const sources: SourceReference[] = [];
 
-  // 多于阈值时触发 HIL，让用户选择具体工单
-  if (tickets.length >= DISAMBIGUATION_THRESHOLDS.ticket) {
-    const ticketCandidates = tickets.slice(0, 20).map((t) => ({
-      id: t.id,
-      label: `#${t.ticketNo} ${t.title}`,
-      summary: `${t.status} | P${t.priority} | ${t.project.name}`,
-    }));
-    return {
-      summary: `找到 ${tickets.length} 个工单，请选择想了解的具体工单：`,
-      sources: [],
-      attribution: {
-        kind: "disambiguation" as const,
-        entityType: "ticket" as const,
-        candidates: ticketCandidates,
-        count: tickets.length,
-      },
-      decision: {
-        type: "human" as const,
-        reason: `找到 ${tickets.length} 个工单，需要人工选择`,
-        entityType: "ticket",
-        candidates: ticketCandidates,
-      },
-    };
-  }
-
   for (let i = 0; i < Math.min(tickets.length, 10); i++) {
     const t = tickets[i];
     const deadline = t.deadline ? ` ⏰${new Date(t.deadline).toLocaleDateString("zh-CN")}` : "";

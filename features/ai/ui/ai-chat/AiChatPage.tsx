@@ -12,6 +12,7 @@ import type { WorkRoute } from "@/features/ai/agents/work/runtime/work-run-ref";
 import type { AiUserProfile } from "./UserProfilePanel";
 import type { AiMode, ChatToolMode } from "@/features/ai/types/modes";
 import type { ReasoningLevel } from "@/features/ai/llm/model-reasoning";
+import type { RagTrace } from "@/features/ai/search/rag-trace";
 
 type ChatMode = "conversation" | "work";
 
@@ -37,6 +38,7 @@ function AiChatPageInner() {
   // Panel collapse states (three-panel folding)
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [ragTrace, setRagTrace] = useState<RagTrace | null>(null);
 
   // Category filter for conversation sidebar
   const [conversationCategory, setConversationCategory] = useState<ConversationCategory>("ALL");
@@ -97,7 +99,7 @@ function AiChatPageInner() {
     }
     const newQuery = params.toString();
     const newUrl = newQuery ? `${pathname}?${newQuery}` : pathname;
-    router.replace(newUrl, { scroll: false });
+    window.history.replaceState(null, "", newUrl);
   }, [activeConversationId, mode, pathname, router, searchParams]);
 
   // Handle selecting a conversation from the sidebar
@@ -314,6 +316,7 @@ function AiChatPageInner() {
             selectedModel={selectedModel}
             onModelChange={handleModelChange}
             userProfile={userProfile}
+            ragTrace={ragTrace}
             onUserProfileChange={setUserProfile}
             onClose={() => setRightPanelOpen(false)}
             aiMode={aiMode}
@@ -346,6 +349,7 @@ function AiChatPageInner() {
             thinkingLevel={thinkingLevel}
             onThinkingLevelChange={setThinkingLevel}
             clearTrigger={clearTrigger}
+            onRagTraceChange={setRagTrace}
             initialMessage={pendingInitialMessage}
             initialImages={pendingInitialImages}
             onConversationCreated={handleConversationCreated}

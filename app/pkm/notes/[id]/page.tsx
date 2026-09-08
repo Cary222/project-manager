@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/shared/ui/AppShell";
+import { KnowledgeGraphSection } from "@/features/knowledge/ui/graph/KnowledgeGraphSection";
 import { MarkdownContent } from "@/shared/ui/MarkdownContent";
 import { IconArrowLeft, IconKnowledge, IconTag } from "@/shared/ui/icons";
 import { prisma } from "@/shared/db/client";
@@ -123,6 +124,7 @@ export default async function PkmNoteDetailPage({ params }: Params) {
 
           <NoteAttachments attachments={attachments} />
         </section>
+        <KnowledgeGraphSection noteId={note.id} />
 
         <section className="flex items-center gap-2 rounded-xl border border-brand-100 bg-brand-50/60 px-4 py-3 text-sm text-ink-600">
           <IconKnowledge className="h-4 w-4 text-brand-600" />

@@ -8,7 +8,9 @@ export interface SourceReference {
   index?: number;
   title: string;
   url: string;
-  type: "ticket" | "commit" | "note" | "doc" | "project" | "user" | "weekly_report";
+  type: "ticket" | "commit" | "note" | "doc" | "project" | "user" | "weekly_report" | "meeting";
+  sources?: string[];
+  knowledgePaths?: string[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -41,6 +43,7 @@ function SourceTypeIcon({ type }: { type: string }) {
     case "commit":
       return <IconRepo width={12} height={12} />;
     case "weekly_report":
+    case "meeting":
       return <IconReport width={12} height={12} />;
     case "note":
     case "doc":
@@ -57,6 +60,7 @@ function SourceTypeLabel({ type }: { type: string }) {
     case "user": return "用户";
     case "commit": return "提交";
     case "weekly_report": return "周报";
+    case "meeting": return "会议纪要";
     case "note": return "笔记";
     case "doc": return "项目文档";
     default: return "查看";
@@ -113,9 +117,16 @@ export function AiSourcesList({ sources }: AiSourcesListProps) {
                 ? `#${parseTicketNo(source.title) ?? source.title}`
                 : source.title}
             </span>
-            <span className="ml-auto shrink-0 rounded-full border border-ink-200 bg-ink-50 px-1.5 py-0.5 text-[10px] font-medium text-ink-500">
-              <SourceTypeLabel type={source.type} />
-            </span>
+            <div className="ml-auto flex items-center gap-1.5 shrink-0">
+              {source.sources?.includes("graph") && (
+                <span className="rounded-full border border-purple-200 bg-purple-50 px-1.5 py-0.5 text-[10px] font-medium text-purple-700" title={source.knowledgePaths?.join(" \n ")}>
+                  图谱关联
+                </span>
+              )}
+              <span className="rounded-full border border-ink-200 bg-ink-50 px-1.5 py-0.5 text-[10px] font-medium text-ink-500">
+                <SourceTypeLabel type={source.type} />
+              </span>
+            </div>
           </Link>
         ))}
       </div>

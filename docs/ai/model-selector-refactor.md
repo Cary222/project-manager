@@ -142,7 +142,7 @@ function detectProvider(
 
 ```bash
 # 1. 安装依赖
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm install
 
 # 2. 生成 Prisma Client（如有 schema 改动）

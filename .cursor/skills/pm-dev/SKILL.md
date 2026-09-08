@@ -18,7 +18,7 @@ description: >-
 
 | 场景 | 命令 |
 |------|------|
-| 🏃 起 dev server | `cd /Users/vastgui/Desktop/project-manager && npm run dev` |
+| 🏃 起 dev server | `cd /Volumes/WorkStation/project-manager && npm run dev` |
 | 🗄️ 同步 schema 到远程 DB | `npx prisma db push` |
 | 🖼️ 可视化远程 DB | `npx prisma studio` |
 | 🌱 Seed Counter | `npm run db:seed` |

@@ -4,10 +4,26 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { IconSearch, IconSettings, IconTask, IconTeam, IconEdit, IconMenu, IconRepo, IconBook } from "@/shared/ui/icons";
-import { BackLink, SimplePageHeader, HeaderSkeleton } from "@/shared/ui/headers";
+import {
+  IconSearch,
+  IconSettings,
+  IconTask,
+  IconTeam,
+  IconEdit,
+  IconMenu,
+  IconRepo,
+  IconBook,
+} from "@/shared/ui/icons";
+import {
+  BackLink,
+  SimplePageHeader,
+  HeaderSkeleton,
+} from "@/shared/ui/headers";
 import { type FileAttachment } from "@/features/knowledge/lib/pkm";
-import { AttachmentItem, type PreviewableFile } from "@/shared/ui/AttachmentItem";
+import {
+  AttachmentItem,
+  type PreviewableFile,
+} from "@/shared/ui/AttachmentItem";
 import { PriorityBadge } from "@/shared/ui/PriorityBadge";
 import { DocumentPreviewModal } from "@/shared/ui/DocumentPreviewModal";
 import { uploadProjectFile } from "@/features/knowledge/lib/upload";
@@ -17,8 +33,15 @@ import { useToast } from "@/shared/lib/use-toast";
 import { useRecentVisits } from "@/shared/lib/visits-context";
 import { ProjectMemberTab } from "@/features/project/ui/ProjectMemberTab";
 import { ProjectMeetingTab } from "@/features/project/ui/ProjectMeetingTab";
-import { type TicketStatus, type MyTicket } from "@/entities/ticket/model/types";
-import { TicketColumnsGrid, TicketColumnsSkeleton } from "@/features/task/ui/TicketColumn";
+import { KnowledgeGraphView } from "@/features/knowledge/ui/graph";
+import {
+  type TicketStatus,
+  type MyTicket,
+} from "@/entities/ticket/model/types";
+import {
+  TicketColumnsGrid,
+  TicketColumnsSkeleton,
+} from "@/features/task/ui/TicketColumn";
 import { isRoot } from "@/shared/lib/permissions-client";
 
 // ---- Types ----
@@ -117,7 +140,6 @@ function formatRelativeTime(date: Date): string {
 
 // ---- Progress bar ----
 
-
 // ---- Skeletons ----
 
 function KanbanSkeleton() {
@@ -126,7 +148,15 @@ function KanbanSkeleton() {
 
 // ---- Kanban columns ----
 
-function KanbanColumns({ tickets, query, sortByPriority }: { tickets: ProjectTicket[]; query: string; sortByPriority?: boolean }) {
+function KanbanColumns({
+  tickets,
+  query,
+  sortByPriority,
+}: {
+  tickets: ProjectTicket[];
+  query: string;
+  sortByPriority?: boolean;
+}) {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return tickets;
@@ -150,7 +180,9 @@ function KanbanColumns({ tickets, query, sortByPriority }: { tickets: ProjectTic
     for (const t of filtered) map[t.status].push(t);
     for (const k of Object.keys(map) as TicketStatus[]) {
       if (sortByPriority) {
-        map[k].sort((a, b) => a.priority - b.priority || b.ticketNo - a.ticketNo);
+        map[k].sort(
+          (a, b) => a.priority - b.priority || b.ticketNo - a.ticketNo,
+        );
       } else {
         map[k].sort((a, b) => b.ticketNo - a.ticketNo);
       }
@@ -158,7 +190,16 @@ function KanbanColumns({ tickets, query, sortByPriority }: { tickets: ProjectTic
     return map;
   }, [filtered, sortByPriority]);
 
-  return <TicketColumnsGrid grouped={grouped as Record<TicketStatus, import("@/features/task/ui/TicketColumn").TicketItem[]>} />;
+  return (
+    <TicketColumnsGrid
+      grouped={
+        grouped as Record<
+          TicketStatus,
+          import("@/features/task/ui/TicketColumn").TicketItem[]
+        >
+      }
+    />
+  );
 }
 
 // ---- Task tab content ----
@@ -210,7 +251,11 @@ function TaskTab({ tickets, taskCounts }: TaskTabProps) {
         </div>
       </div>
 
-      <KanbanColumns tickets={tickets} query={query} sortByPriority={sortByPriority} />
+      <KanbanColumns
+        tickets={tickets}
+        query={query}
+        sortByPriority={sortByPriority}
+      />
     </div>
   );
 }
@@ -274,7 +319,9 @@ function OverviewTab({
       .catch(() => {
         if (!cancelled) toast.error("负责人列表加载失败");
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [editing, project, toast]);
 
   async function handleSave() {
@@ -409,7 +456,10 @@ function OverviewTab({
           <InfoRow label="负责人" value={project.owner?.name || "—"} />
           <InfoRow label="成员数量" value={`${memberCount} 人`} />
           <InfoRow label="创建时间" value={createdAt} />
-          <InfoRow label="状态" value={STATUS_LABEL[project.status ?? "ACTIVE"]} />
+          <InfoRow
+            label="状态"
+            value={STATUS_LABEL[project.status ?? "ACTIVE"]}
+          />
         </div>
       )}
     </div>
@@ -493,7 +543,8 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
       uploader: string;
     }> = [];
     for (const note of project.pkmNotes ?? []) {
-      const atts = (note.attachments as FileAttachment[] | null | undefined) ?? [];
+      const atts =
+        (note.attachments as FileAttachment[] | null | undefined) ?? [];
       for (const att of atts) {
         if (!att.fileId) continue;
         items.push({
@@ -543,7 +594,9 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
       .filter((id): id is string => id !== null);
 
     // 去重 + 过滤掉已有数据的
-    const newIds = fileIds.filter((id) => !refsByFileId[id] && !refsLoading.has(id));
+    const newIds = fileIds.filter(
+      (id) => !refsByFileId[id] && !refsLoading.has(id),
+    );
     if (newIds.length === 0) return;
 
     setRefsLoading((prev) => new Set([...prev, ...newIds]));
@@ -579,7 +632,13 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
 
   // 聚合所有 fileId 对应的 TICKET / TICKET_COMMENT 引用（来源单子）
   const ticketRefs = useMemo(() => {
-    const result: Array<{ fileId: string; fileName: string | undefined; sourceType: string; sourceId: string; createdAt: string }> = [];
+    const result: Array<{
+      fileId: string;
+      fileName: string | undefined;
+      sourceType: string;
+      sourceId: string;
+      createdAt: string;
+    }> = [];
     for (const item of allAttachments) {
       const fileId = item.attachment.fileId;
       if (!fileId) continue;
@@ -588,7 +647,12 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
       for (const [st, items] of Object.entries(refs)) {
         if (st === "TICKET" || st === "TICKET_COMMENT") {
           for (const ref of items) {
-            result.push({ fileId, fileName: item.attachment.name, sourceType: st, ...ref });
+            result.push({
+              fileId,
+              fileName: item.attachment.name,
+              sourceType: st,
+              ...ref,
+            });
           }
         }
       }
@@ -612,7 +676,10 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
   return (
     <>
       {previewFile && (
-        <DocumentPreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+        <DocumentPreviewModal
+          file={previewFile}
+          onClose={() => setPreviewFile(null)}
+        />
       )}
       <div className="space-y-4">
         {/* Upload bar */}
@@ -630,7 +697,9 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
           <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
             <h2 className="mb-3 text-base font-semibold text-ink-900">
               来源单子
-              <span className="ml-2 text-sm font-normal text-ink-400">（{ticketRefs.length} 条）</span>
+              <span className="ml-2 text-sm font-normal text-ink-400">
+                （{ticketRefs.length} 条）
+              </span>
             </h2>
             <div className="flex flex-wrap gap-2">
               {ticketRefs.map((ref, i) => (
@@ -649,7 +718,9 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
           <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
             <h2 className="mb-4 text-base font-semibold text-ink-900">
               单子文档
-              <span className="ml-2 text-sm font-normal text-ink-400">（{ticketAttachments.length} 个文件）</span>
+              <span className="ml-2 text-sm font-normal text-ink-400">
+                （{ticketAttachments.length} 个文件）
+              </span>
             </h2>
             <ul className="space-y-2">
               {ticketAttachments.map((item, i) => {
@@ -657,7 +728,14 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
                 const att = item.attachment;
                 const mimeType = att.mimeType ?? "application/octet-stream";
                 const isImage = mimeType.startsWith("image/");
-                const canPreview = isImage || mimeType === "application/pdf" || mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || mimeType === "text/markdown" || mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                const canPreview =
+                  isImage ||
+                  mimeType === "application/pdf" ||
+                  mimeType ===
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+                  mimeType === "text/markdown" ||
+                  mimeType ===
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
                 const fileUrl = `/api/upload/${att.fileId}`;
                 const size = att.size ?? 0;
                 const sizeLabel =
@@ -668,7 +746,10 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
                       : `${(size / 1024 / 1024).toFixed(1)} MB`;
 
                 return (
-                  <li key={`${item.ticketId}-${att.fileId}-${i}`} className="flex flex-col gap-1">
+                  <li
+                    key={`${item.ticketId}-${att.fileId}-${i}`}
+                    className="flex flex-col gap-1"
+                  >
                     <div className="flex items-center gap-2 text-xs text-ink-400">
                       来源单子：
                       {ticketInfo ? (
@@ -679,7 +760,9 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
                           #{ticketInfo.ticketNo} {ticketInfo.title}
                         </Link>
                       ) : (
-                        <span className="truncate">{item.ticketId.slice(0, 8)}…</span>
+                        <span className="truncate">
+                          {item.ticketId.slice(0, 8)}…
+                        </span>
                       )}
                       {item.createdAt && (
                         <> · {item.createdAt.toLocaleDateString("zh-CN")}</>
@@ -709,14 +792,22 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
                         </div>
                       )}
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-ink-800">{att.name}</p>
+                        <p className="truncate text-sm font-medium text-ink-800">
+                          {att.name}
+                        </p>
                         <p className="text-xs text-ink-400">{sizeLabel}</p>
                       </div>
                       <div className="flex shrink-0 items-center gap-1.5">
                         {canPreview && (
                           <button
                             type="button"
-                            onClick={() => setPreviewFile({ name: att.name || "document", url: fileUrl, mimeType })}
+                            onClick={() =>
+                              setPreviewFile({
+                                name: att.name || "document",
+                                url: fileUrl,
+                                mimeType,
+                              })
+                            }
                             className="rounded-lg border border-ink-200 bg-white px-2 py-1 text-xs text-ink-600 hover:bg-brand-50 hover:border-brand-300 hover:text-brand-700"
                           >
                             预览
@@ -754,9 +845,11 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
                 const canPreview =
                   isImage ||
                   mimeType === "application/pdf" ||
-                  mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+                  mimeType ===
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
                   mimeType === "text/markdown" ||
-                  mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                  mimeType ===
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
                 const fileUrl = `/api/upload/${att.fileId}`;
                 const size = att.size ?? 0;
                 const sizeLabel =
@@ -767,38 +860,73 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
                       : `${(size / 1024 / 1024).toFixed(1)} MB`;
 
                 return (
-                  <li key={`${att.fileId}-${i}`} className="flex flex-col gap-1">
+                  <li
+                    key={`${att.fileId}-${i}`}
+                    className="flex flex-col gap-1"
+                  >
                     <div className="flex items-center gap-2 text-xs text-ink-400">
-                      <span className="rounded bg-brand-50 px-1.5 py-0.5 text-brand-600">项目文档</span>
+                      <span className="rounded bg-brand-50 px-1.5 py-0.5 text-brand-600">
+                        项目文档
+                      </span>
                       <span>上传者：{att.uploader}</span>
-                      {att.createdAt && <> · {new Date(att.createdAt).toLocaleDateString("zh-CN")}</>}
+                      {att.createdAt && (
+                        <>
+                          {" "}
+                          ·{" "}
+                          {new Date(att.createdAt).toLocaleDateString("zh-CN")}
+                        </>
+                      )}
                     </div>
                     <div className="flex items-center gap-3 rounded-lg border border-brand-100 bg-brand-50 px-3 py-2">
                       {isImage ? (
-                        <img src={fileUrl} alt={att.name} className="h-8 w-8 shrink-0 rounded object-cover" />
+                        <img
+                          src={fileUrl}
+                          alt={att.name}
+                          className="h-8 w-8 shrink-0 rounded object-cover"
+                        />
                       ) : (
                         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-brand-200">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-brand-600">
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            className="text-brand-600"
+                          >
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                             <polyline points="14,2 14,8 20,8" />
                           </svg>
                         </div>
                       )}
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-ink-800">{att.name}</p>
+                        <p className="truncate text-sm font-medium text-ink-800">
+                          {att.name}
+                        </p>
                         <p className="text-xs text-ink-400">{sizeLabel}</p>
                       </div>
                       <div className="flex shrink-0 items-center gap-1.5">
                         {canPreview && (
                           <button
                             type="button"
-                            onClick={() => setPreviewFile({ name: att.name || "document", url: fileUrl, mimeType })}
+                            onClick={() =>
+                              setPreviewFile({
+                                name: att.name || "document",
+                                url: fileUrl,
+                                mimeType,
+                              })
+                            }
                             className="rounded-lg border border-brand-200 bg-white px-2 py-1 text-xs text-brand-600 hover:bg-brand-50"
                           >
                             预览
                           </button>
                         )}
-                        <a href={fileUrl} download={att.name} className="rounded-lg border border-ink-200 bg-white px-2.5 py-1 text-xs text-ink-600 hover:bg-ink-100">
+                        <a
+                          href={fileUrl}
+                          download={att.name}
+                          className="rounded-lg border border-ink-200 bg-white px-2.5 py-1 text-xs text-ink-600 hover:bg-ink-100"
+                        >
                           下载
                         </a>
                       </div>
@@ -815,11 +943,16 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
           <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
             <h2 className="mb-4 text-base font-semibold text-ink-900">
               来源笔记
-              <span className="ml-2 text-sm font-normal text-ink-400">（{allAttachments.length} 个文件）</span>
+              <span className="ml-2 text-sm font-normal text-ink-400">
+                （{allAttachments.length} 个文件）
+              </span>
             </h2>
             <ul className="space-y-2">
               {allAttachments.map((item, i) => (
-                <li key={`${item.noteId}-${item.attachment.name}-${i}`} className="flex flex-col gap-1">
+                <li
+                  key={`${item.noteId}-${item.attachment.name}-${i}`}
+                  className="flex flex-col gap-1"
+                >
                   <div className="text-xs text-ink-400">
                     来源笔记：
                     <Link
@@ -842,13 +975,16 @@ function DocsTab({ project }: { project: ProjectWithStatus }) {
           </div>
         )}
 
-        {allAttachments.length === 0 && (project.projectAttachments ?? []).length === 0 && (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-ink-200 py-12 text-center">
-            <IconBook className="mb-3 h-10 w-10 text-ink-300" />
-            <p className="text-sm text-ink-500">暂无文档</p>
-            <p className="mt-1 text-xs text-ink-400">上传文件或关联笔记附件后在此展示</p>
-          </div>
-        )}
+        {allAttachments.length === 0 &&
+          (project.projectAttachments ?? []).length === 0 && (
+            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-ink-200 py-12 text-center">
+              <IconBook className="mb-3 h-10 w-10 text-ink-300" />
+              <p className="text-sm text-ink-500">暂无文档</p>
+              <p className="mt-1 text-xs text-ink-400">
+                上传文件或关联笔记附件后在此展示
+              </p>
+            </div>
+          )}
       </div>
     </>
   );
@@ -878,17 +1014,35 @@ function SettingsTab() {
 
 // ---- Tab navigation ----
 
-type TabKey = "overview" | "tasks" | "dispatch" | "code" | "docs" | "meetings" | "members" | "settings";
+type TabKey =
+  | "overview"
+  | "tasks"
+  | "dispatch"
+  | "code"
+  | "docs"
+  | "graph"
+  | "meetings"
+  | "members"
+  | "settings";
 
 const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
-  { key: "overview",  label: "概览",     icon: <IconTask className="h-4 w-4" /> },
-  { key: "tasks",     label: "任务",     icon: <IconTask className="h-4 w-4" /> },
-  { key: "dispatch",  label: "派单",     icon: <IconTask className="h-4 w-4" /> },
-  { key: "code",      label: "代码",     icon: <IconRepo className="h-4 w-4" /> },
-  { key: "docs",      label: "文档",     icon: <IconBook className="h-4 w-4" /> },
-  { key: "meetings",  label: "会议纪要", icon: <IconBook className="h-4 w-4" /> },
-  { key: "members",   label: "成员",     icon: <IconTeam className="h-4 w-4" /> },
-  { key: "settings",  label: "设置",     icon: <IconSettings className="h-4 w-4" /> },
+  { key: "overview", label: "概览", icon: <IconTask className="h-4 w-4" /> },
+  { key: "tasks", label: "任务", icon: <IconTask className="h-4 w-4" /> },
+  { key: "dispatch", label: "派单", icon: <IconTask className="h-4 w-4" /> },
+  { key: "code", label: "代码", icon: <IconRepo className="h-4 w-4" /> },
+  { key: "docs", label: "文档", icon: <IconBook className="h-4 w-4" /> },
+  { key: "graph", label: "图谱", icon: <IconRepo className="h-4 w-4" /> },
+  {
+    key: "meetings",
+    label: "会议纪要",
+    icon: <IconBook className="h-4 w-4" />,
+  },
+  { key: "members", label: "成员", icon: <IconTeam className="h-4 w-4" /> },
+  {
+    key: "settings",
+    label: "设置",
+    icon: <IconSettings className="h-4 w-4" />,
+  },
 ];
 
 function TabNav({
@@ -919,7 +1073,9 @@ function TabNav({
             {tab.key === "tasks" && taskCount > 0 && (
               <span
                 className={`rounded-full px-1.5 py-0.5 text-[11px] ${
-                  isActive ? "bg-brand-100 text-brand-600" : "bg-ink-100 text-ink-500"
+                  isActive
+                    ? "bg-brand-100 text-brand-600"
+                    : "bg-ink-100 text-ink-500"
                 }`}
               >
                 {taskCount}
@@ -934,14 +1090,26 @@ function TabNav({
 
 // ---- Task counts ----
 
-type TaskCounts = { total: number; developing: number; test: number; delivered: number; done: number };
+type TaskCounts = {
+  total: number;
+  developing: number;
+  test: number;
+  delivered: number;
+  done: number;
+};
 
-function computeTaskCounts(data: { project: ProjectWithStatus } | undefined): TaskCounts {
-  const resp = (data?.project as ProjectWithStatus | undefined)?.responsibilities ?? [];
-  const tickets = resp.flatMap((r) => r.modules ?? []).flatMap((m) => m.tickets ?? []);
+function computeTaskCounts(
+  data: { project: ProjectWithStatus } | undefined,
+): TaskCounts {
+  const resp =
+    (data?.project as ProjectWithStatus | undefined)?.responsibilities ?? [];
+  const tickets = resp
+    .flatMap((r) => r.modules ?? [])
+    .flatMap((m) => m.tickets ?? []);
   return {
     total: tickets.length,
-    developing: tickets.filter((t: MyTicket) => t.status === "DEVELOPING").length,
+    developing: tickets.filter((t: MyTicket) => t.status === "DEVELOPING")
+      .length,
     test: tickets.filter((t: MyTicket) => t.status === "READY_FOR_TEST").length,
     delivered: tickets.filter((t: MyTicket) => t.status === "DELIVERED").length,
     done: tickets.filter((t: MyTicket) => t.status === "DONE").length,
@@ -974,31 +1142,54 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
 
   const [mounted, setMounted] = useState(false);
   const tabParam = searchParams.get("tab") as TabKey | null;
-  const validTabs: TabKey[] = ["overview", "tasks", "dispatch", "code", "docs", "meetings", "members", "settings"];
+  const validTabs: TabKey[] = [
+    "overview",
+    "tasks",
+    "dispatch",
+    "code",
+    "docs",
+    "graph",
+    "meetings",
+    "members",
+    "settings",
+  ];
   const [activeTab, setActiveTab] = useState<TabKey>(
-    tabParam && validTabs.includes(tabParam) ? tabParam : "overview"
+    tabParam && validTabs.includes(tabParam) ? tabParam : "overview",
   );
   const [overviewEditing, setOverviewEditing] = useState(false);
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const currentUserId = session?.user?.id ?? "";
   const userIsRoot = isRoot(session?.user?.role);
-  const isOwner = project.members?.some(
-    (m) => m.user.id === currentUserId && m.role === "OWNER"
-  ) ?? false;
+  const isOwner =
+    project.members?.some(
+      (m) => m.user.id === currentUserId && m.role === "OWNER",
+    ) ?? false;
   const canEditProject = mounted && (userIsRoot || isOwner);
 
   const taskCounts = useMemo(() => computeTaskCounts({ project }), [project]);
 
   const handleTabChange = (tab: TabKey) => {
     setActiveTab(tab);
-    scheduleRecord({ projectId: project.id, projectName: project.name, tabKey: tab, tabLabel: TABS.find((t) => t.key === tab)?.label ?? tab });
+    scheduleRecord({
+      projectId: project.id,
+      projectName: project.name,
+      tabKey: tab,
+      tabLabel: TABS.find((t) => t.key === tab)?.label ?? tab,
+    });
   };
 
   useEffect(() => {
     const tabLabel = TABS.find((t) => t.key === activeTab)?.label ?? activeTab;
-    scheduleRecord({ projectId: project.id, projectName: project.name, tabKey: activeTab, tabLabel });
+    scheduleRecord({
+      projectId: project.id,
+      projectName: project.name,
+      tabKey: activeTab,
+      tabLabel,
+    });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tickets = useMemo<ProjectTicket[]>(() => {
@@ -1015,7 +1206,9 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
           project: { id: project.id, name: project.name },
           module: {
             name: t.module?.name ?? "",
-            responsibility: { kind: t.module?.responsibility?.kind ?? "PROGRAM" },
+            responsibility: {
+              kind: t.module?.responsibility?.kind ?? "PROGRAM",
+            },
           },
         })) ?? []
     );
@@ -1046,7 +1239,9 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
           <div className="min-w-0 flex-1">
             {/* Row 1: name + status + actions */}
             <div className="flex items-center gap-3">
-              <h1 className="text-xl font-semibold text-ink-900 truncate">{project.name}</h1>
+              <h1 className="text-xl font-semibold text-ink-900 truncate">
+                {project.name}
+              </h1>
               <span
                 className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${
                   STATUS_STYLE[status] ?? "bg-ink-100 text-ink-500"
@@ -1055,21 +1250,21 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
                 {STATUS_LABEL[status]}
               </span>
               <div className="ml-auto flex items-center gap-2">
-              {canEditProject && (
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-sm text-ink-700 transition hover:border-brand-300 hover:bg-brand-50"
-                  onClick={() => {
-                    if (activeTab !== "overview") {
-                      setActiveTab("overview");
-                    }
-                    setOverviewEditing(true);
-                  }}
-                >
-                  <IconEdit className="h-4 w-4" />
-                  编辑项目
-                </button>
-              )}
+                {canEditProject && (
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-sm text-ink-700 transition hover:border-brand-300 hover:bg-brand-50"
+                    onClick={() => {
+                      if (activeTab !== "overview") {
+                        setActiveTab("overview");
+                      }
+                      setOverviewEditing(true);
+                    }}
+                  >
+                    <IconEdit className="h-4 w-4" />
+                    编辑项目
+                  </button>
+                )}
                 <button
                   type="button"
                   className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-ink-200 bg-white text-ink-700 transition hover:border-brand-300 hover:bg-brand-50"
@@ -1084,19 +1279,23 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
             {/* Row 2: meta info */}
             <p className="mt-2 text-sm text-ink-500">
               <span>
-                负责人：<span className="font-medium text-ink-700">{ownerName}</span>
+                负责人：
+                <span className="font-medium text-ink-700">{ownerName}</span>
               </span>
               <span className="mx-2 text-ink-300">·</span>
               <span>
-                成员：<span className="font-medium text-ink-700">{memberCount}</span>
+                成员：
+                <span className="font-medium text-ink-700">{memberCount}</span>
               </span>
               <span className="mx-2 text-ink-300">·</span>
               <span>
-                创建时间：<span className="font-medium text-ink-700">{createdAt}</span>
+                创建时间：
+                <span className="font-medium text-ink-700">{createdAt}</span>
               </span>
               <span className="mx-2 text-ink-300">·</span>
               <span>
-                更新时间：<span className="font-medium text-ink-700">{updatedAt}</span>
+                更新时间：
+                <span className="font-medium text-ink-700">{updatedAt}</span>
               </span>
             </p>
           </div>
@@ -1113,7 +1312,7 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
       </div>
 
       {/* Tab content */}
-      {activeTab === "overview"  && (
+      {activeTab === "overview" && (
         <OverviewTab
           project={project}
           editing={overviewEditing}
@@ -1126,12 +1325,15 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
           canEdit={canEditProject}
         />
       )}
-      {activeTab === "tasks"     && <TaskTab tickets={tickets} taskCounts={taskCounts} />}
-      {activeTab === "dispatch"  && <DispatchTab projectId={project.id} />}
-      {activeTab === "code"      && <CodeTab />}
-      {activeTab === "docs"      && <DocsTab project={project} />}
-      {activeTab === "meetings"  && <ProjectMeetingTab project={project} />}
-      {activeTab === "members"   && (
+      {activeTab === "tasks" && (
+        <TaskTab tickets={tickets} taskCounts={taskCounts} />
+      )}
+      {activeTab === "dispatch" && <DispatchTab projectId={project.id} />}
+      {activeTab === "code" && <CodeTab />}
+      {activeTab === "docs" && <DocsTab project={project} />}
+      {activeTab === "graph" && <KnowledgeGraphView projectId={project.id} />}
+      {activeTab === "meetings" && <ProjectMeetingTab project={project} />}
+      {activeTab === "members" && (
         <ProjectMemberTab
           projectId={project.id}
           members={project.members ?? []}
@@ -1140,7 +1342,7 @@ export function ProjectDetail({ project }: { project: ProjectWithStatus }) {
           isOwner={isOwner}
         />
       )}
-      {activeTab === "settings"   && <SettingsTab />}
+      {activeTab === "settings" && <SettingsTab />}
     </div>
   );
 }
@@ -1162,7 +1364,11 @@ export function ProjectDetailLoading() {
             </div>
             <div className="flex gap-4">
               {[120, 60, 100, 80].map((w, i) => (
-                <div key={i} className={`h-4 rounded bg-ink-100`} style={{ width: w }} />
+                <div
+                  key={i}
+                  className={`h-4 rounded bg-ink-100`}
+                  style={{ width: w }}
+                />
               ))}
             </div>
           </div>

@@ -219,7 +219,7 @@ app/api/reports/                             ← 业务聚类 API
 
 ```bash
 # 1. 启动 dev server
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm run dev
 # 期望：Local: http://localhost:3003
 
@@ -235,7 +235,7 @@ npm run dev
 ### 6.1 单元 / 脚本验证
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 ./node_modules/.bin/tsx --env-file=.env.local scripts/reports-store-unit-test.ts
 ```
 
@@ -353,7 +353,7 @@ const [totalDoneMap, totalCreatedMap, users] = await Promise.all([
 2. 看到"## X 完工报告"信号后，再启动下一个子代理
 3. 跨子代理协调由**主代理**负责，**不要**在子代理里写"等 X 完成"
 
-**新加的 Rule**：`/Users/vastgui/Desktop/project-manager/.cursor/rules/subagent-coordination-sop.mdc`
+**新加的 Rule**：`/Volumes/WorkStation/project-manager/.cursor/rules/subagent-coordination-sop.mdc`
 
 ### 坑 4：缺失子代理协作 SOP
 

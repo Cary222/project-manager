@@ -15,7 +15,7 @@ export interface SourceReference {
   index: number;
   title: string;
   url: string;
-  type: "ticket" | "project" | "user" | "commit" | "weekly_report";
+  type: "ticket" | "project" | "user" | "commit" | "weekly_report" | "meeting";
 }
 
 export interface UserActivityAttribution {
@@ -68,12 +68,11 @@ export interface ExtractedUser {
 
 /** Per-entity-type disambiguation thresholds */
 export const DISAMBIGUATION_THRESHOLDS = {
-  user: 1,
-  ticket: 3,
-  project: 3,
-  weekly_report: 3,
-  commit: 5,
+  user: 2,
+  ticket: 999,
+  project: 999,
+  weekly_report: 999,
+  commit: 999,
 } as const;
-
 /** Activity window types for time-based queries */
 export type ActivityWindow = "today" | "yesterday" | "this_week" | "last_week" | "this_month" | "recent";

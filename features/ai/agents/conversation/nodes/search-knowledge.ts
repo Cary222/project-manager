@@ -8,9 +8,10 @@ import { setSearchKnowledgeViewer, setSearchKnowledgeConversationId } from "@/fe
  */
 export function injectSearchKnowledgeContext(
   viewerUserId: string,
-  conversationId: string
+  conversationId: string,
+  viewerRole?: string | null
 ) {
-  setSearchKnowledgeViewer(viewerUserId);
+  setSearchKnowledgeViewer(viewerUserId, viewerRole);
   setSearchKnowledgeConversationId(conversationId);
 }
 

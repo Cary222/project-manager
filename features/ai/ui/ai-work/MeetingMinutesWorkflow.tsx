@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MarkdownContent } from "@/shared/ui/MarkdownContent";
+import { meetingUploadFileName } from "@/features/project/lib/meeting-upload";
 
 export interface MeetingSummaryData {
   summary: string;
@@ -342,7 +343,7 @@ export function MeetingMinutesWorkflow({
       const formData = new FormData();
       formData.append("title", formTitle.trim());
       formData.append("meetingDate", formDate);
-      formData.append("file", selectedFile);
+      formData.append("file", selectedFile, meetingUploadFileName(selectedFile));
 
       const res = await fetch(`/api/projects/${projectId}/meetings`, {
         method: "POST",

@@ -67,7 +67,7 @@ export async function searchStructuredNode(
     // originalQuery = pendingHumanAction.query = original user query (e.g. "刘工的周报有哪些")
     const effectiveQuery = state.originalQuery || content;
 
-    let queryType: "ticket" | "project" | "user" | "commit" | "weekly_report";
+    let queryType: "ticket" | "project" | "user" | "commit" | "weekly_report" | "meeting";
     let filters: Record<string, unknown> | undefined;
     let queryText: string;
 

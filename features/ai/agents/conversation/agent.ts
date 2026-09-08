@@ -3,6 +3,9 @@ import type { BaseMessage } from "@langchain/core/messages";
 import type { TaskType, UserRoutingConfig } from "@/features/ai/llm/providers/types";
 import type { AgentMode } from "./state";
 import type { DisambiguationCandidate } from "./types";
+import type { QueryUnderstanding } from "@/features/ai/search/query-understanding";
+import type { ClarificationSuggestion } from "@/features/ai/search/evidence-evaluator";
+import type { RagTrace } from "@/features/ai/search/rag-trace";
 import type { QueryType, ResolvedTimeWindow } from "@/features/ai/core/resolvers/query-parser";
 import type { ExtractedUser, ActivityWindow } from "@/features/ai/types/structured";
 import type { WorkflowDefinition } from "@/features/ai/runtime/types";
@@ -36,6 +39,7 @@ export interface PendingHumanAction {
 
 import { detectIntent } from "./nodes/detect-intent";
 import { searchKnowledgeNode } from "./nodes/search-knowledge";
+import { retrieveEvidenceNode } from "./nodes/retrieve-evidence";
 import { searchStructuredNode } from "./nodes/search-structured";
 import { decision as disambiguateIntentNode, humanConfirmation as humanConfirmationNode } from "./nodes/decision";
 import { webSearchNode } from "./nodes/web-search";
@@ -49,6 +53,7 @@ import {
   routeAfterSearchStructured,
   routeAfterDecision,
   routeAfterGenerateResponse,
+  routeAfterRetrieveEvidence,
 } from "./edges/routing";
 
 /**
@@ -56,6 +61,7 @@ import {
  * This is the idiomatic way for LangGraph JS 1.x.
  */
 const AgentStateAnnotation = Annotation.Root({
+  retrievalPlan: Annotation<QueryUnderstanding | null>({ value: (_current, update) => update ?? null, default: () => null }),
   /** Conversation message history */
   messages: Annotation<BaseMessage[]>({
     value: (current, update) => {
@@ -120,13 +126,28 @@ const AgentStateAnnotation = Annotation.Root({
     value: (_current, update) => update ?? "",
     default: () => "",
   }),
+  /** Post-retrieval clarification suggestions */
+  clarificationSuggestions: Annotation<ClarificationSuggestion[] | null>({
+    value: (_current, update) => update ?? null,
+    default: () => null,
+  }),
+  /** Full observable RAG Trace for debugging and inspection */
+  ragTrace: Annotation<RagTrace | null>({
+    value: (_current, update) => update ?? null,
+    default: () => null,
+  }),
+  /** Step counter for bounded Agentic RAG loop (maxSteps <= 3) */
+  agenticStep: Annotation<number>({
+    value: (_current, update) => update ?? 0,
+    default: () => 0,
+  }),
   /** Human-in-Loop: resolved entities (single source of truth) */
   resolvedEntities: Annotation<{
     user?: { id: string; name: string; resolvedBy: "auto" | "confirmation" };
     project?: { id: string; name: string; resolvedBy: "auto" | "confirmation" };
     ticket?: { id: string; name: string; resolvedBy: "auto" | "confirmation" };
     weekly_report?: { id: string; name: string; resolvedBy: "auto" | "confirmation" };
-    originalQueryType?: "ticket" | "project" | "user" | "commit" | "weekly_report";
+    originalQueryType?: "ticket" | "project" | "user" | "commit" | "weekly_report" | "meeting";
     /** Original user query (e.g. "刘工的周报有哪些") — set after disambiguation
      *  so searchStructuredNode can re-parse it on the follow-up round instead of
      *  using the selection message ("1" or "cary") as the new query. */
@@ -190,6 +211,7 @@ export type NextNode =
   | "detectIntent"
   | "modelSelect"
   | "searchKnowledge"
+  | "retrieveEvidence"
   | "searchStructured"
   | "decision"
   | "webSearch"
@@ -214,6 +236,7 @@ function buildWorkflow() {
     .addNode("detectIntent", detectIntent)
     .addNode("modelSelect", modelSelectNode)
     .addNode("searchKnowledge", searchKnowledgeNode)
+    .addNode("retrieveEvidence", retrieveEvidenceNode)
     .addNode("searchStructured", searchStructuredNode)
     .addNode("decision", disambiguateIntentNode)
     .addNode("webSearch", webSearchNode)
@@ -226,10 +249,16 @@ function buildWorkflow() {
     // modelSelect → conditional routing based on mode
     .addConditionalEdges("modelSelect", routeAfterModelSelect, {
       searchKnowledge: "searchKnowledge",
+      retrieveEvidence: "retrieveEvidence",
       searchStructured: "searchStructured",
       webSearch: "webSearch",
       generateResponse: "generateResponse",
       humanConfirmation: "humanConfirmation",
+    })
+    .addConditionalEdges("retrieveEvidence", routeAfterRetrieveEvidence, {
+      retrieveEvidence: "retrieveEvidence",
+      webSearch: "webSearch",
+      generateResponse: "generateResponse",
     })
     // searchKnowledge → searchStructured → (conditional: decision or generateResponse)
     .addEdge("searchKnowledge", "searchStructured")

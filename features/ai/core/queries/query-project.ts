@@ -31,30 +31,6 @@ export async function queryProject(input: ProjectQueryInput): Promise<Structured
     });
     if (projects.length === 0) return { summary: "当前没有活跃项目", sources: [] };
 
-    // 多于阈值时触发 HIL
-    if (projects.length >= DISAMBIGUATION_THRESHOLDS.project) {
-      const projectCandidates = projects.map((p) => ({
-        id: p.id,
-        label: p.name,
-        summary: "",
-      }));
-      return {
-        summary: `找到 ${projects.length} 个项目，请选择想了解的具体项目：`,
-        sources: [],
-        attribution: {
-          kind: "disambiguation" as const,
-          entityType: "project" as const,
-          candidates: projectCandidates,
-          count: projects.length,
-        },
-        decision: {
-          type: "human" as const,
-          reason: `找到 ${projects.length} 个项目，需要人工选择`,
-          entityType: "project",
-          candidates: projectCandidates,
-        },
-      };
-    }
 
     const sources: SourceReference[] = projects.map((p, i) => ({
       index: i + 1,

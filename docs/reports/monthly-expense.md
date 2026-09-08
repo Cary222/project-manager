@@ -170,7 +170,7 @@ export async function listMyExpenses(
 
 ```bash
 # 1. 同步数据库（必须先执行）
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npx prisma db push
 
 # 2. 启动开发服务器

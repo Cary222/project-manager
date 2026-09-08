@@ -4,6 +4,7 @@ import {
   isUserActivityQuery,
   isDeepContentQuery,
 } from "@/features/ai/core/resolvers/query-parser";
+import { decideRetrievalRoute } from "@/features/ai/search/retrieval-router";
 
 // Re-export NextNode for external consumers of this module
 export type { NextNode } from "../agent";
@@ -28,6 +29,20 @@ export function routeByMode(state: AgentState): NextNode {
     typeof lastMessage?.content === "string"
       ? lastMessage.content
       : "";
+
+  const isPersonQuery =
+    state.queryType === "user" ||
+    isUserActivityQuery(content) ||
+    state.retrievalPlan?.fineGrainedIntent === "RECENT_ACTIVITY" ||
+    state.retrievalPlan?.fineGrainedIntent === "TIMELINE";
+
+  if (isPersonQuery) return "searchStructured";
+
+  if (state.retrievalPlan) {
+    const route = decideRetrievalRoute(state.retrievalPlan);
+    if (route === "STRUCTURED") return "searchStructured";
+    return "retrieveEvidence";
+  }
 
   switch (state.mode) {
     case "search":
@@ -139,6 +154,51 @@ export function routeAfterSearchKnowledge(_state: AgentState): NextNode {
 }
 
 /**
+ * Route after retrieveEvidence — Bounded Agentic RAG Orchestration Loop (maxSteps <= 3).
+ *
+ * Checks EvidenceEvaluation:
+ * - SUFFICIENT / AMBIGUOUS: proceeds to generateResponse.
+ * - WEAK / INSUFFICIENT: if agenticStep < 2 and orthogonal subQueries exist,
+ *   loops back to retrieveEvidence for autonomous retrieval of missing aspects.
+ * - WEB_ALLOWED: if permitted and internal evidence is still insufficient, goes to webSearch.
+ * - Otherwise: proceeds to generateResponse with grounded evidence & clarification suggestions.
+ */
+export function routeAfterRetrieveEvidence(state: AgentState): NextNode {
+  const currentStep = state.agenticStep ?? 0;
+  const maxAgenticSteps = 3;
+  const report = state.toolResults?.retrieval as {
+    evaluation?: { status?: string };
+    allowWeb?: boolean;
+  } | undefined;
+
+  const evalStatus = report?.evaluation?.status;
+
+  // 1. If sufficient or ambiguous, proceed to generateResponse immediately
+  if (evalStatus === "SUFFICIENT" || evalStatus === "AMBIGUOUS") {
+    return "generateResponse";
+  }
+
+  // 2. If weak or insufficient and we have remaining agentic steps (currentStep < maxAgenticSteps)
+  if ((evalStatus === "WEAK" || evalStatus === "INSUFFICIENT") && currentStep < maxAgenticSteps) {
+    const subQueries = state.retrievalPlan?.subQueries;
+    const nextSubQueryIndex = currentStep - 1 >= 0 ? currentStep - 1 : 0;
+    if (subQueries && subQueries.length > nextSubQueryIndex) {
+      console.log(
+        `[Agentic RAG] step ${currentStep}/${maxAgenticSteps}: re-routing with orthogonal sub-query for missing evidence: "${subQueries[nextSubQueryIndex]}"`,
+      );
+      return "retrieveEvidence";
+    }
+  }
+
+  // 3. If external web search is permitted and internal evidence is insufficient
+  if (state.retrievalPlan?.scope === "WEB_ALLOWED" && report?.allowWeb === true) {
+    return "webSearch";
+  }
+
+  // 4. Default: proceed to generate response
+  return "generateResponse";
+}
+/**
  * Route after searchStructured → to decision, humanConfirmation, or generateResponse.
  *
  * Priority:
@@ -165,11 +225,6 @@ export function routeAfterSearchStructured(state: AgentState): NextNode {
     if (decision?.type === "human") {
       return "decision";
     }
-  }
-  // Ambiguous query type — route to decision so Branch 2 cross-type search runs.
-  // Only fire when no entity has been resolved yet (Round 1 ambiguous path).
-  if (state.queryType === "ambiguous" && !state.resolvedEntities) {
-    return "decision";
   }
   // No pending decision — check resolvedEntities for a confirmed selection.
   if (state.resolvedEntities?.user ||
@@ -238,14 +293,46 @@ export function routeAfterModelSelect(state: AgentState): NextNode {
     return "generateResponse";
   }
 
-  const mode = state.mode;
+  // If user selected a candidate from HIL, route to searchStructured to execute the query
+  if (state.resolvedEntities) {
+    return "searchStructured";
+  }
 
+  const lastMessage = state.messages[state.messages.length - 1];
+  const content =
+    typeof lastMessage?.content === "string"
+      ? lastMessage.content
+      : "";
+
+  // Check if this is a person / user activity query that must go through searchStructured & resolveUser
+  const isPersonQuery =
+    state.queryType === "user" ||
+    isUserActivityQuery(content) ||
+    state.retrievalPlan?.fineGrainedIntent === "RECENT_ACTIVITY" ||
+    state.retrievalPlan?.fineGrainedIntent === "TIMELINE";
+
+  if (isPersonQuery) {
+    return "searchStructured";
+  }
+
+  // If retrievalPlan is present:
+  if (state.retrievalPlan) {
+    const route = decideRetrievalRoute(state.retrievalPlan);
+    if (route === "STRUCTURED") {
+      return "searchStructured";
+    }
+    return "retrieveEvidence";
+  }
+
+  const mode = state.mode;
   if (mode === "web") return "webSearch";
   if (mode === "chat") return "generateResponse";
   if (mode === "image") return "generateResponse";
   if (mode === "video") return "generateResponse";
-  // search and auto both start with searchKnowledge
-  if (mode === "search" || mode === "auto") return "searchKnowledge";
+  if (mode === "search" || mode === "auto") {
+    if (isUserActivityQuery(content)) return "searchStructured";
+    return "retrieveEvidence";
+  }
 
   // Default fallback
   return "generateResponse";

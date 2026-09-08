@@ -11,9 +11,18 @@
 
 import WebSocket from "ws";
 import { spawn } from "child_process";
+import fs from "fs";
+import path from "path";
+import os from "os";
 import { resolveVoiceCredential } from "@/features/ai/llm/providers/audio/credentials";
 
 const DASHSCOPE_TIMEOUT_MS = 60_000;
+
+/**
+ * 直传阈值（5MB）：上游网关对 multipart/form-data request body 有 6MB / 10MB 硬限制。
+ * 超过 5MB 的音频自动路由至对象存储/临时 OSS 异步转写链路，杜绝 BadRequest.TooLarge。
+ */
+export const DIRECT_UPLOAD_THRESHOLD_BYTES = 5 * 1024 * 1024;
 
 export type SupportedAudioFormat = "webm" | "mp4" | "wav" | "mp3" | "m4a";
 
@@ -25,6 +34,7 @@ export interface TranscribeResult {
 export interface TranscribeOptions {
   userId: string;
   model?: string;
+  originalName?: string;
 }
 
 interface TranscribeResponse {
@@ -42,12 +52,15 @@ interface TranscribeResponse {
 interface TaskStatusResponse {
   output?: {
     task_id: string;
-    task_status: "PENDING" | "RUNNING" | "SUCCESS" | "FAIL";
+    task_status: "PENDING" | "RUNNING" | "SUCCESS" | "SUCCEEDED" | "FAIL" | "FAILED";
     transcription_url?: string;
+    result?: { transcription_url?: string };
+    results?: Array<{ transcription_url?: string; subtask_status?: string }>;
+    code?: string;
+    message?: string;
   };
   request_id: string;
 }
-
 interface DashScopeError {
   code: string;
   message: string;
@@ -174,11 +187,11 @@ async function normalizeAudioToWav(
  * @returns 识别结果 { text, duration? }
  */
 export async function transcribeWithDashScope(
-  audioBuffer: Buffer,
+  audioInput: Buffer | string,
   format: SupportedAudioFormat,
   options: TranscribeOptions,
 ): Promise<TranscribeResult> {
-  const { userId, model } = options;
+  const { userId, model, originalName } = options;
 
   // 使用语音凭证解析器
   const voiceResult = await resolveVoiceCredential(userId, "stt", model);
@@ -190,25 +203,88 @@ export async function transcribeWithDashScope(
 
   const { credential } = voiceResult;
 
-  // 1. 优先使用 WebSocket 流式识别协议（百炼 MaaS 专属空间与标准 DashScope 官方推荐，支持 qwen-audio-3.0-asr-flash-streaming）
-  try {
-    const wsModel = model || "qwen-audio-3.0-asr-flash-streaming";
-    return await transcribeWithWebSocket(
-      audioBuffer,
-      format,
+  // 1. 如果传入的是已存在的远程/临时 OSS URL，直接走异步转写任务
+  if (typeof audioInput === "string") {
+    console.log(
+      `[stt] 接收到音频 URL，直接走异步转写任务: ${audioInput.slice(0, 80)}`,
+    );
+    return await transcribeWithAsyncFiletrans(
+      audioInput,
       credential.apiKey,
       credential.baseURL,
-      wsModel,
+      voiceResult.modelName,
     );
-  } catch (wsError) {
-    console.warn(
-      "[stt] WebSocket ASR 尝试失败，开始尝试 HTTP 异步/同步 ASR 降级链路:",
-      wsError instanceof Error ? wsError.message : String(wsError),
+  }
+
+  const audioBuffer = audioInput;
+  const isLarge = audioBuffer.length > DIRECT_UPLOAD_THRESHOLD_BYTES;
+
+  // 2. 大文件 (> 5MB)：必须走大文件异步转写链路，杜绝 RequestBody 超过 6MB 导致 BadRequest.TooLarge
+  if (isLarge) {
+    console.log(
+      `[stt] 音频大小为 ${(audioBuffer.length / 1024 / 1024).toFixed(2)}MB，超过直传阈值 (${DIRECT_UPLOAD_THRESHOLD_BYTES / 1024 / 1024}MB)，自动走大文件异步转写链路`,
     );
 
-    const isMaaS = credential.baseURL.includes(".maas.aliyuncs.com");
+    try {
+      // 阶段 1: 上传到 DashScope 临时 OSS
+      const ossUrl = await uploadToDashscopeOss(
+        audioBuffer,
+        format,
+        credential.apiKey,
+        credential.baseURL,
+        voiceResult.modelName,
+        originalName,
+      );
+
+      // 阶段 2: 提交异步转写并轮询
+      return await transcribeWithAsyncFiletrans(
+        ossUrl,
+        credential.apiKey,
+        credential.baseURL,
+        voiceResult.modelName,
+      );
+    } catch (ossError) {
+      console.warn(
+        "[stt] DashScope 临时 OSS 大文件异步转录失败，尝试 ffmpeg 分片兜底:",
+        ossError instanceof Error ? ossError.message : String(ossError),
+      );
+
+      // 阶段 3 (兜底): ffmpeg 分片顺序转写合并
+      return await transcribeWithFfmpegChunking(
+        audioBuffer,
+        format,
+        credential.apiKey,
+        credential.baseURL,
+        voiceResult.modelName,
+      );
+    }
+  }
+
+  // 3. 小文件 (<= 5MB)：保留直传 / WebSocket 快速链路
+  // 3.1 极短音频 (<= 2MB) 优先尝试 WebSocket 流式识别
+  if (audioBuffer.length <= 2 * 1024 * 1024) {
+    try {
+      const wsModel = model || "qwen-audio-3.0-asr-flash-streaming";
+      return await transcribeWithWebSocket(
+        audioBuffer,
+        format,
+        credential.apiKey,
+        credential.baseURL,
+        wsModel,
+      );
+    } catch (wsError) {
+      console.warn(
+        "[stt] 小文件 WebSocket ASR 尝试失败，降级至 HTTP 链路:",
+        wsError instanceof Error ? wsError.message : String(wsError),
+      );
+    }
+  }
+
+  // 3.2 HTTP 直传 (MaaS 异步 / 标准同步)
+  const isMaaS = credential.baseURL.includes(".maas.aliyuncs.com");
+  try {
     if (isMaaS) {
-      return transcribeAsyncMaaS(
+      return await transcribeAsyncMaaS(
         audioBuffer,
         format,
         voiceResult.modelName,
@@ -216,13 +292,41 @@ export async function transcribeWithDashScope(
         credential.baseURL,
       );
     }
-    return transcribeSync(
+    return await transcribeSync(
       audioBuffer,
       format,
       voiceResult.modelName,
       credential.apiKey,
       credential.baseURL,
     );
+  } catch (httpError) {
+    const errorText =
+      httpError instanceof Error ? httpError.message : String(httpError);
+    if (
+      errorText.includes("TooLarge") ||
+      errorText.includes("RequestEntityTooLarge") ||
+      errorText.includes("413")
+    ) {
+      console.warn(
+        "[stt] HTTP 直传仍然超限，自动转入 OSS 大文件异步链路:",
+        errorText,
+      );
+      const ossUrl = await uploadToDashscopeOss(
+        audioBuffer,
+        format,
+        credential.apiKey,
+        credential.baseURL,
+        voiceResult.modelName,
+        originalName,
+      );
+      return await transcribeWithAsyncFiletrans(
+        ossUrl,
+        credential.apiKey,
+        credential.baseURL,
+        voiceResult.modelName,
+      );
+    }
+    throw httpError;
   }
 }
 
@@ -527,13 +631,14 @@ async function transcribeAsyncMaaS(
   const submitUrl = `${apiBase}/services/audio/asr/transcription`;
 
   const candidateModels = Array.from(
-    new Set([
-      modelName,
-      "qwen-audio-3.0-asr-flash-streaming",
-      "qwen3-asr-flash-filetrans",
-      "paraformer-v2",
-      "sensevoice-v1",
-    ]),
+    new Set(
+      [
+        modelName,
+        "qwen3-asr-flash-filetrans",
+        "paraformer-v2",
+        "sensevoice-v1",
+      ].filter((m): m is string => Boolean(m && !m.includes("streaming") && !m.includes("realtime"))),
+    ),
   );
 
   let taskId: string | null = null;
@@ -627,12 +732,16 @@ async function transcribeAsyncMaaS(
       `[stt] 任务状态: ${status} (attempt ${attempt + 1}/${maxAttempts})`,
     );
 
-    if (status === "SUCCESS") {
-      transcriptionUrl = statusData.output?.transcription_url ?? null;
+    if (status === "SUCCESS" || status === "SUCCEEDED") {
+      transcriptionUrl =
+        statusData.output?.transcription_url ??
+        statusData.output?.result?.transcription_url ??
+        statusData.output?.results?.[0]?.transcription_url ??
+        null;
       break;
     }
 
-    if (status === "FAIL") {
+    if (status === "FAIL" || status === "FAILED") {
       throw new Error(`ASR 转写失败: ${JSON.stringify(statusData)}`);
     }
   }
@@ -651,18 +760,446 @@ async function transcribeAsyncMaaS(
   }
 
   const resultData = (await resultResponse.json()) as {
-    transcripts?: Array<{ text: string }>;
+    transcripts?: Array<{ text: string; content_duration_in_milliseconds?: number }>;
     text?: string;
+    properties?: { original_duration_in_milliseconds?: number };
+    audio_info?: { duration_in_milliseconds?: number };
   };
 
   let text = "";
+  let duration: number | undefined;
+
   if (resultData.transcripts?.length) {
     text = resultData.transcripts.map((t) => t.text).join(" ");
+    const firstDuration = resultData.transcripts[0]?.content_duration_in_milliseconds;
+    if (typeof firstDuration === "number") {
+      duration = Math.round(firstDuration / 1000);
+    }
   } else if (resultData.text) {
     text = resultData.text;
   }
 
-  return { text: text.trim() };
+  if (!duration) {
+    const rawDurationMs =
+      resultData.properties?.original_duration_in_milliseconds ??
+      resultData.audio_info?.duration_in_milliseconds;
+    if (typeof rawDurationMs === "number") {
+      duration = Math.round(rawDurationMs / 1000);
+    }
+  }
+
+  return { text: text.trim(), duration };
+}
+
+/**
+ * 上传音频至 DashScope 官方临时 OSS 存储空间（支持最大 1024MB）
+ */
+interface DashScopeUploadPolicyResponse {
+  data?: {
+    policy: string;
+    signature: string;
+    upload_dir: string;
+    upload_host: string;
+    expire_in_seconds?: number;
+    max_file_size_mb?: number;
+    oss_access_key_id: string;
+    x_oss_object_acl?: string;
+    x_oss_forbid_overwrite?: string;
+  };
+  code?: string;
+  message?: string;
+  request_id?: string;
+}
+
+async function uploadToDashscopeOss(
+  audioBuffer: Buffer,
+  format: SupportedAudioFormat,
+  apiKey: string,
+  baseURL: string,
+  modelName: string,
+  originalName?: string,
+): Promise<string> {
+  const apiBase = normalizeDashscopeBaseUrl(baseURL);
+  const targetModel = modelName || "paraformer-v2";
+  const policyUrl = `${apiBase}/uploads?action=getPolicy&model=${encodeURIComponent(targetModel)}`;
+
+  console.log(`[stt-oss] 获取 DashScope 临时 OSS 凭证: url=${policyUrl}`);
+  const policyRes = await fetch(policyUrl, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!policyRes.ok) {
+    const errText = await policyRes.text().catch(() => "");
+    throw new Error(`获取 DashScope OSS 凭证失败 (${policyRes.status}): ${errText}`);
+  }
+
+  const policyJson = (await policyRes.json()) as DashScopeUploadPolicyResponse;
+  const policyData = policyJson.data;
+  if (!policyData || !policyData.upload_host || !policyData.upload_dir) {
+    throw new Error(`DashScope OSS 凭证响应不完整: ${JSON.stringify(policyJson)}`);
+  }
+
+  const safeExt = format || "mp3";
+  const rawBaseName = originalName
+    ? path.basename(originalName).replace(/[^a-zA-Z0-9._-]/g, "_")
+    : `audio_${Date.now()}.${safeExt}`;
+  const fileName = rawBaseName.toLowerCase().endsWith(`.${safeExt}`)
+    ? rawBaseName
+    : `${rawBaseName}.${safeExt}`;
+  const key = `${policyData.upload_dir}/${fileName}`;
+
+  const formData = new FormData();
+  formData.append("OSSAccessKeyId", policyData.oss_access_key_id);
+  formData.append("Signature", policyData.signature);
+  formData.append("policy", policyData.policy);
+  if (policyData.x_oss_object_acl) {
+    formData.append("x-oss-object-acl", policyData.x_oss_object_acl);
+  }
+  if (policyData.x_oss_forbid_overwrite) {
+    formData.append("x-oss-forbid-overwrite", policyData.x_oss_forbid_overwrite);
+  }
+  formData.append("key", key);
+  formData.append("success_action_status", "200");
+  formData.append(
+    "file",
+    new Blob([new Uint8Array(audioBuffer)], { type: formatToMimeType(format) }),
+    fileName,
+  );
+
+  console.log(
+    `[stt-oss] 开始上传音频至 OSS (${(audioBuffer.length / 1024 / 1024).toFixed(2)}MB) ... host=${policyData.upload_host}`,
+  );
+  const uploadRes = await fetch(policyData.upload_host, {
+    method: "POST",
+    body: formData,
+    signal: AbortSignal.timeout(180_000),
+  });
+
+  if (!uploadRes.ok) {
+    const errText = await uploadRes.text().catch(() => "");
+    throw new Error(`音频上传到 DashScope OSS 失败 (${uploadRes.status}): ${errText}`);
+  }
+
+  const ossUrl = `oss://${key}`;
+  console.log(`[stt-oss] OSS 上传成功，临时资源: ${ossUrl}`);
+  return ossUrl;
+}
+
+/**
+ * 通过远程/OSS URL 提交大文件异步 ASR 任务并轮询获取结果
+ */
+async function transcribeWithAsyncFiletrans(
+  audioUrl: string,
+  apiKey: string,
+  baseURL: string,
+  modelName?: string,
+): Promise<TranscribeResult> {
+  const apiBase = normalizeDashscopeBaseUrl(baseURL);
+  const submitUrl = `${apiBase}/services/audio/asr/transcription`;
+
+  const candidateModels = Array.from(
+    new Set(
+      [
+        modelName,
+        "qwen3-asr-flash-filetrans",
+        "paraformer-v2",
+        "sensevoice-v1",
+      ].filter((m): m is string => Boolean(m && !m.includes("streaming") && !m.includes("realtime"))),
+    ),
+  );
+
+  let taskId: string | null = null;
+  let lastErrorText = "";
+  const isOss = audioUrl.startsWith("oss://");
+
+  for (const currentModel of candidateModels) {
+    console.log(
+      `[stt-async] 提交异步转写任务: model=${currentModel}, url=${audioUrl.slice(0, 80)}`,
+    );
+
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "X-DashScope-Async": "enable",
+    };
+    if (isOss) {
+      headers["X-DashScope-OssResourceResolve"] = "enable";
+    }
+
+    const submitResponse = await fetch(submitUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: currentModel,
+        input: {
+          file_url: audioUrl,
+          file_urls: [audioUrl],
+        },
+        parameters: {
+          language_hints: ["zh", "en"],
+        },
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (submitResponse.ok) {
+      const submitData = (await submitResponse.json()) as {
+        output?: { task_id: string; task_status?: string };
+        request_id: string;
+      };
+      taskId = submitData.output?.task_id ?? null;
+      if (taskId) {
+        console.log(
+          `[stt-async] 任务提交成功: model=${currentModel}, task_id=${taskId}`,
+        );
+        break;
+      }
+    } else {
+      lastErrorText = await submitResponse.text().catch(() => "");
+      console.warn(
+        `[stt-async] 模型 ${currentModel} 提交失败 (${submitResponse.status}):`,
+        lastErrorText,
+      );
+    }
+  }
+
+  if (!taskId) {
+    throw new Error(`ASR 提交任务失败: ${lastErrorText}`);
+  }
+
+  // 轮询任务状态 (最长 5 分钟)
+  const taskUrl = `${apiBase}/tasks/${taskId}`;
+  const maxAttempts = 100;
+  let transcriptionUrl: string | null = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await new Promise((r) => setTimeout(r, 3000));
+
+    let statusResponse: Response;
+    try {
+      statusResponse = await fetch(taskUrl, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (fetchErr) {
+      console.warn(`[stt-async] 轮询网络抖动 (${attempt + 1}/${maxAttempts}):`, fetchErr);
+      continue;
+    }
+
+    if (!statusResponse.ok) {
+      const err = await statusResponse.text().catch(() => "");
+      console.warn(`[stt-async] 查询状态失败: ${statusResponse.status}`, err);
+      continue;
+    }
+
+    const statusData = (await statusResponse.json()) as TaskStatusResponse;
+    const status = statusData.output?.task_status;
+
+    if (
+      attempt % 5 === 0 ||
+      status === "SUCCESS" ||
+      status === "SUCCEEDED" ||
+      status === "FAIL" ||
+      status === "FAILED"
+    ) {
+      console.log(
+        `[stt-async] 任务状态: ${status} (attempt ${attempt + 1}/${maxAttempts})`,
+      );
+    }
+
+    if (status === "SUCCESS" || status === "SUCCEEDED") {
+      transcriptionUrl =
+        statusData.output?.transcription_url ??
+        statusData.output?.result?.transcription_url ??
+        statusData.output?.results?.[0]?.transcription_url ??
+        null;
+      break;
+    }
+
+    if (status === "FAIL" || status === "FAILED") {
+      throw new Error(
+        `ASR 转写失败: ${statusData.output?.code || "FAILED"} - ${statusData.output?.message || JSON.stringify(statusData)}`,
+      );
+    }
+  }
+
+  if (!transcriptionUrl) {
+    throw new Error("ASR 转写超时（超过 5 分钟）");
+  }
+
+  console.log(`[stt-async] 正在下载识别结果: ${transcriptionUrl.slice(0, 100)}...`);
+  const resultResponse = await fetch(transcriptionUrl, {
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!resultResponse.ok) {
+    throw new Error(`下载转写结果失败: ${resultResponse.status}`);
+  }
+
+  const resultData = (await resultResponse.json()) as {
+    transcripts?: Array<{
+      text?: string;
+      content_duration_in_milliseconds?: number;
+    }>;
+    text?: string;
+    properties?: {
+      original_duration_in_milliseconds?: number;
+    };
+    audio_info?: {
+      duration_in_milliseconds?: number;
+    };
+  };
+
+  let text = "";
+  let duration: number | undefined;
+
+  if (Array.isArray(resultData.transcripts) && resultData.transcripts.length > 0) {
+    text = resultData.transcripts
+      .map((t) => t.text?.trim())
+      .filter(Boolean)
+      .join(" ");
+
+    const firstDuration = resultData.transcripts[0]?.content_duration_in_milliseconds;
+    if (typeof firstDuration === "number") {
+      duration = Math.round(firstDuration / 1000);
+    }
+  } else if (resultData.text) {
+    text = resultData.text.trim();
+  }
+
+  if (!duration) {
+    const rawDurationMs =
+      resultData.properties?.original_duration_in_milliseconds ??
+      resultData.audio_info?.duration_in_milliseconds;
+    if (typeof rawDurationMs === "number") {
+      duration = Math.round(rawDurationMs / 1000);
+    }
+  }
+
+  return { text: text.trim(), duration };
+}
+
+/**
+ * 当 Provider 不支持 OSS / URL 时的 ffmpeg 分片兜底方案。
+ * 将大音频以 180s（3 分钟）分片切分，严格控制单片小于 4.5MB，顺序识别后合并。
+ */
+async function transcribeWithFfmpegChunking(
+  audioBuffer: Buffer,
+  format: SupportedAudioFormat,
+  apiKey: string,
+  baseURL: string,
+  modelName: string,
+): Promise<TranscribeResult> {
+  const binary = process.env.FFMPEG_PATH || "ffmpeg";
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "stt-chunk-"));
+  const inputPath = path.join(tmpDir, `input.${format}`);
+  const outputPattern = path.join(tmpDir, "chunk_%03d.mp3");
+
+  try {
+    await fs.promises.writeFile(inputPath, audioBuffer);
+    console.log(
+      `[stt-chunk] 启动 ffmpeg 分片兜底: 总大小 ${(audioBuffer.length / 1024 / 1024).toFixed(2)}MB`,
+    );
+
+    // 180 秒一片，压制为 64kbps mp3，单片约 1.4MB，远低于 5MB 限制
+    await new Promise<void>((resolve, reject) => {
+      const ff = spawn(
+        binary,
+        [
+          "-y",
+          "-i",
+          inputPath,
+          "-f",
+          "segment",
+          "-segment_time",
+          "180",
+          "-c:a",
+          "libmp3lame",
+          "-b:a",
+          "64k",
+          outputPattern,
+        ],
+        { stdio: ["ignore", "pipe", "pipe"] },
+      );
+
+      let stderr = "";
+      ff.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
+
+      ff.on("close", (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`ffmpeg 分片退出码 ${code}: ${stderr.slice(-200)}`));
+      });
+      ff.on("error", (err) => reject(err));
+    });
+
+    const entries = await fs.promises.readdir(tmpDir);
+    const chunkFiles = entries
+      .filter((name) => name.startsWith("chunk_") && name.endsWith(".mp3"))
+      .sort();
+
+    if (chunkFiles.length === 0) {
+      throw new Error("ffmpeg 分片未生成任何有效音频片段");
+    }
+
+    console.log(`[stt-chunk] 音频分片完成，共 ${chunkFiles.length} 个片段`);
+
+    const chunkTexts: string[] = [];
+    let totalDuration = 0;
+
+    for (let i = 0; i < chunkFiles.length; i++) {
+      const chunkFile = chunkFiles[i];
+      const chunkPath = path.join(tmpDir, chunkFile);
+      const chunkBuf = await fs.promises.readFile(chunkPath);
+      console.log(
+        `[stt-chunk] 转写片段 ${i + 1}/${chunkFiles.length} (${(chunkBuf.length / 1024).toFixed(1)}KB)...`,
+      );
+
+      const isMaaS = baseURL.includes(".maas.aliyuncs.com");
+      let chunkResult: TranscribeResult;
+      if (isMaaS) {
+        chunkResult = await transcribeAsyncMaaS(
+          chunkBuf,
+          "mp3",
+          modelName,
+          apiKey,
+          baseURL,
+        );
+      } else {
+        chunkResult = await transcribeSync(
+          chunkBuf,
+          "mp3",
+          modelName,
+          apiKey,
+          baseURL,
+        );
+      }
+
+      if (chunkResult.text) {
+        chunkTexts.push(chunkResult.text);
+      }
+      if (chunkResult.duration) {
+        totalDuration += chunkResult.duration;
+      }
+    }
+
+    return {
+      text: chunkTexts.join(" ").trim(),
+      duration: totalDuration > 0 ? totalDuration : undefined,
+    };
+  } finally {
+    try {
+      await fs.promises.rm(tmpDir, { recursive: true, force: true });
+    } catch (cleanupErr) {
+      console.warn("[stt-chunk] 清理临时分片目录失败:", cleanupErr);
+    }
+  }
 }
 
 /**

@@ -249,7 +249,7 @@ if (parsed.title !== undefined) {
 ## 5. 启动 / 部署
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 
 # 1. 推送 schema（必须）
 set -a && source .env.local && set +a
@@ -280,7 +280,7 @@ curl -s -o /dev/null -w "HTTP %{http_code}\n" http://localhost:3003/api/auth/ses
 ### 6.1 Store 层 smoke（无需登录，最快验证 DB + 业务函数）
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 set -a && source .env.local && set +a
 npx tsx scripts/ai-chat-polish-smoke.ts
 ```

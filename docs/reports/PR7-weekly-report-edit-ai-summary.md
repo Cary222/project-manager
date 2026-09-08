@@ -1,6 +1,6 @@
 # PR7 周报编辑页 AI 总结 + UI 统一 — 开发到测试复现手册
 
-> 适用：`/Users/vastgui/Desktop/project-manager`（Next.js 15 + Prisma + shadcn 风格）
+> 适用：`/Volumes/WorkStation/project-manager`（Next.js 15 + Prisma + shadcn 风格）
 > 目标：让任何同事 / 未来的我拿到这份文档 + 仓库 commit 后，能**完整复现** PR7「周报编辑页 AI 总结 + 详情/编辑合并 toggle 单页 + 列表页返回报表键」的端到端过程。
 
 ---
@@ -146,7 +146,7 @@ return aiSummary
 ## 5. 启动 / 部署
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 
 # 1. 装依赖（如未装）
 npm install
@@ -170,7 +170,7 @@ curl -I http://localhost:3003/reports/weekly-reports
 ### 6.1 单元 / 脚本验证
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 ./node_modules/.bin/tsx --env-file=.env.local scripts/weekly-report-draft-summary-unit-test.ts
 ```
 
@@ -198,7 +198,7 @@ cd /Users/vastgui/Desktop/project-manager
 ### 6.2 TypeScript 自检
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npx tsc --noEmit 2>&1 | grep -v "e2e/module-edit.spec.ts\|features/admin/admin.test.ts" | grep "error TS" | head
 ```
 

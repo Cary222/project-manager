@@ -21,7 +21,7 @@ description: >-
 
 | 场景 | 命令 |
 |------|------|
-| 🏃 Mac 起 dev | `cd /Users/vastgui/Desktop/project-manager && npm run dev` |
+| 🏃 Mac 起 dev | `cd /Volumes/WorkStation/project-manager && npm run dev` |
 | 🏗️ 远程 build | `ssh hxy@192.168.1.14 'cd /home/hxy/work/personal/project-manager && npm run build'` |
 | 🔄 远程重启生产 Next.js | `ssh hxy@192.168.1.14 'systemctl --user restart project-manager.service'` |
 | 🔄 远程重启 Index Worker | `ssh hxy@192.168.1.14 'systemctl --user restart project-manager-worker.service'` |
@@ -180,7 +180,7 @@ npx prisma studio     # 浏览器打开，自动连远程
 **远程仓库**：
 - 裸仓：`/home/hxy/work/personal/project-manager.git`（在 192.168.1.14）
 - 工作区：`/home/hxy/work/personal/project-manager`
-- Mac 本地工作区：`/Users/vastgui/Desktop/project-manager`
+- Mac 本地工作区：`/Volumes/WorkStation/project-manager`
 - Mac → origin：常规 `git push` 即可，ssh 已配 authorized_keys
 
 **双远端注意**：

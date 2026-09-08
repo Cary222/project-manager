@@ -86,7 +86,7 @@ try {
 
 ```bash
 # 1. 确认 middleware 已更新
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 git diff middleware.ts
 
 # 2. 测试 API 端点（无需认证就能访问，但会返回 401）

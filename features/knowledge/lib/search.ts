@@ -24,6 +24,10 @@ import { SEARCH_DOCUMENT_SOURCE_TYPES } from "@/features/knowledge/lib/search-ty
 import { PKM_ATTACHMENT_MAX_SIZE, type FileAttachment } from "@/features/knowledge/lib/pkm";
 import { cleanExtractedTextForEmbedding, cleanMarkdownForEmbedding, formatAttachmentLabel } from "@/shared/lib/markdown";
 import { splitIntoChunks, CHUNK_DEFAULTS } from "@/features/knowledge/lib/chunk";
+import { createHierarchicalChunks } from "@/features/knowledge/lib/parent-child";
+import { searchGraphCandidates } from "@/features/knowledge/lib/graph/retrieval-graph";
+import { fuseCandidatesWithRRF } from "@/features/knowledge/lib/graph/fusion-rrf";
+import type { RetrievalMode } from "@/features/knowledge/lib/graph/types";
 
 const SEARCH_LIMIT_DEFAULT = 8;
 const SEARCH_LIMIT_MAX = 20;
@@ -143,6 +147,15 @@ function coerceMetadata(value: Prisma.JsonValue | null): SearchDocumentMetadata 
     noteIsPublic: typeof data.noteIsPublic === "boolean" ? data.noteIsPublic : undefined,
     noteAttachmentCount: typeof data.noteAttachmentCount === "number" ? data.noteAttachmentCount : undefined,
     noteIndexedAttachmentCount: typeof data.noteIndexedAttachmentCount === "number" ? data.noteIndexedAttachmentCount : undefined,
+    chunkIndex: typeof data.chunkIndex === "number" ? data.chunkIndex : undefined,
+    totalChunks: typeof data.totalChunks === "number" ? data.totalChunks : undefined,
+    parentId: typeof data.parentId === "string" ? data.parentId : undefined,
+    parentChunkId: typeof data.parentChunkId === "string" ? data.parentChunkId : (typeof data.parentId === "string" ? data.parentId : undefined),
+    sectionTitle: typeof data.sectionTitle === "string" ? data.sectionTitle : undefined,
+    parentContent: typeof data.parentContent === "string" ? data.parentContent : undefined,
+    isHierarchical: typeof data.isHierarchical === "boolean" ? data.isHierarchical : undefined,
+    sourceId: typeof data.sourceId === "string" ? data.sourceId : undefined,
+    fileAssetId: typeof data.fileAssetId === "string" ? data.fileAssetId : undefined,
   };
 }
 
@@ -355,6 +368,7 @@ function buildSearchablePkmNoteDocumentContent(
   chunkIndex: number,
   totalChunks: number,
   attachmentIndexedCount: number,
+  parentInfo?: { parentId: string; sectionTitle: string; parentContent: string },
 ): SearchableRecord {
   const authorName = note.user.name || note.user.email;
 
@@ -364,6 +378,7 @@ function buildSearchablePkmNoteDocumentContent(
 
   const header = [
     `标题 ${note.title.trim()}`,
+    parentInfo?.sectionTitle ? `章节 ${parentInfo.sectionTitle}` : null,
     `作者 ${authorName}`,
     note.project ? `项目 ${note.project.name}` : null,
     tagsStr,
@@ -391,6 +406,15 @@ function buildSearchablePkmNoteDocumentContent(
       totalChunks,
       noteAttachmentCount: totalAttachmentCount,
       noteIndexedAttachmentCount: attachmentIndexedCount,
+      ...(parentInfo
+        ? {
+            parentId: parentInfo.parentId,
+            parentChunkId: parentInfo.parentId,
+            sectionTitle: parentInfo.sectionTitle,
+            parentContent: parentInfo.parentContent,
+            isHierarchical: true,
+          }
+        : {}),
     },
   };
 }
@@ -400,16 +424,38 @@ export async function buildSearchablePkmNoteChunks(
   attachmentTexts: Map<string, string> = new Map(),
   noteAttachments?: FileAttachment[],
 ): Promise<SearchableRecord[]> {
-  // noteAttachments: explicitly pass FileAttachment[] from caller (syncPkmNoteSearchDocument).
-  // Fallback reads from note.attachments for callers that don't pre-process attachments.
   const attachments = noteAttachments
     ?? ((note.attachments as unknown as FileAttachment[] | null | undefined) ?? []);
 
-  const rawChunks: string[] = [];
+  type PreparedChunk = {
+    content: string;
+    parentInfo?: { parentId: string; sectionTitle: string; parentContent: string };
+  };
+  const preparedChunks: PreparedChunk[] = [];
 
   if (note.content) {
-    const cleaned = cleanMarkdownForEmbedding(note.content);
-    if (cleaned) rawChunks.push(...splitIntoChunks(cleaned));
+    const rawContent = note.content.trim();
+    if (rawContent) {
+      const hierarchy = createHierarchicalChunks(rawContent, note.id, {
+        parentMaxChars: 2000,
+        childMaxChars: 350,
+        childOverlap: 50,
+      });
+      const parentMap = new Map(hierarchy.parents.map((p) => [p.id, p]));
+      for (const child of hierarchy.children) {
+        const parent = parentMap.get(child.parentId);
+        preparedChunks.push({
+          content: child.content,
+          parentInfo: parent
+            ? {
+                parentId: parent.id,
+                sectionTitle: parent.sectionTitle,
+                parentContent: parent.content,
+              }
+            : undefined,
+        });
+      }
+    }
   }
 
   for (const attachment of attachments) {
@@ -419,16 +465,30 @@ export async function buildSearchablePkmNoteChunks(
     if (!text) continue;
     const cleaned = cleanExtractedTextForEmbedding(text);
     if (!cleaned) continue;
-    rawChunks.push(...splitIntoChunks(cleaned));
+    const hierarchy = createHierarchicalChunks(cleaned, `${note.id}_${name}`);
+    const parentMap = new Map(hierarchy.parents.map((p) => [p.id, p]));
+    for (const child of hierarchy.children) {
+      const parent = parentMap.get(child.parentId);
+      preparedChunks.push({
+        content: child.content,
+        parentInfo: parent
+          ? {
+              parentId: parent.id,
+              sectionTitle: parent.sectionTitle,
+              parentContent: parent.content,
+            }
+          : undefined,
+      });
+    }
   }
 
-  const totalChunks = rawChunks.length;
+  const totalChunks = preparedChunks.length;
   const attachmentIndexedCount = attachments.reduce(
     (count, att) => count + (att.name ? (attachmentTexts.has(att.name) ? 1 : 0) : 0),
     0,
   );
-  return rawChunks.map((content, idx) =>
-    buildSearchablePkmNoteDocumentContent(note, content, idx, totalChunks, attachmentIndexedCount),
+  return preparedChunks.map(({ content, parentInfo }, idx) =>
+    buildSearchablePkmNoteDocumentContent(note, content, idx, totalChunks, attachmentIndexedCount, parentInfo),
   );
 }
 
@@ -992,8 +1052,8 @@ function normalizeSemanticScore(distance: number) {
   return Math.max(0, Math.min(1, 1 - distance));
 }
 
-function toRankedCandidate(args: {
-  document: Pick<SearchDocumentRow, "id" | "sourceType" | "title" | "content" | "url" | "metadata" | "updatedAt" | "project">;
+export function toRankedCandidate(args: {
+  document: Pick<SearchDocumentRow, "id" | "sourceType" | "sourceId" | "title" | "content" | "url" | "metadata" | "updatedAt" | "project">;
   query: string;
   terms: string[];
   keywordScore?: number;
@@ -1003,6 +1063,9 @@ function toRankedCandidate(args: {
   if (!type) return null;
 
   const metadata = coerceMetadata(args.document.metadata);
+  if (args.document.sourceId && !metadata.sourceId) {
+    metadata.sourceId = args.document.sourceId;
+  }
   const keywordScore = args.keywordScore ?? 0;
   const semanticScore = args.semanticScore ?? 0;
   const directMatchBoost = hasDirectQueryMatch(args.document.title, args.document.content, args.query) ? 2 : 0;
@@ -1083,6 +1146,7 @@ function mergeCandidates(options: {
       document: {
         id: document.id,
         sourceType: document.sourceType,
+        sourceId: document.sourceId,
         title: document.title,
         content: document.content,
         url: document.url,
@@ -1115,6 +1179,9 @@ export async function searchDocuments(options: {
   limit?: number;
   mode?: SearchResponseMode;
   viewerUserId?: string | null;
+  viewerRole?: string | null;
+  useGraph?: boolean;
+  retrievalMode?: RetrievalMode;
 }): Promise<SearchResponse> {
   const startedAt = Date.now();
   const query = normalizeQuery(options.query);
@@ -1135,20 +1202,71 @@ export async function searchDocuments(options: {
 
   const keywordLimit = Math.min(SEARCH_LIMIT_MAX * KEYWORD_CANDIDATE_MULTIPLIER, limit * KEYWORD_CANDIDATE_MULTIPLIER);
   const vectorLimit = Math.min(SEARCH_LIMIT_MAX * VECTOR_CANDIDATE_MULTIPLIER, limit * VECTOR_CANDIDATE_MULTIPLIER);
+  const enableGraph = options.useGraph ?? (process.env.FEATURE_GRAPH_RAG === "true");
+  const retrievalMode = options.retrievalMode ?? (enableGraph ? "MIX" : "NAIVE");
 
-  const [keywordDocuments, vectorDocuments] = await Promise.all([
+  const [keywordDocuments, vectorDocuments, graphCandidates] = await Promise.all([
     searchKeywordCandidates({ query, projectId: options.projectId, limit: keywordLimit }),
     searchVectorCandidates({ query, projectId: options.projectId, limit: vectorLimit }).catch(() => []),
+    enableGraph
+      ? searchGraphCandidates(prisma, {
+          query,
+          projectId: options.projectId,
+          viewerUserId: options.viewerUserId,
+          viewerRole: options.viewerRole,
+          limit,
+          maxHops: 2,
+        }).catch((err) => {
+          console.error("[GraphRAG] searchGraphCandidates fallback:", err);
+          return [];
+        })
+      : Promise.resolve([]),
   ]);
 
-  const ranked = mergeCandidates({
-    query,
-    terms,
-    keywordDocuments,
-    vectorDocuments,
-    viewerUserId: options.viewerUserId,
-  }).slice(0, limit);
-
+  let ranked: SearchResultItem[];
+  if (enableGraph && graphCandidates.length > 0) {
+    const keywordRaw = keywordDocuments.map((d) => {
+      const meta = coerceMetadata(d.metadata) as Record<string, unknown>;
+      return {
+        documentId: d.id,
+        sourceType: d.sourceType,
+        sourceId: d.sourceId,
+        chunkIndex: (meta.chunkIndex as number) ?? 0,
+        title: d.title,
+        content: d.content,
+        metadata: meta,
+        projectId: d.projectId,
+        href: d.url || `/search/${d.id}`,
+      };
+    });
+    const vectorRaw = vectorDocuments.map((d) => {
+      const meta = coerceMetadata(d.metadata) as Record<string, unknown>;
+      return {
+        documentId: d.id,
+        sourceType: d.sourceType,
+        sourceId: d.sourceId,
+        chunkIndex: (meta.chunkIndex as number) ?? 0,
+        title: d.title,
+        content: d.content,
+        metadata: meta,
+        projectId: d.projectId,
+        href: d.url || `/search/${d.id}`,
+        distance: d.distance,
+      };
+    });
+    ranked = fuseCandidatesWithRRF(keywordRaw, vectorRaw, graphCandidates, {
+      mode: retrievalMode,
+      limit,
+    });
+  } else {
+    ranked = mergeCandidates({
+      query,
+      terms,
+      keywordDocuments,
+      vectorDocuments,
+      viewerUserId: options.viewerUserId,
+    }).slice(0, limit);
+  }
   const grouped: Record<SearchResultType, SearchResultItem[]> = {
     ticket: [],
     commit: [],

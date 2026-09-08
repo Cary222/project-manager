@@ -78,6 +78,26 @@ export function buildProxyAwareFetch(): typeof fetch | undefined {
       }
     }
 
+    const contentType = normalizedHeaders.get("content-type") ?? "";
+    if (contentType.includes("text/event-stream")) {
+      const stream = new ReadableStream({
+        async start(controller) {
+          try {
+            for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+              controller.enqueue(chunk);
+            }
+            controller.close();
+          } catch (err) {
+            controller.error(err);
+          }
+        },
+      });
+      return new Response(stream, {
+        status: response.statusCode,
+        headers: normalizedHeaders,
+      });
+    }
+
     // Collect raw body bytes
     const bodyChunks: Uint8Array[] = [];
     for await (const chunk of response.body as AsyncIterable<Uint8Array>) {

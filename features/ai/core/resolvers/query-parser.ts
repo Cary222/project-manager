@@ -175,6 +175,7 @@ export type QueryType =
   | "user"
   | "commit"
   | "weekly_report"
+  | "meeting"
   | "note"
   | "ambiguous";
 
@@ -182,6 +183,7 @@ export type QueryType =
  * Pick the structured entity type only when the message contains a strong signal.
  */
 export function parseQueryType(content: string): QueryType {
+  if (/会议|周会|例会|纪要/i.test(content)) return "meeting";
   if (/工单|ticket|tickets?|#\d+/i.test(content)) return "ticket";
   if (/项目|module|组件|功能/i.test(content)) return "project";
   if (/周报|weekly.report/i.test(content)) return "weekly_report";
@@ -206,19 +208,19 @@ export function parseQueryType(content: string): QueryType {
  */
 export function isUserActivityQuery(content: string): boolean {
   const time = "(?:最近|近期|这周|本周|近来|今天|今日|昨天|昨日|前天|上周|上一周|上礼拜|这阵子|近几天|前几天|本月|这个月)";
-  const activity = "(?:在做什么|在干什么|在干嘛|在干啥|干嘛|干啥|做了什么|干了什么|做了啥|干了啥|做什么|干什么|开发什么|工作近况|工作内容|工作时间|工作总结|产出|完成(?:了)?什么|完成了哪些|进展|进度|动态)";
+  const activity = "(?:在做什么|在干什么|在干嘛|在干啥|干嘛|干啥|做了什么|干了什么|做了啥|干了啥|做什么|干什么|开发什么|工作近况|工作内容|工作时间|工作总结|产出|完成(?:了)?什么|完成了哪些|进展|进度|动态|负责(?:了)?(?:什么|哪些)?|在负责(?:什么|哪些)?|负责的工作|负责的工单|负责的模块|跟进(?:了)?(?:什么|哪些)?)";
 
   return new RegExp(`${time}.{0,12}${activity}`, "i").test(content)
     || new RegExp(`${activity}.{0,12}${time}`, "i").test(content)
-    || /[\u4e00-\u9fa5A-Za-z0-9_.\-@]{1,60}\s*(?:在干嘛|在干啥|在做什么|干嘛|干啥|干了什么|做了啥|做了什么|完成了什么|产出|进展|进度|最近动态)/i.test(content)
-    || /(?:上周|本周|最近|昨天|这周).{0,10}(?:干了|做了|完成|产出|开发|工作)/i.test(content);
+    || /[\u4e00-\u9fa5A-Za-z0-9_.\-@]{1,60}\s*(?:在干嘛|在干啥|在做什么|干嘛|干啥|干了什么|做了啥|做了什么|完成了什么|产出|进展|进度|最近动态|负责(?:了)?(?:什么|哪些)?)/i.test(content)
+    || /(?:上周|本周|最近|昨天|这周).{0,10}(?:干了|做了|完成|产出|开发|工作|负责|跟进)/i.test(content);
 }
 
 /**
  * Detect content-heavy queries that should use semantic knowledge retrieval.
  */
 export function isDeepContentQuery(content: string): boolean {
-  return /(?:了解|想了解|详情|详细内容|具体内容|文档|需求文档|设计文档|技术文档|需求说明|PRD|需求内容|笔记|记录|说明|资料|光污染|传感器|硬件|功能设计|接口设计)/i.test(content);
+  return /(?:了解|想了解|详情|详细内容|具体内容|文档|需求文档|设计文档|技术文档|需求说明|PRD|需求内容|笔记|记录|说明|资料|光污染|传感器|硬件|功能设计|接口设计|会议|周会|例会|纪要)/i.test(content);
 }
 
 /**

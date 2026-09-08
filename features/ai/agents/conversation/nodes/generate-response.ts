@@ -1,7 +1,8 @@
 import type { BaseMessage } from "@langchain/core/messages";
 import { HumanMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
 import type { AgentState } from "../agent";
-import { generateText } from "ai";
+import { streamText } from "ai";
+import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import type {
   ModelMessage,
   UserModelMessage,
@@ -17,9 +18,9 @@ import {
   buildReasoningProviderOptions,
   type ModelRuntimeConfig,
 } from "@/features/ai/llm/model-runtime-config";
-import { isUserActivityQuery } from "./detect-intent";
 import { type MultimodalPart } from "@/features/ai/core/context/messages/multimodal-builder";
 import type { UserContent } from "ai";
+import type { ClarificationSuggestion } from "@/features/ai/search/evidence-evaluator";
 
 /**
  * Call generateText with a dynamically selected model based on modelContext.
@@ -31,6 +32,7 @@ async function callWithDynamicModel(
   systemPrompt: string,
   messages: ModelMessage[],
   userId: string,
+  onDelta?: (delta: string) => void,
 ): Promise<string> {
   const taskType = modelContext?.taskType ?? "chat";
   const manualOverride = modelContext?.userConfig?.manualOverride;
@@ -60,7 +62,7 @@ async function callWithDynamicModel(
 
     const model = await createModel({ userId, modelRef });
     console.log(
-      `[generateResponseNode] using model instance for "${modelRef}", calling generateText...`,
+      `[generateResponseNode] using model instance for "${modelRef}", calling streamText...`,
     );
 
     // Stage 7：reasoning level → provider-specific 请求参数（anthropic thinking / openai reasoningEffort）
@@ -68,7 +70,7 @@ async function callWithDynamicModel(
       ? buildReasoningProviderOptions(runtimeConfig)
       : undefined;
 
-    const result = await generateText({
+    const result = streamText({
       model,
       system: systemPrompt,
       messages,
@@ -82,31 +84,37 @@ async function callWithDynamicModel(
       ...(providerOptions
         ? {
             providerOptions: providerOptions as Parameters<
-              typeof generateText
+              typeof streamText
             >[0]["providerOptions"],
           }
         : {}),
     });
 
+    let fullText = "";
+    for await (const chunk of result.textStream) {
+      fullText += chunk;
+      onDelta?.(chunk);
+    }
+
+    if (!fullText) {
+      try {
+        const fallbackText = await result.text;
+        if (fallbackText) {
+          fullText = fallbackText;
+          onDelta?.(fallbackText);
+        }
+      } catch {
+        // ignore text fallback failure
+      }
+    }
+
     console.log(
-      `[DEBUG:H2:callWithDynamicModel] generateText called with messages.length=${messages.length} message[0].role=${messages[0]?.role} message[last].role=${messages[messages.length - 1]?.role}`,
+      `[generateResponseNode] streamText success, textLen=${fullText.length}`,
     );
-    console.log(
-      `[DEBUG:H2:callWithDynamicModel] message[last].content types:`,
-      (() => {
-        const c = messages[messages.length - 1]?.content;
-        return Array.isArray(c)
-          ? c.map((p: any) => ({ type: p.type }))
-          : "string";
-      })(),
-    );
-    console.log(
-      `[generateResponseNode] generateText success, textLen=${result.text.length}`,
-    );
-    return result.text;
+    return fullText;
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
-    const apiError = err as any;
+    const apiError = err as Error & { response?: unknown; statusCode?: number };
     const responseBody = apiError.response
       ? JSON.stringify(apiError.response).slice(0, 300)
       : undefined;
@@ -483,7 +491,14 @@ function buildMessages(
  */
 export async function generateResponseNode(
   state: AgentState,
+  config?: LangGraphRunnableConfig,
 ): Promise<Partial<AgentState>> {
+  const onDelta = config?.configurable?.onTextDelta as
+    | ((delta: string) => void)
+    | undefined;
+  const onGenerateStart = config?.configurable?.onGenerateStart as
+    | (() => void)
+    | undefined;
   // Guard: never generate a response while waiting for human confirmation.
   // The graph should be at humanConfirmation, not here. This guards against
   // edge cases where the router doesn't catch waitingForConfirmation=true.
@@ -553,7 +568,7 @@ export async function generateResponseNode(
 
   // Handle user activity queries with summary results from searchStructured
   // 周报和个人活动查询的结果在 searchResults[0] 中（JSON 格式）
-  const userActivityContext = getUserActivityContext(state.toolResults);
+  const userActivityContext = state.toolResults?.retrieval ? null : getUserActivityContext(state.toolResults);
   if (userActivityContext) {
     // 根据用户意图决定输出格式：汇总意图 vs 具体意图
     const systemPrompt =
@@ -567,11 +582,13 @@ export async function generateResponseNode(
     ];
 
     try {
+      onGenerateStart?.();
       const resultText = await callWithDynamicModel(
         state.modelContext,
         systemPrompt,
         activityMsgs,
         state.userId,
+        onDelta,
       );
       return { response: resultText, lastMentionedUser };
     } catch (error) {
@@ -580,31 +597,19 @@ export async function generateResponseNode(
       console.warn(
         `[generateResponseNode] activity二次排版失败，降级返回原文: ${msg}`,
       );
+      if (onDelta) {
+        const chunks =
+          userActivityContext.match(/[\s\S]{1,6}/g) || [userActivityContext];
+        for (const c of chunks) {
+          onDelta(c);
+        }
+      }
       return { response: userActivityContext, lastMentionedUser };
     }
   }
 
-  // Fallback: 如果有 searchResults 且包含 summary，使用 searchResults
-  if (state.searchResults && state.searchResults.length > 0) {
-    const firstResult = state.searchResults[0];
-    try {
-      const parsed = JSON.parse(firstResult);
-      if (parsed?.summary && typeof parsed.summary === "string") {
-        return { response: parsed.summary, lastMentionedUser };
-      }
-    } catch {
-      // 不是 JSON 格式，继续使用 LLM 生成
-    }
-  }
-
-  // 如果是用户活动查询但没有有效结果，返回提示
-  if (isUserActivityQuery(userContent)) {
-    return {
-      response:
-        "暂未查询到该用户的结构化活动记录，请确认用户名或邮箱是否准确后重试。",
-      lastMentionedUser,
-    };
-  }
+  // Missing structured results are not a reason to terminate the entire answer.
+  // The retrieval report distinguishes empty, failed and partially covered sources.
 
   const systemPrompt = buildSystemPrompt(
     userName,
@@ -649,11 +654,13 @@ export async function generateResponseNode(
   );
 
   try {
+    onGenerateStart?.();
     const resultText = await callWithDynamicModel(
       state.modelContext,
       systemPrompt,
       messages,
       state.userId,
+      onDelta,
     );
 
     // Fallback: if data retrieval failed and the model produced nothing useful,
@@ -668,6 +675,7 @@ export async function generateResponseNode(
         buildSystemPrompt(userName, "chat", profile, lastMentionedUser),
         [{ role: "user", content: userContent } satisfies UserModelMessage],
         state.userId,
+        onDelta,
       );
       return {
         response:
@@ -681,16 +689,45 @@ export async function generateResponseNode(
       };
     }
 
+    const retrievalToolResult = state.toolResults?.retrieval as
+      | { evaluation?: { suggestions?: ClarificationSuggestion[] } }
+      | undefined;
+    const clarificationSuggestions =
+      retrievalToolResult?.evaluation?.suggestions ?? null;
+
     return {
       response: resultText,
       lastMentionedUser,
       // Belt-and-suspenders: clear any stale pending action so a fresh user message
       // is not hijacked by an abandoned HIL session from a previous request.
       pendingHumanAction: null,
+      clarificationSuggestions,
     };
   } catch (error) {
+    // Fallback: 如果 LLM 生成失败但有 searchResults 包含 summary，降级返回 summary
+    if (state.searchResults && state.searchResults.length > 0) {
+      try {
+        const parsed = JSON.parse(state.searchResults[0]);
+        if (parsed?.summary && typeof parsed.summary === "string") {
+          if (onDelta) {
+            const chunks =
+              parsed.summary.match(/[\s\S]{1,6}/g) || [parsed.summary];
+            for (const c of chunks) {
+              onDelta(c);
+            }
+          }
+          return { response: parsed.summary, lastMentionedUser };
+        }
+      } catch {
+        // 不是 JSON 格式，继续返回错误说明
+      }
+    }
     const msg = error instanceof Error ? error.message : String(error);
-    return { response: `生成回答时出错：${msg}`, lastMentionedUser };
+    const errText = `生成回答时出错：${msg}`;
+    if (onDelta) {
+      onDelta(errText);
+    }
+    return { response: errText, lastMentionedUser };
   }
 }
 

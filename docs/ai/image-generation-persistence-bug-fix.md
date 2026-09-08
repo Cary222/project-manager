@@ -128,7 +128,7 @@ attachments: m.attachments,
 
 ```bash
 # 1. 确保依赖已安装
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm install
 
 # 2. 确保数据库连接正常
@@ -209,7 +209,7 @@ open http://localhost:3003/ai/chat
 **现象**：
 ```
 Error: Transform failed with 1 error:
-/Users/vastgui/Desktop/project-manager/features/ai/llm/image-generator.ts:144:10: 
+/Volumes/WorkStation/project-manager/features/ai/llm/image-generator.ts:144:10: 
 ERROR: The symbol "typedData" has already been declared
 ```
 

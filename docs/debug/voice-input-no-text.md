@@ -48,7 +48,7 @@
 kill -9 15027
 
 # 2. 重新构建
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm run build
 
 # 3. 启动新服务

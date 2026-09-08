@@ -35,7 +35,7 @@ description: Cursor 生态 Skill 路由与能力地图。ProjectHub 4 子代理�
 
 ---
 
-## 🗂️ 总览：35+ Skill 分 7 大类
+## 🗂️ 总览：41+ Skill 分 7 大类
 
 | 分类 | Skill 数量 | 适用子代理 |
 |------|----------|----------|
@@ -52,7 +52,7 @@ description: Cursor 生态 Skill 路由与能力地图。ProjectHub 4 子代理�
 ## A. ProjectHub 专属开发（7 个）— **fullstack-developer 主战场**
 
 > 这些是项目核心 skill，fullstack-developer 必须熟。
-> **所有路径相对于项目根目录 `/Users/vastgui/Desktop/project-manager/`**
+> **所有路径相对于项目根目录 `/Volumes/WorkStation/project-manager/`**
 
 | Skill | 路径 | 触发词 | 必读/按需 | 适用任务 |
 |-------|------|--------|----------|----------|
@@ -71,7 +71,7 @@ description: Cursor 生态 Skill 路由与能力地图。ProjectHub 4 子代理�
 
 ---
 
-## B. AI / LLM 框架（11 个）— **fullstack-developer 开发 AI 时按需读**
+## B. AI / LLM / GraphRAG 框架（17 个）— **fullstack-developer 开发 AI 时按需读**
 
 > 这些 skill 在 `.agents/skills/`（项目内，更新勤）或 `~/.cursor/skills/`（用户级，通用）。
 > **项目内 skills 优先使用 `.agents/skills/`**
@@ -107,6 +107,32 @@ description: Cursor 生态 Skill 路由与能力地图。ProjectHub 4 子代理�
 - **LangChain 与 LangGraph 重叠时**：`langchain-architecture` 是入口；要深挖某专题再选 B2/B3 子 skill
 - **RAG 入门**：`langchain-rag`；**RAG 调优**：`rag-retrieval`
 - **LangGraph 入门**：`langgraph-fundamentals` 或 `dive-into-langgraph`；**HITL**：`langgraph-human-in-the-loop`；**持久化**：`langgraph-persistence`
+
+
+### B4. 知识图谱 / GraphRAG 参考（6 个）
+
+> **先读 `projecthub-graphrag-reference`**：它会按主题输出 `/Volumes/WorkStation/graph/` 的精确源码路径；只读命中路径，不要把八个参考仓库整库塞进上下文。ProjectHub 实现仍固定在 PostgreSQL `pm` schema + pgvector + Prisma，**不得因参考 Skill 引入 Neo4j / Apache AGE / KuzuDB**。
+
+> **物理位置**：Cursor / Pi 使用 `.agents/skills/`；Claude 使用同名 `.claude/skills/` 副本。
+
+> | Skill | 路径 | 触发词 | 必读/按需 |
+> |---|---|---|---|
+> | **projecthub-graphrag-reference** | `.agents/skills/projecthub-graphrag-reference/SKILL.md` | `知识图谱 / GraphRAG / KnowledgeNode / KnowledgeEdge / recursive CTE / 图检索 / 图谱 UI / community` | **必读**（GraphRAG 设计、调研、实现前） |
+> | **neo4j-modeling-skill** | `.agents/skills/neo4j-modeling-skill/SKILL.md` | `Node / Edge / property schema / 关系建模 / 约束` | 按需（只借用建模原则） |
+> | **neo4j-graphrag-skill** | `.agents/skills/neo4j-graphrag-skill/SKILL.md` | `GraphRAG / retriever / vector + graph / Text2Cypher` | 按需（只借用 Retriever 模式） |
+> | **neo4j-document-import-skill** | `.agents/skills/neo4j-document-import-skill/SKILL.md` | `文档入图 / entity extraction / relationship extraction / entity resolution` | 按需 |
+> | **neo4j-vector-index-skill** | `.agents/skills/neo4j-vector-index-skill/SKILL.md` | `向量索引 / HNSW / semantic / hybrid / RRF` | 按需（映射到 pgvector） |
+> | **neo4j-nvl-skill** | `.agents/skills/neo4j-nvl-skill/SKILL.md` | `图可视化 / graph canvas / node click / WebGL` | 按需（优先对照 GitNexus Sigma.js/Graphology） |
+>
+**主题 → 源码重点**：
+- `modeling`：pg-raggraph schema + LightRAG `PGTableGraphStorage`。
+- `ingestion`：LightRAG 抽取思路 + Neo4j GraphRAG Python extractor/resolver。
+- `retrieval`：pg-raggraph seed → recursive CTE → chunk mapping → rerank。
+- `hybrid-search`：GitNexus BM25/semantic/RRF。
+- `communities`：Microsoft GraphRAG local/global/DRIFT/community reports。
+- `graph-ui` / `agent-mcp` / `temporal` / `workspace`：分别优先 GitNexus、Graphiti、Boujoy。
+
+> **MCP 优先**：调用 `graph-reference.graph_open_topic` 后再 `graph_read_source` / `graph_search_sources`；没有 MCP 工具时才运行 `./.agents/skills/projecthub-graphrag-reference/scripts/open-reference.sh <topic>`。
 
 ---
 
@@ -235,6 +261,13 @@ description: Cursor 生态 Skill 路由与能力地图。ProjectHub 4 子代理�
 用户说："RAG" / "embedding" / "向量检索"
   └→ 必读 langchain-rag（入门）
   └→ 按需 rag-retrieval（调优）
+
+
+用户说：`知识图谱` / `GraphRAG` / `KnowledgeNode` / `KnowledgeEdge` / `图检索` / `图谱 UI`
+  └→ **先读** `projecthub-graphrag-reference`；优先用 MCP `graph-reference.graph_open_topic`，无 MCP 时才运行 `open-reference.sh <topic>`
+  └→ 建模：`neo4j-modeling-skill`；入图：`neo4j-document-import-skill`
+  └→ 检索：`neo4j-graphrag-skill` + `rag-retrieval`；图 UI：`neo4j-nvl-skill` + `pretty-ui`
+  └→ 约束：仅映射方法到 PostgreSQL `pm` + pgvector，不引入 Neo4j / Apache AGE / KuzuDB
 
 用户说："Agent" / "Tool Calling" / "LangGraph"
   └→ 必读 langchain-architecture（入口）

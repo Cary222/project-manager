@@ -25,10 +25,14 @@ import { MessageCopyButton } from "./MessageCopyButton";
 import { AiThinkingStream } from "./AiThinkingStream";
 import type { TaskRecord } from "@/features/ai/types";
 
+import { IconSparkles } from "@/shared/ui/icons";
+import type { ClarificationSuggestion } from "@/features/ai/search/evidence-evaluator";
 interface AiResponsePanelProps {
   content: string;
   thinkingSteps?: TaskRecord[];
   sources?: SourceReference[];
+  suggestions?: ClarificationSuggestion[];
+  onSelectSuggestion?: (query: string) => void;
   isStreaming?: boolean;
   totalThinkingMs?: number;
 }
@@ -37,14 +41,17 @@ export function AiResponsePanel({
   content,
   thinkingSteps,
   sources,
+  suggestions,
+  onSelectSuggestion,
   isStreaming,
   totalThinkingMs,
 }: AiResponsePanelProps) {
   const hasThinking = thinkingSteps && thinkingSteps.length > 0;
   const hasSources = sources && sources.length > 0;
+  const hasSuggestions = suggestions && suggestions.length > 0;
   const showCopyButton = !isStreaming;
   const showSources = !isStreaming && hasSources;
-
+  const showSuggestions = !isStreaming && hasSuggestions;
   return (
     <div className="w-full overflow-hidden rounded-xl border border-ink-200 bg-white shadow-sm">
       {/* ── Section 1: Thinking Trail (Collapsible) ────────────────────────── */}
@@ -68,7 +75,7 @@ export function AiResponsePanel({
       </div>
 
       {/* ── Section 3: Footer (Copy + Sources) ────────────────────────────── */}
-      {(showCopyButton || showSources) && (
+      {(showCopyButton || showSources || showSuggestions) && (
         <div className="mt-3 flex flex-col gap-2 px-4 pb-3">
           {showCopyButton && (
             <div className="flex justify-start">
@@ -78,6 +85,26 @@ export function AiResponsePanel({
           {showSources && (
             <div>
               <AiSourcesList sources={sources!} />
+            </div>
+          )}
+          {showSuggestions && (
+            <div className="mt-1 border-t border-ink-100/80 pt-2.5">
+              <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-ink-500">
+                <IconSparkles className="h-3.5 w-3.5 text-brand-500" />
+                <span>建议继续探索：</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {suggestions!.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => onSelectSuggestion?.(s.query)}
+                    className="inline-flex items-center gap-1 rounded-lg border border-brand-200/90 bg-brand-50/50 px-2.5 py-1 text-xs text-brand-700 transition-colors hover:border-brand-400 hover:bg-brand-100"
+                  >
+                    <span>{s.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>

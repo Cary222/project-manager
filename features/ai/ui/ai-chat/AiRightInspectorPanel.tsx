@@ -11,13 +11,15 @@ import {
   type AiMode,
   type ChatToolMode,
 } from "@/features/ai/types/modes";
+import type { RagTrace } from "@/features/ai/search/rag-trace";
 
-export type InspectorTab = "info" | "sources" | "profile";
+export type InspectorTab = "info" | "sources" | "trace" | "profile";
 
 interface AiRightInspectorPanelProps {
   mode: "chat" | "work";
   conversationId: string | null;
   sources?: SourceReference[];
+  ragTrace?: RagTrace | null;
   userProfile?: AiUserProfile | null;
   onUserProfileChange?: (next: AiUserProfile) => void;
   selectedModel?: string;
@@ -37,6 +39,7 @@ export function AiRightInspectorPanel({
   mode,
   conversationId,
   sources = [],
+  ragTrace = null,
   userProfile = null,
   onUserProfileChange,
   selectedModel = "agnes:agnes-2.5-flash",
@@ -120,6 +123,17 @@ export function AiRightInspectorPanel({
             }`}
           >
             引用来源 {sources.length > 0 && `(${sources.length})`}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("trace")}
+            className={`flex-1 rounded-lg py-1 text-center text-xs font-medium transition ${
+              activeTab === "trace"
+                ? "bg-white text-brand-700 shadow-2xs font-semibold"
+                : "text-ink-500 hover:text-ink-800"
+            }`}
+          >
+            RAG Trace {ragTrace ? "●" : ""}
           </button>
           <button
             type="button"
@@ -423,6 +437,143 @@ export function AiRightInspectorPanel({
                     <p className="mt-1 text-[11px] text-ink-400 leading-relaxed">
                       提问中涉及具体工单（如
                       #10001）、项目文档或知识库内容时，自动召回的参考来源将展示在这里。
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+            {activeTab === "trace" && (
+              <div className="space-y-3">
+                {ragTrace ? (
+                  <div className="space-y-3 text-xs">
+                    {/* 1. 选路决策 */}
+                    <div className="rounded-xl border border-ink-200 bg-white p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-ink-900">选路决策</span>
+                        <span className="rounded bg-brand-100 px-2 py-0.5 text-[10px] font-bold text-brand-700">
+                          {ragTrace.router.route}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-ink-600 leading-relaxed">
+                        {ragTrace.router.rationale}
+                      </p>
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        <span className="rounded bg-ink-100 px-1.5 py-0.5 text-[10px] text-ink-600">
+                          意图: {ragTrace.query.fineGrainedIntent}
+                        </span>
+                        <span className="rounded bg-ink-100 px-1.5 py-0.5 text-[10px] text-ink-600">
+                          范围: {ragTrace.query.scope}
+                        </span>
+                        {ragTrace.router.fallbackOccurred && (
+                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                            ⚠️ 已触发安全降级
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 2. 实体绑定与歧义 */}
+                    {ragTrace.query.entityBindings && ragTrace.query.entityBindings.length > 0 && (
+                      <div className="rounded-xl border border-ink-200 bg-white p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-ink-900">预解析实体</span>
+                          {ragTrace.query.ambiguity?.isAmbiguous && (
+                            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700">
+                              存在歧义 ({Math.round(ragTrace.query.ambiguity.score * 100)}%)
+                            </span>
+                          )}
+                        </div>
+                        <div className="space-y-1">
+                          {ragTrace.query.entityBindings.map((b) => (
+                            <div key={`${b.type}-${b.id}`} className="flex items-center justify-between text-[11px] text-ink-700">
+                              <span>[{b.type}] {b.name}</span>
+                              <span className="text-ink-400 font-mono">{(b.confidence * 100).toFixed(0)}%</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 3. 图谱拓扑路径 */}
+                    {ragTrace.graph && ragTrace.graph.paths.length > 0 && (
+                      <div className="rounded-xl border border-purple-200 bg-purple-50/40 p-3 space-y-2">
+                        <span className="font-semibold text-purple-900 block">
+                          图谱拓扑路径 ({ragTrace.graph.pathsCount} 条)
+                        </span>
+                        <div className="space-y-1 text-[11px] text-purple-800">
+                          {ragTrace.graph.paths.map((p, i) => (
+                            <div key={i} className="rounded bg-white/80 px-2 py-1 font-mono text-[10px] text-purple-900 border border-purple-100 break-all">
+                              🔗 {p}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 4. 多通道初筛候选池 */}
+                    {ragTrace.retrieval.candidates && ragTrace.retrieval.candidates.length > 0 && (
+                      <div className="rounded-xl border border-ink-200 bg-white p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-ink-900">初筛候选池 ({ragTrace.retrieval.totalRetrieved} 条)</span>
+                          <div className="flex gap-1 text-[9px] text-ink-500">
+                            {Object.entries(ragTrace.retrieval.byChannel).map(([ch, cnt]) => (
+                              <span key={ch} className="rounded bg-ink-100 px-1 py-0.5 font-mono">{ch}:{cnt}</span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          {ragTrace.retrieval.candidates.slice(0, 6).map((c) => (
+                            <div key={`${c.channel}-${c.id}`} className="flex items-center justify-between text-[11px] text-ink-700">
+                              <span className="truncate pr-2"><span className="text-ink-400 font-mono mr-1">#{c.rrfRank}</span>[{c.channel}] {c.title}</span>
+                              <span className="text-[10px] text-ink-400 shrink-0">{c.type}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 5. 语义精排结果 */}
+                    {ragTrace.reranking.items.length > 0 && (
+                      <div className="rounded-xl border border-ink-200 bg-white p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-ink-900">语义精排 (Top {ragTrace.reranking.items.length})</span>
+                          <span className="text-[10px] text-ink-400">初筛 {ragTrace.reranking.totalBefore} 条</span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {ragTrace.reranking.items.slice(0, 5).map((item, idx) => (
+                            <div key={item.id} className="rounded border border-ink-100 bg-ink-50/40 p-1.5 text-[11px]">
+                              <div className="flex items-center justify-between font-medium text-ink-800">
+                                <span className="truncate pr-2">{item.title}</span>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <span className="rounded bg-ink-100 px-1 py-0.5 text-[9px] font-mono text-ink-500">初筛 #{item.rrfRank} → 精排 #{idx + 1}</span>
+                                  <span className="text-brand-600 font-mono text-[10px]">{(item.score * 100).toFixed(0)}%</span>
+                                </div>
+                              </div>
+                              {item.reasons.length > 0 && (
+                                <div className="mt-1 flex flex-wrap gap-1 text-[9px] text-ink-500">
+                                  {item.reasons.map((r, ri) => (
+                                    <span key={ri} className="rounded bg-white px-1 py-0.5 border border-ink-100">{r}</span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 5. 证据评估与耗时 */}
+                    <div className="flex items-center justify-between text-[11px] text-ink-500 px-1">
+                      <span>评估状态: {ragTrace.evaluation.status}</span>
+                      <span>总耗时: {ragTrace.timing.tookMs} ms</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-ink-200 p-6 text-center text-ink-400">
+                    <IconSparkles className="mx-auto h-7 w-7 text-ink-300 mb-2" />
+                    <p className="font-medium text-ink-600">暂无当前提问的 RAG Trace</p>
+                    <p className="mt-1 text-[11px] text-ink-400 leading-relaxed">
+                      在会话中发送检索或业务查询后，完整的 Query Understanding、选路决策、图谱路径和重排打分将在此呈现。
                     </p>
                   </div>
                 )}

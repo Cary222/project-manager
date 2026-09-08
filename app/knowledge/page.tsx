@@ -1,4 +1,6 @@
 import { AppShell } from "@/shared/ui/AppShell";
+import Link from "next/link";
+import { KnowledgeGraphView } from "@/features/knowledge/ui/graph";
 import { KnowledgeSearchPanel } from "@/features/knowledge/ui/KnowledgeSearchPanel";
 import { KnowledgeSpaces } from "@/features/knowledge/ui/KnowledgeSpaces";
 import { KnowledgePublicTags } from "@/features/knowledge/ui/KnowledgePublicTags";
@@ -35,9 +37,13 @@ export default async function KnowledgePage({
           知识库当前结果来自工单、提交记录与个人笔记。
         </div>
 
-        <KnowledgeSearchPanel initialQuery={initialQuery} />
+        <nav aria-label="知识库视图" className="flex gap-2">
+          <Link href="/knowledge" aria-current={params?.tab !== "graph" ? "page" : undefined} className="rounded-lg border border-ink-200 bg-white px-4 py-2 text-sm text-ink-700">文档与搜索</Link>
+          <Link href="/knowledge?tab=graph" aria-current={params?.tab === "graph" ? "page" : undefined} className="rounded-lg border border-ink-200 bg-white px-4 py-2 text-sm text-ink-700">知识图谱</Link>
+        </nav>
+        {params?.tab === "graph" ? <KnowledgeGraphView /> : <KnowledgeSearchPanel initialQuery={initialQuery} />}
 
-        {!showSearchResults ? (
+        {!showSearchResults && params?.tab !== "graph" ? (
           <>
             <KnowledgeSpaces />
             <KnowledgePublicTags />

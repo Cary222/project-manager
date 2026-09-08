@@ -222,7 +222,7 @@ psql "$DATABASE_URL" -f prisma/migrations/manual_add_uploaded_file/migration.sql
 psql "$DATABASE_URL" -c "SELECT id, \"originalName\" FROM pm.\"UploadedFile\" LIMIT 1;"
 
 # 4. 启动 dev server
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm run dev
 
 # 5. 确认服务存活

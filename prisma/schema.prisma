@@ -218,6 +218,8 @@ model Project {
   members          UserOnProject[]
   weeklyReports    WeeklyReportProject[]
   meetings         ProjectMeeting[]
+  knowledgeNodes   KnowledgeNode[]
+  knowledgeEdges   KnowledgeEdge[]
 
   @@schema("pm")
 }
@@ -1249,5 +1251,118 @@ model ProjectMeeting {
 
   @@index([projectId, meetingDate(sort: Desc)])
   @@index([status])
+  @@schema("pm")
+}
+
+// =============================================================================
+// Knowledge Graph 模型 (GraphRAG V1)
+// =============================================================================
+
+enum KnowledgeNodeType {
+  // 确定性业务实体 (Deterministic)
+  PROJECT
+  TICKET
+  USER
+  COMMIT
+  REPOSITORY
+  MEETING
+  DOCUMENT
+  PKM_NOTE
+  MODULE
+  // 抽取的语义概念 (Extracted)
+  CONCEPT
+  TECHNOLOGY
+  FEATURE
+  ORGANIZATION
+  CUSTOM
+
+  @@schema("pm")
+}
+
+enum KnowledgeEdgeSourceType {
+  BUSINESS  // 来自数据库关系硬同步（100% 确定性）
+  EXPLICIT  // 来自文档显式 [[WikiLink]] 或 Markdown 超链接
+  EXTRACTED // 来自 LLM 从文本中抽取的实体关系
+
+  @@schema("pm")
+}
+
+model KnowledgeNode {
+  id             String            @id @default(cuid())
+  type           KnowledgeNodeType
+  canonicalName  String            // 规范展示名，如 "Ticket #10208"
+  normalizedName String            // 小写归一化去重标识，如 "ticket_10208"
+  description    String?
+  projectId      String?
+  metadata       Json              @default("{}")
+  embedding      Unsupported("vector")?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  project        Project?          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  outgoingEdges  KnowledgeEdge[]   @relation("EdgeSourceNode")
+  incomingEdges  KnowledgeEdge[]   @relation("EdgeTargetNode")
+  chunkSources   KnowledgeNodeSource[]
+
+  @@unique([type, normalizedName, projectId])
+  @@index([normalizedName])
+  @@index([projectId, type])
+  @@schema("pm")
+}
+
+model KnowledgeEdge {
+  id               String                  @id @default(cuid())
+  sourceId         String
+  targetId         String
+  relType          String
+  weight           Float                   @default(1.0)
+  confidence       Float                   @default(1.0)
+  sourceType       KnowledgeEdgeSourceType @default(BUSINESS)
+  extractorVersion String?
+  projectId        String?
+  sourceDocumentId String?
+  sourceChunkId    String?
+  metadata         Json                    @default("{}")
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  sourceNode       KnowledgeNode           @relation("EdgeSourceNode", fields: [sourceId], references: [id], onDelete: Cascade)
+  targetNode       KnowledgeNode           @relation("EdgeTargetNode", fields: [targetId], references: [id], onDelete: Cascade)
+  project          Project?                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, targetId, relType])
+  @@index([sourceId])
+  @@index([targetId])
+  @@index([projectId, relType])
+  @@schema("pm")
+}
+
+model KnowledgeNodeSource {
+  id               String        @id @default(cuid())
+  nodeId           String
+  sourceDocumentId String?
+  sourceChunkId    String?
+  confidence       Float         @default(1.0)
+  createdAt        DateTime      @default(now())
+
+  node             KnowledgeNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId])
+  @@index([sourceChunkId])
+  @@schema("pm")
+}
+
+model KnowledgeCommunity {
+  id        String   @id @default(cuid())
+  projectId String?
+  level     Int      @default(0)
+  name      String
+  summary   String
+  nodeIds   String[] @default([])
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, level])
   @@schema("pm")
 }

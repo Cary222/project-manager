@@ -175,7 +175,7 @@ function OverviewTab({
 
 ```bash
 # 1. 确认服务运行
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm run dev
 
 # 2. 确认数据库连接正常（访问任意需要 auth 的页面）

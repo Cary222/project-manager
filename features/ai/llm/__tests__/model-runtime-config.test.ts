@@ -5,6 +5,7 @@ import type { ModelCatalogEntry } from "../providers/types";
 vi.mock("@/shared/db/client", () => ({ prisma: {} }));
 vi.mock("../providers/registry", () => ({
   getEnabledModels: vi.fn(),
+  AGNES_MODELS: [],
 }));
 vi.mock("@/lib/user-models-cache", () => ({
   loadUserModelsWithCache: vi.fn(async (_key: string, loader: () => unknown) => loader()),

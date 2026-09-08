@@ -13,6 +13,7 @@ import {
   type FileAttachment,
 } from "@/features/knowledge/lib/pkm";
 import { uploadImage } from "@/features/knowledge/lib/upload";
+import { KnowledgeGraphSection } from "@/features/knowledge/ui/graph/KnowledgeGraphSection";
 
 type ProjectOption = {
   id: string;
@@ -640,6 +641,7 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
             </div>
           </div>
         </div>
+        {selectedNote && <KnowledgeGraphSection key={selectedNote.id} noteId={selectedNote.id} />}
         {previewFile && (
           <DocumentPreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
         )}

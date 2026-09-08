@@ -195,7 +195,7 @@ curl -s -X POST http://localhost:5000/extract-text \
 ### 6.2 TypeScript 类型检查
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npx tsc --noEmit 2>&1 | head -20
 
 # 期望: 仅历史遗留错误（e2e/module-edit.spec.ts、features/admin/admin.test.ts、API routes）

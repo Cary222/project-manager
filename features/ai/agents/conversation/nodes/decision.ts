@@ -1,6 +1,5 @@
 import type { AgentState } from "../agent";
 import type { DisambiguationCandidate } from "../types";
-import { searchAmbiguousEntities } from "@/features/ai/core/queries/query-ambiguous";
 
 /**
  * Decision node — unified decision layer after searchStructured.
@@ -53,7 +52,7 @@ export async function disambiguateIntentNode(
       // Guard: if resolvedEntities is already set (user picked from a previous round),
       // do NOT re-trigger HIL — the selection is complete, route to generateResponse.
       !state.resolvedEntities &&
-      decisionField.entityType &&
+      decisionField.entityType === "user" &&
       decisionField.candidates &&
       decisionField.candidates.length > 0
     ) {
@@ -80,46 +79,6 @@ export async function disambiguateIntentNode(
     }
   }
 
-  // ── Branch 2: ambiguous query type — search across entity types ──
-  // detectIntent sets state.queryType = "ambiguous" when parseQueryType returns
-  // "ambiguous". We only act on it when there's no pendingHumanAction yet
-  // (avoid double-triggering) and no resolvedEntities (already picked once).
-  if (state.queryType === "ambiguous" && !state.pendingHumanAction && !state.resolvedEntities) {
-    const lastMessage = state.messages[state.messages.length - 1];
-    const lastMessageContent = typeof lastMessage?.content === "string"
-      ? lastMessage.content
-      : "";
-    const query = state.originalQuery || lastMessageContent;
-
-    if (!query) {
-      return {};
-    }
-
-    const candidates = await searchAmbiguousEntities(query);
-
-    if (candidates.length > 0) {
-      console.log(
-        `[decision] ambiguous query candidates=${candidates.length} query="${query.slice(0, 40)}"`
-      );
-      return {
-        pendingHumanAction: {
-          type: "select",
-          entity: "ambiguous",
-          entityType: "ambiguous",
-          reason: `查询"${query.slice(0, 30)}"未明确指向某种实体类型，请选择：`,
-          candidates: candidates.map((c) => ({
-            id: c.id,
-            label: c.label,
-            summary: c.summary,
-          })),
-          query,
-          sourceResult: { queryType: "ambiguous", originalQuery: query },
-        },
-        waitingForConfirmation: true,
-        originalQuery: query,
-      };
-    }
-  }
 
   return {};
 }

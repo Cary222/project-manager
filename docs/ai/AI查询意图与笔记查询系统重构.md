@@ -214,7 +214,7 @@ RAG 结果在 `toolResults.searchKnowledge` 中，进入 LLM 上下文：
 
 ```bash
 # 1. 安装依赖
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm install
 
 # 2. 确保 embedding 服务运行

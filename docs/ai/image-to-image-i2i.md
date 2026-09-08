@@ -136,7 +136,7 @@ async function generateWithAgnes(
 ```bash
 # ========== 本地开发 ==========
 # 1. 安装依赖
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm install
 
 # 2. 启动 Next.js 开发服务器
@@ -148,7 +148,7 @@ npm run worker
 # ========== 远程部署 ==========
 # 1. 同步代码到远程
 rsync -avz --exclude='node_modules' --exclude='.next' \
-  /Users/vastgui/Desktop/project-manager/ \
+  /Volumes/WorkStation/project-manager/ \
   hxy@192.168.1.14:/home/hxy/work/personal/project-manager/
 
 # 2. 在远程服务器重启 Worker
@@ -246,7 +246,7 @@ requestBody.extra_body = {
 **解法**：使用 rsync 同步代码后，必须重启 Worker：
 ```bash
 rsync -avz --exclude='node_modules' --exclude='.next' \
-  /Users/vastgui/Desktop/project-manager/ \
+  /Volumes/WorkStation/project-manager/ \
   hxy@192.168.1.14:/home/hxy/work/personal/project-manager/
 
 ssh hxy@192.168.1.14 "cd /home/hxy/work/personal/project-manager && pm2 restart worker-background"

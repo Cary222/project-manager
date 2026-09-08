@@ -194,9 +194,9 @@ const created = await prisma.$transaction(async (tx) => {
 
 ```bash
 # 1. 数据库迁移（已有手动 SQL，需要时执行）
-# 路径: /Users/vastgui/Desktop/project-manager
+# 路径: /Volumes/WorkStation/project-manager
 # 方式一：Prisma migrate（推荐开发环境）
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npx prisma migrate deploy
 
 # 方式二：手动 SQL（如果 Prisma migrate 失败）
@@ -208,7 +208,7 @@ psql "postgresql://community:community@192.168.1.14:5432/community" \
   -c "SELECT 1;"
 
 # 3. 生成 Prisma Client（schema 变更后必须）
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npx prisma generate
 
 # 4. 启动开发服务

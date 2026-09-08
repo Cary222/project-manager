@@ -17,13 +17,14 @@ import { queryProject } from "@/features/ai/core/queries/query-project";
 import { queryCommit } from "@/features/ai/core/queries/query-commit";
 import { queryWeeklyReport } from "@/features/ai/core/queries/query-weekly-report";
 import { queryNote } from "@/features/ai/core/queries/query-note";
+import { queryMeeting } from "@/features/ai/core/queries/query-meeting";
 
 // ---------------------------------------------------------------------------
 // Input schema
 // ---------------------------------------------------------------------------
 
 export const searchStructuredInputSchema = z.object({
-  type: z.enum(["ticket", "project", "user", "commit", "weekly_report", "note"]),
+  type: z.enum(["ticket", "project", "user", "commit", "weekly_report", "meeting", "note"]),
   id: z.string().optional().describe("工单号(如 #10156 或 10156)、项目ID、用户ID、commit SHA 等"),
   filters: z
     .object({
@@ -92,6 +93,9 @@ export async function executeStructuredQuery(
         break;
       case "note":
         result = await queryNote({ id, filters, limit: _limit }, viewerUserId);
+        break;
+      case "meeting":
+        result = await queryMeeting({ id, filters, limit: _limit }, viewerUserId);
         break;
       default:
         result = { summary: `不支持的查询类型: ${type}`, sources: [] };

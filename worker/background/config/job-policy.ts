@@ -29,7 +29,7 @@ export const JOB_POLICY: Record<BackgroundJobType, JobPolicy> = {
   },
   MEETING_PROCESS: {
     maxAttempts: 3,
-    timeoutMs: 300_000,
+    timeoutMs: 600_000, // 10 分钟（支持 100MB 大音频转录 + 7 要素总结）
     backoffMs: [3_000, 10_000, 30_000],
   },
 };

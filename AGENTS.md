@@ -90,7 +90,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 ## 📂 项目结构速查
 
 ```
-/Users/vastgui/Desktop/project-manager
+/Volumes/WorkStation/project-manager
 ├─ app/                       # Next.js App Router（页面 + API 路由）
 │  ├─ api/auth/[...nextauth]/ # NextAuth v5 入口
 │  ├─ tickets/[ticketId]/     # 工单详情页

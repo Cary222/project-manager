@@ -159,7 +159,7 @@ if (asset.storageType === "REMOTE_URL" && asset.storageKey) {
 
 ```bash
 # 1. 更新 Prisma schema（REMOTE_URL 枚举）
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npx prisma db push
 
 # 2. 生成 Prisma Client

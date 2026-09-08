@@ -231,7 +231,7 @@ function dedupeSourcesByUrl(sources: SourceReference[]): SourceReference[] {
 
 ```bash
 # 本地开发
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm run dev
 
 # 远端生产（hxy@192.168.1.14）
@@ -261,7 +261,7 @@ ssh hxy@192.168.1.14 'cd ~/work/personal/project-manager && npx prisma db push'
 ### 6.1 单元验证（关键词召回）
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npx tsx -e "
 const { searchDocuments } = require('./shared/lib/search');
 (async () => {

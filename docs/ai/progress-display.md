@@ -145,7 +145,7 @@ const startPolling = useCallback(
 
 ```bash
 # 1. 本地开发
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm run dev
 
 # 2. 服务器部署（需要先 push 代码）

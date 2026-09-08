@@ -81,6 +81,8 @@ export type { ModelCatalogEntry, ApiFormat };
  */
 async function normalizeResponse(res: Response): Promise<Response> {
   if (!res.ok || res.status === 204) return res;
+  const contentType = res.headers.get("content-type") ?? "";
+  if (contentType.includes("text/event-stream")) return res;
 
   let body: string;
   try {
@@ -155,7 +157,7 @@ function isHardcodedProvider(p: string): p is HardcodedProvider {
 // The /responses endpoint rejects role='user', while /chat/completions supports
 // role='user' and multimodal image parts — exactly what the vision feature needs.
 // ---------------------------------------------------------------------------
-const AGNES_MODELS: ModelCatalogEntry[] = [
+export const AGNES_MODELS: ModelCatalogEntry[] = [
   // Chat models
   {
     id: "agnes:agnes-2.5-flash",

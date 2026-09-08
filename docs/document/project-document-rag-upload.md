@@ -167,7 +167,7 @@ journalctl --user -u project-manager-worker.service -n 20 --no-pager
 ### 6.1 诊断脚本（本地可跑）
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npx tsx scripts/diagnose-document-search.ts
 ```
 

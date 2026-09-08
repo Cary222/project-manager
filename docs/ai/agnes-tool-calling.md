@@ -251,7 +251,7 @@ setSearchStructuredViewer(session.user.id);
 
 ```bash
 # 1. 安装 / 更新依赖
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm install
 
 # 2. 确认 .env.local 中包含：
@@ -274,7 +274,7 @@ curl -s http://localhost:3003 | head -5
 ### 6.1 类型检查
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npx tsc --noEmit 2>&1 | grep -E "search-knowledge|messages/route|agnes-provider|tools/index|web-search"
 ```
 

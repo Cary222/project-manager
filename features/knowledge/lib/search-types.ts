@@ -31,6 +31,13 @@ export type SearchDocumentMetadata = {
   noteIndexedAttachmentCount?: number;
   chunkIndex?: number;
   totalChunks?: number;
+  parentId?: string;
+  parentChunkId?: string;
+  sectionTitle?: string;
+  parentContent?: string;
+  isHierarchical?: boolean;
+  sourceId?: string;
+  fileAssetId?: string;
 };
 
 export type SearchResultItem = {
@@ -47,6 +54,8 @@ export type SearchResultItem = {
   keywordScore: number;
   semanticScore: number;
   metadata: SearchDocumentMetadata;
+  sources?: string[];
+  knowledgePaths?: string[];
 };
 
 export type SearchResponseMode = "search" | "suggest";

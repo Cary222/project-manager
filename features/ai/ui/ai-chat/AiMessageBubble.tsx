@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import Image from "next/image";
 import { AiResponsePanel } from "./AiResponsePanel";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
 import { AiLoadingIndicator } from "./AiLoadingIndicator";
 import type { TaskRecord } from "@/features/ai/types";
 import type { SourceReference } from "./AiSourcesList";
+import type { ClarificationSuggestion } from "@/features/ai/search/evidence-evaluator";
 
 interface CandidateUser {
   id: string;
@@ -22,6 +23,8 @@ interface AiMessageBubbleProps {
   content: string;
   sources?: SourceReference[];
   candidates?: CandidateUser[];
+  suggestions?: ClarificationSuggestion[];
+  onSuggestionSelect?: (query: string) => void;
   isStreaming?: boolean;
   thinkingSteps?: TaskRecord[];
   totalThinkingMs?: number;
@@ -50,20 +53,13 @@ interface AiMessageBubbleProps {
   };
 }
 
-// Typewriter timing (in milliseconds per character):
-//  - MIN: floor — we always type at least this fast so the user never waits
-//         when SSE is silent because the LLM is "thinking".
-//  - MAX: ceiling — we never type faster than this so big SSE bursts don't
-//         dump dozens of characters on screen at once.
-//  Target reading speed sits between the two (~45 ms/char ≈ 22 cps).
-const TYPEWRITER_MIN_MS_PER_CHAR = 18;
-const TYPEWRITER_MAX_MS_PER_CHAR = 55;
-
 export function AiMessageBubble({
   role,
   content,
   sources,
   candidates,
+  suggestions,
+  onSuggestionSelect,
   isStreaming,
   thinkingSteps,
   totalThinkingMs,
@@ -77,103 +73,12 @@ export function AiMessageBubble({
   const isUserMessage = role === "user";
   const hasCandidates = candidates && candidates.length > 0;
 
-  // User messages always render the full content. Assistant messages start
-  // empty and are revealed by the typewriter loop below.
-  const [displayed, setDisplayed] = useState(isUserMessage ? content : "");
-
   // Lightbox state for generated images
   const [lightboxImage, setLightboxImage] = useState<{ src: string; name: string } | null>(null);
 
   // Lightbox state for user uploaded reference images
   const [userImageLightbox, setUserImageLightbox] = useState<{ src: string; name: string } | null>(null);
 
-  // Keep latest content/streaming flags in refs so the typewriter loop reads
-  // fresh values without restarting on every SSE chunk. This eliminates
-  // flicker caused by useEffect re-running per chunk.
-  const contentRef = useRef(content);
-  const streamingRef = useRef(isStreaming);
-  const displayedRef = useRef(displayed);
-  const rafRef = useRef<number | null>(null);
-
-  // Track arrival rate of SSE chars so we can adapt the reveal speed.
-  const lastChunkLengthRef = useRef(0);
-  const lastChunkAtRef = useRef(0);
-
-  // Sync refs AFTER commit (not during render) to satisfy React 19 ref rules.
-  useEffect(() => {
-    contentRef.current = content;
-    if (streamingRef.current && isStreaming && content.length > contentRef.current.length) {
-      lastChunkLengthRef.current = content.length - contentRef.current.length;
-      lastChunkAtRef.current = performance.now();
-    }
-    streamingRef.current = isStreaming;
-    displayedRef.current = displayed;
-  });
-
-  useEffect(() => {
-    // User messages render the full content directly via the `content` prop
-    // and never need the typewriter loop, so this effect is a no-op for them.
-    if (isUserMessage) return;
-
-    if (!isStreaming) {
-      // Snap to whatever content we have so the bubble never shows stale text.
-      // Defer to a microtask so we don't setState synchronously inside an effect.
-      if (displayed !== content) {
-        const handle = setTimeout(() => setDisplayed(content), 0);
-        return () => clearTimeout(handle);
-      }
-      return;
-    }
-
-    // Start the typewriter loop only once per streaming session.
-    if (rafRef.current !== null) return;
-
-    let lastFrameAt = performance.now();
-
-    const tick = () => {
-      const target = contentRef.current;
-      const current = displayedRef.current;
-
-      if (current.length >= target.length) {
-        rafRef.current = null;
-        return;
-      }
-
-      const backlog = target.length - current.length;
-      const now = performance.now();
-      const frameDelta = now - lastFrameAt;
-      lastFrameAt = now;
-
-      // Adaptive speed based on SSE arrival rate
-      const chunkLen = lastChunkLengthRef.current;
-      const chunkAt = lastChunkAtRef.current;
-      let msPerChar = TYPEWRITER_MAX_MS_PER_CHAR;
-      if (chunkLen > 0 && chunkAt > 0 && now - chunkAt < 1000) {
-        const assumedBurstMs = 80;
-        msPerChar = Math.max(
-          TYPEWRITER_MIN_MS_PER_CHAR,
-          Math.min(TYPEWRITER_MAX_MS_PER_CHAR, assumedBurstMs / chunkLen)
-        );
-      }
-
-      const step = Math.max(1, Math.min(backlog, Math.round(frameDelta / msPerChar)));
-      const nextLength = current.length + step;
-      const nextText = target.slice(0, nextLength);
-      setDisplayed(nextText);
-      displayedRef.current = nextText;
-
-      rafRef.current = requestAnimationFrame(tick);
-    };
-
-    rafRef.current = requestAnimationFrame(tick);
-
-    return () => {
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-      }
-    };
-  }, [isStreaming, isUserMessage, content, displayed]);
 
   // User message: right-aligned bubble (max-w-[75%])
   if (isUserMessage) {
@@ -257,9 +162,11 @@ export function AiMessageBubble({
       )}
 
       <AiResponsePanel
-        content={displayed}
+        content={content}
         thinkingSteps={thinkingSteps}
         sources={sources}
+        suggestions={suggestions}
+        onSelectSuggestion={onSuggestionSelect}
         isStreaming={isStreaming}
         totalThinkingMs={totalThinkingMs}
       />

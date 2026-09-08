@@ -171,7 +171,7 @@ model WeeklyReport {
 
 ```bash
 # 1. 装依赖
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm install
 
 # 2. 同步 DB（开发环境）
@@ -193,7 +193,7 @@ open http://localhost:3003/reports/weekly-reports
 ### 6.1 单元 / 脚本验证
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 ./node_modules/.bin/tsx --env-file=.env.local scripts/weekly-report-store-unit-test.ts
 ```
 

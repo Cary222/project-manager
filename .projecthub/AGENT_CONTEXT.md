@@ -8,7 +8,7 @@
 | Run ID | `run_1788356675440_d72xzs8` |
 | User ID | `cmpuv1ota001rjlnkds1ckqe2` |
 | User Name | User |
-| Workspace | `/Users/vastgui/Desktop/project-manager` |
+| Workspace | `/Volumes/WorkStation/project-manager` |
 | Generated At | 2026-09-02T13:44:35.450Z |
 
 ## Current Task

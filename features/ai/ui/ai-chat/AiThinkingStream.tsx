@@ -409,7 +409,7 @@ export function AiThinkingStream({
       {/* Steps list with dividers */}
       {tasks.map((task, idx) => (
         <div
-          key={task.id}
+          key={`${task.id}-${idx}`}
           className={idx < tasks.length - 1 ? "border-b border-ink-100" : undefined}
         >
           <StepRow

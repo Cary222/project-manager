@@ -111,7 +111,7 @@ curl -s -w "\nHTTP Status: %{http_code}\nTime: %{time_total}s\n" \
   -d '{"text":"test"}' --max-time 10
 
 # 2. 启动 Next.js 开发服务器
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm run dev
 
 # 3. 确认服务正常

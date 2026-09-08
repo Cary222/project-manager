@@ -132,7 +132,7 @@ import { MarkdownContent } from "@/shared/ui/MarkdownContent";
 
 ```bash
 # 1. 安装新依赖
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm install
 
 # 2. 启动开发服务器（如已在运行会自动热重载）
@@ -203,7 +203,7 @@ curl -s http://localhost:3003 | head -c 100
 ### 6.2 TypeScript 编译验证
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npx tsc --noEmit
 ```
 

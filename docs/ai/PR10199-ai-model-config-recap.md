@@ -166,7 +166,7 @@ export async function resolveCredential(userId: string, provider: string): Promi
 
 ```bash
 # 1. 安装 / 更新依赖
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm install
 
 # 2. 类型检查（必须通过才能启动）

@@ -43,6 +43,10 @@ describe("detectWorkflowMatch", () => {
       const match2 = await detectWorkflowMatch("把会议录音文件转写并生成纪要");
       expect(match2).not.toBeNull();
       expect(match2?.type).toBe("meeting_minutes");
+      const match3 = await detectWorkflowMatch("最近有什么会议纪要吗");
+      expect(match3).toBeNull();
+      const match4 = await detectWorkflowMatch("上周会议纪要说了什么");
+      expect(match4).toBeNull();
     });
   });
 

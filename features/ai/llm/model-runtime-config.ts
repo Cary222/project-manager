@@ -30,7 +30,7 @@ import {
  type ReasoningLevel,
 } from "./model-reasoning";
 import { loadUserModelsWithCache } from "@/lib/user-models-cache";
-import { getEnabledModels } from "./providers/registry";
+import { getEnabledModels, AGNES_MODELS } from "./providers/registry";
 import { getModelPreference } from "./preferences/user-model-preferences";
 
 // ---------------------------------------------------------------------------
@@ -132,22 +132,50 @@ export async function resolveModelRuntimeConfig(
  userId: string | undefined,
  modelRef: string,
 ): Promise<ModelRuntimeConfig> {
- const models = await loadUserModelsWithCache(userId ?? "anonymous", () =>
-  getEnabledModels(userId),
- );
- const entry = models.find((model) => model.modelRef === modelRef);
- if (!entry) {
-  throw new Error(`Model not found in user scope: "${modelRef}"`);
- }
+  const colonIndex = modelRef.indexOf(":");
+  const provider = colonIndex >= 0 ? modelRef.slice(0, colonIndex) : "";
+  const modelId = colonIndex >= 0 ? modelRef.slice(colonIndex + 1) : modelRef;
 
- const colonIndex = modelRef.indexOf(":");
- const provider = colonIndex >= 0 ? modelRef.slice(0, colonIndex) : "";
- const modelId = colonIndex >= 0 ? modelRef.slice(colonIndex + 1) : modelRef;
+  // Fast path: system hardcoded models (Agnes) don't need full dynamic discovery
+  const hardcodedEntry = AGNES_MODELS.find((model) => model.modelRef === modelRef);
+  if (hardcodedEntry) {
+    const preference = userId
+      ? await getModelPreference(userId, provider, modelId)
+      : null;
+    return mergeRuntimeConfig(hardcodedEntry, preference);
+  }
 
- const preference = userId
-  ? await getModelPreference(userId, provider, modelId)
-  : null;
- return mergeRuntimeConfig(entry, preference);
+  // Fast path for deepseek to avoid slow full-provider discovery across external APIs
+  if (provider === "deepseek") {
+    const preference = userId
+      ? await getModelPreference(userId, provider, modelId)
+      : null;
+    const deepseekEntry: ModelCatalogEntry = {
+      id: modelRef,
+      modelName: modelId,
+      displayName: modelId,
+      modelRef,
+      capabilities: ["fast"],
+      enabled: true,
+      provider: "deepseek",
+      apiFormat: "openai-chat",
+      ownerType: "SYSTEM",
+    };
+    return mergeRuntimeConfig(deepseekEntry, preference);
+  }
+
+  const models = await loadUserModelsWithCache(userId ?? "anonymous", () =>
+    getEnabledModels(userId),
+  );
+  const entry = models.find((model) => model.modelRef === modelRef);
+  if (!entry) {
+    throw new Error(`Model not found in user scope: "${modelRef}"`);
+  }
+
+  const preference = userId
+    ? await getModelPreference(userId, provider, modelId)
+    : null;
+  return mergeRuntimeConfig(entry, preference);
 }
 
 // ---------------------------------------------------------------------------

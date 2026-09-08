@@ -199,7 +199,7 @@ createAgentSession({...} as any)
 
 ```bash
 # 1. 进入项目目录
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 
 # 2. 安装依赖
 npm install

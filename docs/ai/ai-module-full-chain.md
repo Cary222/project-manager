@@ -440,7 +440,7 @@ useEffect(() => {
 
 ```bash
 # 1. 确认仓库根
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 
 # 2. 确认 .env
 grep OPENAI_API_KEY .env   # 必须存在
@@ -454,7 +454,7 @@ cd ../embedding-service  # 假设上游路径
 python -m uvicorn main:app --port 5000
 
 # 5. 启动 dev server
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm run dev
 # → http://localhost:3003
 
@@ -543,7 +543,7 @@ curl -s http://localhost:3003/api/ai/profile -b cookies.txt | jq
 ### 8.5 Lint / Type Check
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npx eslint \
   app/api/ai/**/*.ts \
   features/ai/**/*.{ts,tsx} \
@@ -558,7 +558,7 @@ npx tsc --noEmit
 
 ## 9. 复现 Checklist
 
-- [ ] 仓库根：`/Users/vastgui/Desktop/project-manager`
+- [ ] 仓库根：`/Volumes/WorkStation/project-manager`
 - [ ] `.env` 含 `OPENAI_API_KEY` 和 `DATABASE_URL`
 - [ ] `npx prisma db push --schema prisma/schema.prisma` 已跑过
 - [ ] `pm.ai_conversation` / `pm.ai_chat_message` / `pm.ai_user_profile` 3 张表存在

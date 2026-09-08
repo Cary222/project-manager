@@ -37,33 +37,34 @@ export interface TtsOptions {
 
 // DashScope 支持的音色选项
 export const TTS_VOICE_OPTIONS = {
-  "af_xianger": "甜萌童声（女）",
-  "af_baitiang": "百灵鸟（女）",
-  "af_cibei": "慈祥温和（女）",
-  "af_dingdang": "活泼开朗（女）",
-  "af_jingjing": "知性沉稳（女）",
-  "af_luona": "知性温柔（女）",
-  "af_sichuan": "四川方言（女）",
-  "af_xiaowei": "甜美可爱（女）",
-  "af_youling": "清冷空灵（女）",
-  "af_zhizhong": "稚嫩萌音（女）",
-  "am_fei": "飞飞哥（男）",
-  "am_yunyan": "云Yan（男）",
-  "am_xiaogang": "小刚（男）",
-  "am_xiaohe": "小合（男）",
-  "am_adam": "Adam（男）",
-  "am_ailun": "艾伦（男）",
-  "am_xiaobai": "小白（男）",
-  "am_xiaoming": "小明（男）",
-  "am_yeye": "和蔼老年（男）",
-  "ar_tianxiang": "天翔（男）",
-  "ar_kangning": "康宁（男）",
-  "ar_taibai": "太白金星（男）",
-  "ar_liubei": "刘备（男）",
-  "ar_zhangfei": "张飞（男）",
-  "ar_guanyu": "关羽（男）",
-  "ar_zhaoyun": "赵云（男）",
-  "ar_pangde": "庞德（男）",
+  longanqian: "知性女声（默认推荐）",
+  af_xianger: "甜萌童声（女）",
+  af_baitiang: "百灵鸟（女）",
+  af_cibei: "慈祥温和（女）",
+  af_dingdang: "活泼开朗（女）",
+  af_jingjing: "知性沉稳（女）",
+  af_luona: "知性温柔（女）",
+  af_sichuan: "四川方言（女）",
+  af_xiaowei: "甜美可爱（女）",
+  af_youling: "清冷空灵（女）",
+  af_zhizhong: "稚嫩萌音（女）",
+  am_fei: "飞飞哥（男）",
+  am_yunyan: "云Yan（男）",
+  am_xiaogang: "小刚（男）",
+  am_xiaohe: "小合（男）",
+  am_adam: "Adam（男）",
+  am_ailun: "艾伦（男）",
+  am_xiaobai: "小白（男）",
+  am_xiaoming: "小明（男）",
+  am_yeye: "和蔼老年（男）",
+  ar_tianxiang: "天翔（男）",
+  ar_kangning: "康宁（男）",
+  ar_taibai: "太白金星（男）",
+  ar_liubei: "刘备（男）",
+  ar_zhangfei: "张飞（男）",
+  ar_guanyu: "关羽（男）",
+  ar_zhaoyun: "赵云（男）",
+  ar_pangde: "庞德（男）",
 } as const;
 
 export type TtsVoice = keyof typeof TTS_VOICE_OPTIONS;
@@ -72,66 +73,61 @@ export type TtsVoice = keyof typeof TTS_VOICE_OPTIONS;
  * 非流式语音合成
  *
  * @param userId - 用户 ID（用于查找 DashScope 凭证）
- * @param text - 待合成文本（建议 200 字以内，过长文本建议分段调用）
+ * @param text - 待合成文本（建议 400 字以内）
  * @param options - 可选参数
  * @returns 包含音频 Buffer 的 TtsResult
  */
 export async function synthesizeWithDashScope(
   userId: string,
   text: string,
-  options: TtsOptions = {}
+  options: TtsOptions = {},
 ): Promise<TtsResult> {
-  // 1. 使用新的凭证解析器
   const voiceResult = await resolveVoiceCredential(userId, "tts");
   if (!voiceResult) {
     throw new Error(
-      "语音合成服务未配置。请在「设置 > AI Providers」中添加支持 TTS 的 provider（如 dashscope 或 openai）。"
+      "语音合成服务未配置。请在「设置 > AI Providers」中添加支持 TTS 的 provider（如 dashscope 或 openai）。",
     );
   }
 
   const { credential, modelName } = voiceResult;
 
-  // Token Plan MaaS 检测
-  const isMaaS = credential.baseURL.includes("token-plan") && credential.baseURL.includes(".maas.");
-
-  // 2. 构建请求参数
   const {
-    voice = isMaaS ? "longanhuan_v3.6" : "af_luona", // Token Plan 默认长安唤声
-    format = isMaaS ? "mp3" : "mp3",
-    speed = isMaaS ? 1.0 : 1.0,
-    sampleRate = isMaaS ? 24000 : 16000,
+    voice = "longanqian",
+    format = "mp3",
+    speed = 1.0,
+    sampleRate = 16000,
   } = options;
 
-  // TTS API 端点（Token Plan 使用不同的路径）
-  const ttsApiUrl = isMaaS
-    ? `${credential.baseURL}/services/audio/tts/SpeechSynthesizer`
-    : `${credential.baseURL}/services/audio/tts/synthesis`;
+  // 端点解析：兼容 compatible-mode base URL 与标准 DashScope 端点
+  let ttsApiUrl =
+    "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer";
+  if (credential.baseURL && !credential.baseURL.includes("compatible-mode")) {
+    ttsApiUrl = `${credential.baseURL.replace(/\/+$/, "")}/services/audio/tts/SpeechSynthesizer`;
+  }
 
-  console.log(`[tts] 使用 API: ${ttsApiUrl}, model: ${modelName}, isMaaS: ${isMaaS}`);
+  // 优先选用正式 DashScope 语音合成模型
+  const targetModel =
+    modelName &&
+    !modelName.includes("realtime") &&
+    !modelName.includes("vd") &&
+    !modelName.includes("vc")
+      ? modelName
+      : "qwen-audio-3.0-tts-plus";
 
-  // 3. 构建请求体（Token Plan 格式不同于标准 DashScope）
-  const requestBody = isMaaS
-    ? {
-        model: modelName,
-        input: {
-          text,
-          voice,
-          format,
-          sample_rate: sampleRate,
-        },
-      }
-    : {
-        model: modelName,
-        input: { text },
-        parameters: {
-          voice,
-          format,
-          speed,
-          sample_rate: sampleRate,
-        },
-      };
+  const requestBody = {
+    model: targetModel,
+    input: {
+      text,
+      voice,
+    },
+    parameters: {
+      voice,
+      format,
+      speed,
+      sample_rate: sampleRate,
+    },
+  };
 
-  // 4. 发起 TTS 请求
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TTS_TIMEOUT_MS);
 
@@ -140,9 +136,8 @@ export async function synthesizeWithDashScope(
       method: "POST",
       signal: controller.signal,
       headers: {
-        "Authorization": `Bearer ${credential.apiKey}`,
+        Authorization: `Bearer ${credential.apiKey}`,
         "Content-Type": "application/json",
-        ...(isMaaS ? {} : { "X-App-Id": "pangu" }),
       },
       body: JSON.stringify(requestBody),
     });
@@ -160,12 +155,25 @@ export async function synthesizeWithDashScope(
       throw new Error(`TTS 合成失败: ${errorMsg}`);
     }
 
-    // 4. 获取音频数据
-    const arrayBuffer = await response.arrayBuffer();
-    const audio = new Uint8Array(arrayBuffer);
+    const contentType = response.headers.get("content-type") || "";
+    let audio: Uint8Array;
 
-    // 5. 估算时长（mp3 约 16kbps，平均每 MB 约 8 分钟）
-    // 这是一个粗略估算，实际时长由 API 返回
+    if (contentType.includes("application/json")) {
+      const data = await response.json();
+      const audioUrl = data.output?.audio?.url;
+      if (audioUrl) {
+        const audioRes = await fetch(audioUrl);
+        if (!audioRes.ok) throw new Error("下载合成音频失败");
+        audio = new Uint8Array(await audioRes.arrayBuffer());
+      } else if (data.output?.audio?.data) {
+        audio = new Uint8Array(Buffer.from(data.output.audio.data, "base64"));
+      } else {
+        throw new Error(data.message || "未能获取合成音频数据");
+      }
+    } else {
+      audio = new Uint8Array(await response.arrayBuffer());
+    }
+
     const estimatedDuration = Math.round((audio.length / 1024 / 1024) * 8 * 60);
 
     return {
@@ -189,9 +197,9 @@ export async function synthesizeWithDashScope(
 export async function synthesizeText(
   userId: string,
   text: string,
-  voice?: TtsVoice
+  voice?: TtsVoice,
 ): Promise<TtsResult> {
   return synthesizeWithDashScope(userId, text, {
-    voice: voice ?? "af_luona",
+    voice: voice ?? "longanqian",
   });
 }

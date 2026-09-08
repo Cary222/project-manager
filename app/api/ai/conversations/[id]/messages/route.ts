@@ -20,6 +20,8 @@ import {
   extractSourceReferences,
 } from "@/features/ai/search/rag";
 import type { SourceReference as RagSourceReference } from "@/features/ai/search/rag";
+import { understandQuery } from "@/features/ai/search/query-understanding";
+import { retrievePlannedContext } from "@/features/ai/search/planned-retrieval";
 import {
   speculationCache,
   shouldSpeculate,
@@ -501,15 +503,16 @@ export async function POST(
     // shouldUseRag 在 auto 模式（forceMode=undefined）时根据消息内容自动判断
     const autoNeedsRag = mode === "auto" && shouldUseRag(message);
 
-    const ragPromise =
-      useRag || autoNeedsRag
-        ? retrieveContext(message, { limit: 5, userId: session.user.id })
-        : Promise.resolve({
-            results: [] as Awaited<
-              ReturnType<typeof retrieveContext>
-            >["results"],
-            contextText: "",
-          });
+    const retrievalPlan = understandQuery(message);
+    if (mode === "web" && retrievalPlan.scope !== "INTERNAL_ONLY") retrievalPlan.scope = "WEB_ALLOWED";
+    const runPlannedRetrieval = useRag || autoNeedsRag || mode === "auto" || mode === "web" || retrievalPlan.scope === "INTERNAL_ONLY";
+    const plannedContext = runPlannedRetrieval
+      ? await retrievePlannedContext(message, session.user.id, retrievalPlan, modelName || undefined).catch(() => ({
+          results: [], contextText: "站内检索暂时不可用；不能认定站内不存在相关数据。",
+          retrieval: { allowWeb: false, enough: false, failed: true },
+        }))
+      : { results: [], contextText: "", retrieval: { allowWeb: false } };
+    const ragPromise = Promise.resolve(plannedContext);
 
     // 预测性预加载：
     // - auto 模式下浅层查询（工单/项目/人）：预热 searchKnowledge，用户深挖时直接命中缓存
@@ -572,13 +575,31 @@ export async function POST(
       console.log(`[AI-MSG] intent=PROJECT_DB detected`);
     }
 
+    // Retrieval is executed by the request-scoped coordinator, not re-decided by LLM tools.
+    let plannedWebResult: unknown;
+    if (runPlannedRetrieval) {
+      resolvedTools = undefined;
+      messages.push({ id: "retrieval-evidence", role: "user", content: buildRagPrompt(message, plannedContext) });
+      if (retrievalPlan.scope === "WEB_ALLOWED" && plannedContext.retrieval.allowWeb) {
+        try {
+          const { tavily } = await import("@tavily/core");
+          const tavilyClient = tavily({ apiKey: process.env.TAVILY_API_KEY! });
+          const webRes = await tavilyClient.search(retrievalPlan.subject, { searchDepth: "basic", maxResults: 5 });
+          plannedWebResult = webRes.results.map((r: { title: string; url: string; content: string }) => ({ title: r.title, url: r.url, content: r.content }));
+          messages.push({ id: "external-evidence", role: "user", content: `以下仅为外部公网补充，不是站内证据，不得用于声称站内存在某记录：${JSON.stringify(plannedWebResult)}` });
+        } catch {
+          messages.push({ id: "external-failed", role: "user", content: "公网补充检索失败，请保留站内已找到的证据并说明缺口。" });
+        }
+      }
+    }
+
     console.log(
       `[AI-MSG] tools=${resolvedTools ? Object.keys(resolvedTools).join(",") : "none"} useRag=${useRag} maxSteps=${resolvedMaxSteps}`,
     );
 
     // Inject viewer userId and conversationId into module-scoped tool closures.
     // Necessary because Agnes does not support `toolsContext` / `contextSchema`.
-    setSearchKnowledgeViewer(session.user.id);
+    setSearchKnowledgeViewer(session.user.id, session.user.role);
     setSearchKnowledgeConversationId(conversationId);
     setSearchStructuredViewer(session.user.id);
 
@@ -614,7 +635,7 @@ export async function POST(
     const responseStream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
-        const enqueueData = (obj: object) => {
+        const enqueueData = (obj: Record<string, unknown>) => {
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify(obj)}\n\n`),
           );
@@ -761,6 +782,16 @@ export async function POST(
             `[AI-SSE] sending sources event with ${allSources.length} sources`,
           );
           enqueueData({ type: "sources", sources: allSources });
+        }
+        // SAFETY: plannedContext is returned from retrievePlannedContext with retrieval.evaluation metadata
+        const plannedSuggestions = (plannedContext as unknown as { retrieval?: { evaluation?: { suggestions?: unknown[] } } })?.retrieval?.evaluation?.suggestions;
+        if (Array.isArray(plannedSuggestions) && plannedSuggestions.length > 0) {
+          enqueueData({ type: "clarification_suggestions", suggestions: plannedSuggestions });
+        }
+        // SAFETY: plannedContext carries ragTrace when planned retrieval executes
+        const plannedTrace = (plannedContext as unknown as { ragTrace?: unknown })?.ragTrace;
+        if (plannedTrace) {
+          enqueueData({ type: "rag_trace", trace: plannedTrace });
         }
 
         enqueueData({ type: "done" });
@@ -954,7 +985,7 @@ async function handleLangGraphRequest(
           if (!(error instanceof TypeError)) throw error;
         }
       };
-      const enqueueData = (obj: object) => {
+      const enqueueData = (obj: Record<string, unknown>) => {
         if (isClosed || request.signal.aborted) return false;
         try {
           controller.enqueue(
@@ -983,6 +1014,8 @@ async function handleLangGraphRequest(
       // the new pending that the second stream is about to capture.
       let capturedPendingHumanAction: PendingHumanActionState | null = null;
       let resolvedEntitiesResolved = false;
+      let capturedSuggestions: unknown[] | null = null;
+      let capturedRagTrace: unknown = null;
 
       try {
         // ── 写入 user message + INPUT 附件（事务原子性）───────────────────
@@ -1089,10 +1122,38 @@ async function handleLangGraphRequest(
         let finalLastMentionedUser: { id: string; name: string } | null =
           initialState.lastMentionedUser;
 
+        const timelineStore = new TimelineStore();
+        const unsubscribeTimeline = timelineStore.onUpdate((tasks) => {
+          enqueueData({
+            type: "timeline_snapshot",
+            conversationId,
+            tasks: Array.from(tasks.values()),
+          });
+        });
+
+        let generateExecId: string | null = null;
+        let streamedTextChars = 0;
+        let lastNodeEndTime = Date.now();
+
         try {
           const rawStream = await graph.stream(initialState, {
             streamMode: "updates",
             signal: request.signal,
+            configurable: {
+              onGenerateStart: () => {
+                if (!generateExecId) {
+                  const now = Date.now();
+                  lastNodeEndTime = now;
+                  generateExecId = onNodeStart("generateResponse", now, (cmd) => {
+                    timelineStore.applyCommand(cmd);
+                  });
+                }
+              },
+              onTextDelta: (delta: string) => {
+                streamedTextChars += delta.length;
+                enqueueData({ type: "text", delta });
+              },
+            },
           });
           // Cast to the expected type
           graphStream = rawStream as AsyncIterable<
@@ -1116,37 +1177,16 @@ async function handleLangGraphRequest(
         let lastResponse = "";
         let toolResultCount = 0;
         const toolResults: Array<{ toolName: string; output: unknown }> = [];
-
-        // Declare timelineStore at the outer scope so it can be accessed after the
-        // for-await loop (line ~1039), regardless of which branch (if/else) ran.
-        let timelineStore: TimelineStore | null = null;
-
         if (!graphStream) {
           // Graph was interrupted (interruptReason is set) — skip processing,
           // let the pending_confirmation handler below save state.
         } else {
-          // ── Timeline: create store and subscribe to updates ───────────────────
-          timelineStore = new TimelineStore();
-          console.log(
-            `[Timeline] store created, graphStream type=${typeof graphStream}`,
-          );
-
-          // Subscribe TimelineStore changes → SSE events
-          const unsubscribeTimeline = timelineStore.onUpdate((tasks) => {
-            console.log(`[Timeline] SSE sending snapshot, tasks=${tasks.size}`);
-            enqueueData({
-              type: "timeline_snapshot",
-              conversationId,
-              tasks: Array.from(tasks.values()),
-            });
-          });
-
           // Deduplication: only send pending_confirmation once per response.
           let alreadySentPendingConfirmation = false;
 
           console.log(`[Timeline] about to iterate graphStream`);
           let chunkCount = 0;
-          let lastNodeEndTime = Date.now();
+          lastNodeEndTime = Date.now();
           for await (const chunk of graphStream) {
             chunkCount++;
             console.log(`[Timeline] chunk #${chunkCount}:`, Object.keys(chunk));
@@ -1155,20 +1195,24 @@ async function handleLangGraphRequest(
               console.log(`[Timeline] node=${nodeName}`);
 
               // ── Timeline: Node Timing ───────────────────────────────────────────
-              // The node actually started when the previous step finished (or at graph start).
-              const nodeStartTime = lastNodeEndTime;
               const nodeEndTime = Date.now();
+              const isGenerate = nodeName === "generateResponse";
+              const nodeStartTime = (isGenerate && generateExecId)
+                ? (timelineStore.getTask(generateExecId)?.startTime ?? lastNodeEndTime)
+                : lastNodeEndTime;
               lastNodeEndTime = nodeEndTime;
 
-              // Task appears in the timeline with accurate start time
-              const execId = onNodeStart(nodeName, nodeStartTime, (cmd) => {
-                console.log(
-                  `[Timeline] create task cmd:`,
-                  cmd.op,
-                  cmd.task?.stepLabel,
-                );
-                timelineStore!.applyCommand(cmd);
-              });
+              // Task appears in the timeline with accurate start time (reuse if pre-started)
+              const execId = (isGenerate && generateExecId)
+                ? generateExecId
+                : onNodeStart(nodeName, nodeStartTime, (cmd) => {
+                    console.log(
+                      `[Timeline] create task cmd:`,
+                      cmd.op,
+                      cmd.task?.stepLabel,
+                    );
+                    timelineStore.applyCommand(cmd);
+                  });
               console.log(
                 `[Timeline] execId=${execId} startTime=${nodeStartTime} endTime=${nodeEndTime}`,
               );
@@ -1228,7 +1272,11 @@ async function handleLangGraphRequest(
                   query?: string;
                   sourceResult?: { queryType?: string; [key: string]: unknown };
                 };
-                if (alreadySentPendingConfirmation) {
+                if (pha.entityType !== "user") {
+                  console.log(
+                    `[AI-LangGraph] skipping non-user pending_confirmation (entityType=${pha.entityType})`,
+                  );
+                } else if (alreadySentPendingConfirmation) {
                   // Already sent pending_confirmation (from the first stream or a previous node update).
                   // Skip to prevent duplicate candidate picker on the frontend.
                   console.log(
@@ -1320,6 +1368,7 @@ async function handleLangGraphRequest(
                     },
                     lastAssistantMessage: String(nodeOutput.response ?? ""),
                     mode: resolvedMode,
+                  // SAFETY: approve action payload is structurally compatible with PendingHumanActionState
                   } as unknown as PendingHumanActionState;
                 }
               }
@@ -1357,6 +1406,15 @@ async function handleLangGraphRequest(
                 typeof nodeOutput.response === "string"
               ) {
                 lastResponse = nodeOutput.response;
+              }
+              if (
+                nodeOutput.clarificationSuggestions &&
+                Array.isArray(nodeOutput.clarificationSuggestions)
+              ) {
+                capturedSuggestions = nodeOutput.clarificationSuggestions;
+              }
+              if (nodeOutput.ragTrace) {
+                capturedRagTrace = nodeOutput.ragTrace;
               }
 
               // ── RuntimeStatePersist: parse node output → debounced patch to DB ───────
@@ -1505,6 +1563,14 @@ async function handleLangGraphRequest(
           console.log(`[AI-LangGraph] sending ${allSources.length} sources`);
           enqueueData({ type: "sources", sources: allSources });
         }
+        if (capturedSuggestions && capturedSuggestions.length > 0 && !isPendingDisambiguation) {
+          console.log(`[AI-LangGraph] sending ${capturedSuggestions.length} clarification suggestions`);
+          enqueueData({ type: "clarification_suggestions", suggestions: capturedSuggestions });
+        }
+        if (capturedRagTrace && !isPendingDisambiguation) {
+          console.log(`[AI-LangGraph] sending rag_trace`);
+          enqueueData({ type: "rag_trace", trace: capturedRagTrace });
+        }
 
         console.log(
           `[AI-LangGraph] done. toolResults=${toolResultCount}, textLen=${lastResponse.length}`,
@@ -1522,7 +1588,13 @@ async function handleLangGraphRequest(
         }
 
         // Final text response
-        enqueueData({ type: "text", delta: lastResponse });
+        // Final text response: fallback only if no tokens were streamed (e.g. static responses or error)
+        if (streamedTextChars === 0 && lastResponse) {
+          const chunks = lastResponse.match(/[\s\S]{1,8}/g) || [lastResponse];
+          for (const c of chunks) {
+            enqueueData({ type: "text", delta: c });
+          }
+        }
 
         // Append final message to conversation store
         // Save thinkingSteps + totalThinkingMs so they persist for history display
@@ -1619,8 +1691,9 @@ async function handleLangGraphRequest(
   return new Response(responseStream, {
     headers: {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
     },
   });
 }

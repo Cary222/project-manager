@@ -418,7 +418,7 @@ curl -s http://localhost:5000/dimension
 
 ```bash
 # 本地仓库
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 
 # 1. 把远端代码拉下来
 ssh hxy@192.168.1.14 "cd /home/hxy/work/personal/project-manager && git pull origin main"
@@ -578,7 +578,7 @@ WHERE \"sourceType\" = 'PKM_NOTE'
 ### 6.6 清洗验证：确认 base64/控制字符被清除
 
 ```bash
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npx tsx scripts/test-clean-extracted-text.ts
 ```
 

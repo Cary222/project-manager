@@ -1,5 +1,6 @@
 import type { AgentState } from "../agent";
 import { webSearch } from "@/features/ai/tools/web-search";
+import { resolveQueryScope } from "@/features/ai/search/query-understanding";
 
 /**
  * Wraps the existing webSearch tool as a graph node.
@@ -15,6 +16,11 @@ export async function webSearchNode(
     typeof lastMessage.content === "string"
       ? lastMessage.content
       : "";
+
+  const report = state.toolResults?.retrieval as { allowWeb?: boolean; rewritten?: boolean } | undefined;
+  if (resolveQueryScope(content) === "INTERNAL_ONLY" || state.retrievalPlan?.scope !== "WEB_ALLOWED" || report?.allowWeb !== true || !report.rewritten) {
+    return { toolResults: { webSearch: { blocked: true, reason: "尚未获准公网补充检索" } } };
+  }
 
   // Append city to query if available (weather, local info, etc.)
   const city = state.clientCity;

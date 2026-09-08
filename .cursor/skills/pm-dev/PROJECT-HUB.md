@@ -60,7 +60,7 @@ description: >-
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ 🖥️  Mac 本地（你是 vastgui）                                                    │
-│ /Users/vastgui/Desktop/project-manager                                     │
+│ /Volumes/WorkStation/project-manager                                     │
 │ ├─ 📝 代码编辑 + 单元测试 / E2E / dev 模式跑 Next.js（npm run dev → :3003）  │
 │ ├─ 🧠 Cursor 编辑器 + Cursor Agent（我）                                       │
 │ ├─ 🌐 网络代理：HTTP_PROXY=http://127.0.0.1:7890 (Clash)                       │
@@ -135,7 +135,7 @@ postgresql://community:community@192.168.1.14:5432/community?options=-c%20search
 | ❌ "Worker 进程在 Mac" | ✅ Worker 全在远程 systemd |
 | ❌ "端口 3003 冲突" | ✅ 远程 :3003（生产 inactive）+ 本地 :3003（dev active），物理隔离 |
 | ❌ "找不到 .next 缓存" | ✅ Mac 本地 1.3G 缓存（dev 模式），远程用 start 模式无缓存 |
-| ❌ "重启前 cd /home/hxy/work/..." | ⚠️ 那是远程 hxy 视角。Mac 本地操作 `cd /Users/vastgui/Desktop/project-manager` |
+| ❌ "重启前 cd /home/hxy/work/..." | ⚠️ 那是远程 hxy 视角。Mac 本地操作 `cd /Volumes/WorkStation/project-manager` |
 | ❌ "代码 push 到 origin 就要 ssh" | ✅ push origin = 远程裸仓，常规 git push 即可，ssh 已配 |
 
 ---

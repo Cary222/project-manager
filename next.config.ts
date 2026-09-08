@@ -20,6 +20,8 @@ const nextConfig: NextConfig = {
     "@earendil-works/pi-ai",
   ],
   experimental: {
+    // Auth.js proxy must forward full meeting-audio multipart bodies; the default limit truncates the 32 MB upload before route handlers parse it.
+    proxyClientMaxBodySize: "100mb",
     serverActions: {
       bodySizeLimit: "10mb",
     },

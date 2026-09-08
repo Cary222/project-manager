@@ -106,30 +106,6 @@ export async function queryWeeklyReport(
       };
     });
 
-    // 多份周报时触发 HIL
-    if (reports.length >= DISAMBIGUATION_THRESHOLDS.weekly_report) {
-      const weeklyCandidates = reports.map((r) => ({
-        id: r.id,
-        label: `${r.title}｜${formatReportPeriod(r.weekStart, r.weekEnd)}`,
-        summary: r.aiSummary ? truncateForSummary(r.aiSummary, 100) : "",
-      }));
-      return {
-        summary: `找到 ${resolved.user.name} 的 ${reports.length} 份周报，请选择想要了解的具体周报：`,
-        sources,
-        attribution: {
-          kind: "disambiguation" as const,
-          entityType: "weekly_report" as const,
-          candidates: weeklyCandidates,
-          count: reports.length,
-        },
-        decision: {
-          type: "human" as const,
-          reason: `找到 ${reports.length} 份周报，需要人工选择`,
-          entityType: "weekly_report",
-          candidates: weeklyCandidates,
-        },
-      };
-    }
 
     return {
       summary: lines.join("\n"),

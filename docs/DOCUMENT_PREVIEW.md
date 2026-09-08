@@ -186,7 +186,7 @@ export function normalizePkmAttachments(input: unknown) {
 
 ```bash
 # 1. 安装依赖（包含 mammoth + react-pdf）
-cd /Users/vastgui/Desktop/project-manager
+cd /Volumes/WorkStation/project-manager
 npm install
 
 # 2. 推送 Prisma schema（如有字段变更）

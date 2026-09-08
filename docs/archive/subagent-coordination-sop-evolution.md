@@ -2,7 +2,7 @@
 
 ## 上下文
 
-`/Users/vastgui/Desktop/project-manager/.cursor/rules/subagent-coordination-sop.mdc` 已经多次演进。本文件用于记录历次演进的**思路变化**，便于后续追溯。
+`/Volumes/WorkStation/project-manager/.cursor/rules/subagent-coordination-sop.mdc` 已经多次演进。本文件用于记录历次演进的**思路变化**，便于后续追溯。
 
 ## 版本演进
 

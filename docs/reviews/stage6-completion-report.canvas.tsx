@@ -143,7 +143,7 @@ export default function Stage6CompletionReport() {
           <Text size="small" tone="secondary">Settings 页 AI 模型配置（新 UI）</Text>
           <img
             src={canvasImage(
-              "/Users/vastgui/Desktop/project-manager/docs/ui/stage6-step2-settings-ai-config.png"
+              "/Volumes/WorkStation/project-manager/docs/ui/stage6-step2-settings-ai-config.png"
             )}
             alt="Settings 页 AI 模型配置区域"
             style={{ width: "100%", borderRadius: 8 }}
@@ -153,7 +153,7 @@ export default function Stage6CompletionReport() {
           <Text size="small" tone="secondary">Pi 风格 AI 模型配置对话框（DB-backed）</Text>
           <img
             src={canvasImage(
-              "/Users/vastgui/Desktop/project-manager/docs/ui/stage6-step3-pi-config-dialog.png"
+              "/Volumes/WorkStation/project-manager/docs/ui/stage6-step3-pi-config-dialog.png"
             )}
             alt="Pi 风格配置对话框"
             style={{ width: "100%", borderRadius: 8 }}
@@ -163,7 +163,7 @@ export default function Stage6CompletionReport() {
           <Text size="small" tone="secondary">Provider Picker（搜索 / 分类 / 30+ 卡片）</Text>
           <img
             src={canvasImage(
-              "/Users/vastgui/Desktop/project-manager/docs/ui/stage6-step3-provider-picker.png"
+              "/Volumes/WorkStation/project-manager/docs/ui/stage6-step3-provider-picker.png"
             )}
             alt="Provider 选择器"
             style={{ width: "100%", borderRadius: 8 }}
@@ -173,7 +173,7 @@ export default function Stage6CompletionReport() {
           <Text size="small" tone="secondary">Pi Workspace 模型对话框（models.json，未受影响）</Text>
           <img
             src={canvasImage(
-              "/Users/vastgui/Desktop/project-manager/docs/ui/stage6-step5-pi-workspace-models-dialog.png"
+              "/Volumes/WorkStation/project-manager/docs/ui/stage6-step5-pi-workspace-models-dialog.png"
             )}
             alt="Pi Workspace 模型配置对话框"
             style={{ width: "100%", borderRadius: 8 }}
@@ -183,7 +183,7 @@ export default function Stage6CompletionReport() {
           <Text size="small" tone="secondary">UnifiedModelSelector 下拉（Chat 页）</Text>
           <img
             src={canvasImage(
-              "/Users/vastgui/Desktop/project-manager/docs/debug/verify-ai-step2b-dropdown-panel-full.png"
+              "/Volumes/WorkStation/project-manager/docs/debug/verify-ai-step2b-dropdown-panel-full.png"
             )}
             alt="UnifiedModelSelector 下拉面板"
             style={{ width: "100%", borderRadius: 8 }}
@@ -193,7 +193,7 @@ export default function Stage6CompletionReport() {
           <Text size="small" tone="secondary">搜索过滤实测（agnes：8→5）</Text>
           <img
             src={canvasImage(
-              "/Users/vastgui/Desktop/project-manager/docs/debug/verify-ai-step3-search-agnes.png"
+              "/Volumes/WorkStation/project-manager/docs/debug/verify-ai-step3-search-agnes.png"
             )}
             alt="搜索 agnes 过滤后的模型列表"
             style={{ width: "100%", borderRadius: 8 }}

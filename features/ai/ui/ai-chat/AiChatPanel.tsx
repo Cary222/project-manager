@@ -2,9 +2,12 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AiChatInput } from "./AiChatInput";
+import { useChatVoice } from "./hooks/use-chat-voice";
+import { VoiceConversationOverlay } from "./VoiceConversationOverlay";
 import { AiCandidatePicker } from "./AiCandidatePicker";
 import { AiMessageBubble } from "./AiMessageBubble";
 import { type SourceReference } from "./AiSourcesList";
+import { toast } from "sonner";
 import type { ReasoningLevel } from "@/features/ai/llm/model-reasoning";
 import {
   type AiMode,
@@ -16,6 +19,8 @@ import { shouldUseWebSearch } from "@/features/ai/search/detector";
 import { IconSparkles, IconX } from "@/shared/ui/icons";
 import { SwitchToWorkModal } from "../ai-work/SwitchToWorkModal";
 
+import type { ClarificationSuggestion } from "@/features/ai/search/evidence-evaluator";
+import type { RagTrace } from "@/features/ai/search/rag-trace";
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -71,6 +76,7 @@ interface Message {
   thinkingSteps?: TaskRecord[];
   /** Total thinking duration in ms — persisted from DB for historical messages */
   totalThinkingMs?: number;
+  suggestions?: ClarificationSuggestion[];
   /** 执行状态：QUEUED / PROCESSING / COMPLETED / FAILED（生图/视频模式） */
   executionStatus?: string;
   /** 附件列表（生图模式） */
@@ -157,6 +163,7 @@ interface AiChatPanelProps {
   thinkingLevel?: ReasoningLevel;
   onThinkingLevelChange?: (level: ReasoningLevel) => void;
   clearTrigger?: number;
+  onRagTraceChange?: (trace: RagTrace | null) => void;
 }
 
 // ─── Main Panel ───────────────────────────────────────────────────────────────
@@ -181,14 +188,18 @@ export function AiChatPanel({
   thinkingLevel: propThinkingLevel,
   onThinkingLevelChange,
   clearTrigger,
+  onRagTraceChange,
 }: AiChatPanelProps) {
   const isPage = variant === "page";
 
   const [messages, setMessages] = useState<Message[]>([]);
+  const [voiceInputText, setVoiceInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isMessagesLoading, setIsMessagesLoading] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const [pendingSources, setPendingSources] = useState<SourceReference[]>([]);
+  const [pendingSuggestions, setPendingSuggestions] = useState<ClarificationSuggestion[]>([]);
+  const [currentRagTrace, setCurrentRagTrace] = useState<RagTrace | null>(null);
 
   const [internalAiMode, setInternalAiMode] = useState<AiMode>("auto");
   const aiMode = propAiMode ?? internalAiMode;
@@ -265,6 +276,7 @@ export function AiChatPanel({
   // Ref for streaming message: updated DIRECTLY in SSE handler (no React batching).
   // This is the authoritative source for the in-flight AiMessageBubble.
   const streamingTasksRef = useRef<TaskRecord[]>([]);
+  const initialPlaceholdersRef = useRef<TaskRecord[]>([]);
   // State derived from ref — triggers re-render when ref changes so
   // AiMessageBubble always gets fresh tasks without state batching delays.
   const [streamingTasks, setStreamingTasks] = useState<TaskRecord[]>([]);
@@ -363,59 +375,64 @@ export function AiChatPanel({
         const json = await res.json();
         const conv = json.data;
         if (conv?.messages && Array.isArray(conv.messages)) {
-          setMessages(
-            conv.messages.map(
-              (m: {
+          const loaded = conv.messages.map(
+            (m: {
+              id: string;
+              role: string;
+              content: string;
+              sources?: unknown;
+              metadata?: unknown;
+              executionStatus?: string;
+              attachments?: Array<{
                 id: string;
-                role: string;
-                content: string;
-                sources?: unknown;
-                metadata?: unknown;
-                executionStatus?: string;
-                attachments?: Array<{
-                  id: string;
-                  type: string;
-                  fileAssetId: string;
-                  direction?: string;
-                }>;
-              }) => ({
-                id: m.id,
-                role: m.role as "user" | "assistant",
-                content: m.content,
-                sources: m.sources as SourceReference[] | undefined,
-                thinkingSteps: (() => {
-                  const steps = (m.metadata as { thinkingSteps?: TaskRecord[] } | undefined)
-                    ?.thinkingSteps;
-                  if (!Array.isArray(steps)) return undefined;
-                  return steps.map((s) => ({
-                    ...s,
-                    startTime: typeof s.startTime === "number" && Number.isFinite(s.startTime) ? s.startTime : 0,
-                    endTime: s.endTime !== undefined && s.endTime !== null && Number.isFinite(Number(s.endTime))
-                      ? Number(s.endTime)
-                      : undefined,
-                  }));
-                })(),
-                totalThinkingMs: (m.metadata as { totalThinkingMs?: number } | undefined)
-                  ?.totalThinkingMs,
-                executionStatus: m.executionStatus,
-                attachments: m.attachments,
-                // 从 INPUT attachments 构建 userImages，用于刷新后气泡显示参考图
-                userImages: m.attachments
-                  ?.filter((a) => a.direction === "INPUT")
-                  .map((a) => ({
-                    id: a.fileAssetId,
-                    url: `/api/ai/file-assets/${a.fileAssetId}`,
-                    name: `参考图.${a.type === "IMAGE" ? "jpg" : "png"}`,
-                  })),
-                progress: (m.metadata as { progress?: Message["progress"] } | undefined)?.progress,
-              })
-            )
+                type: string;
+                fileAssetId: string;
+                direction?: string;
+              }>;
+            }) => ({
+              id: m.id,
+              role: m.role as "user" | "assistant",
+              content: m.content,
+              sources: m.sources as SourceReference[] | undefined,
+              thinkingSteps: (() => {
+                const steps = (m.metadata as { thinkingSteps?: TaskRecord[] } | undefined)
+                  ?.thinkingSteps;
+                if (!Array.isArray(steps)) return undefined;
+                return steps.map((s) => ({
+                  ...s,
+                  startTime: typeof s.startTime === "number" && Number.isFinite(s.startTime) ? s.startTime : 0,
+                  endTime: s.endTime !== undefined && s.endTime !== null && Number.isFinite(Number(s.endTime))
+                    ? Number(s.endTime)
+                    : undefined,
+                }));
+              })(),
+              totalThinkingMs: (m.metadata as { totalThinkingMs?: number } | undefined)
+                ?.totalThinkingMs,
+              executionStatus: m.executionStatus,
+              attachments: m.attachments,
+              // 从 INPUT attachments 构建 userImages，用于刷新后气泡显示参考图
+              userImages: m.attachments
+                ?.filter((a) => a.direction === "INPUT")
+                .map((a) => ({
+                  id: a.fileAssetId,
+                  url: `/api/ai/file-assets/${a.fileAssetId}`,
+                  name: `参考图.${a.type === "IMAGE" ? "jpg" : "png"}`,
+                })),
+              progress: (m.metadata as { progress?: Message["progress"] } | undefined)?.progress,
+            })
           );
+          setMessages((prev) => {
+            // 如果后端返回消息为空（刚创建的新会话），且前端已有在途/展示的乐观消息，则保留已有消息
+            if (loaded.length === 0 && prev.length > 0) {
+              return prev;
+            }
+            return loaded;
+          });
         }
       } catch (err) {
         if (version === conversationVersionRef.current) {
           console.error("[AiChatPanel] load messages error:", err);
-          setMessages([]);
+          setMessages((prev) => (prev.length > 0 ? prev : []));
         }
       } finally {
         if (version === conversationVersionRef.current) setIsMessagesLoading(false);
@@ -627,7 +644,6 @@ export function AiChatPanel({
   // when the user switches to a different conversation.
   useEffect(() => {
     return () => {
-      abortControllerRef.current?.abort();
       if (welcomeTypewriterRef.current?.timerId) {
         clearInterval(welcomeTypewriterRef.current.timerId);
       }
@@ -643,7 +659,14 @@ export function AiChatPanel({
 
   useEffect(() => {
     if (conversationId === prevConversationIdRef.current) return;
+    const oldConvId = prevConversationIdRef.current;
     prevConversationIdRef.current = conversationId;
+
+    // 如果是刚刚在发送过程中绑定的新会话（从 null/undefined 绑定为新创建的 convId），
+    // 此时正在流式生成或执行任务，不要中断流或重置消息状态
+    if (!oldConvId && conversationId && conversationId === conversationIdRef.current) {
+      return;
+    }
     const version = ++conversationVersionRef.current;
 
     abortControllerRef.current?.abort();
@@ -785,7 +808,9 @@ export function AiChatPanel({
     async (
       message: string,
       images?: { id: string; url: string; name: string }[],
-      inputFileIds?: { id: string; url: string; name: string }[]
+      inputFileIds?: { id: string; url: string; name: string }[],
+      onComplete?: (content: string | null) => void,
+      onDelta?: (delta: string, fullContent: string) => void
     ) => {
       // Chat 模式识图：图片通过 onChatImagesChange → chatImages state → 传给后端。
       // Image/Video 模式的 inputFileIds 路径不变。
@@ -838,6 +863,7 @@ export function AiChatPanel({
             if (!created.data) throw new Error(created.error ?? "创建对话失败");
             convId = created.data.id;
             conversationIdRef.current = convId;
+            prevConversationIdRef.current = convId;
             onConversationCreated?.(convId);
           }
 
@@ -920,6 +946,7 @@ export function AiChatPanel({
             if (!created.data) throw new Error(created.error ?? "创建对话失败");
             convId = created.data.id;
             conversationIdRef.current = convId;
+            prevConversationIdRef.current = convId;
             onConversationCreated?.(convId);
           }
 
@@ -1010,6 +1037,7 @@ export function AiChatPanel({
       // The placeholder stepLabels act as merge keys when the real
       // timeline_snapshot overwrites them.
       const placeholders = buildPlaceholderTasks(aiModeRef.current);
+      initialPlaceholdersRef.current = placeholders;
       streamingTasksRef.current = placeholders;
       setStreamingTasks(placeholders);
       setTimelineTasks(placeholders);
@@ -1050,6 +1078,7 @@ export function AiChatPanel({
           if (!created.data?.id) throw new Error(created.error ?? "创建对话失败");
           convId = created.data.id;
           conversationIdRef.current = convId;
+          prevConversationIdRef.current = convId;
           onConversationCreated?.(convId);
         }
 
@@ -1074,7 +1103,6 @@ export function AiChatPanel({
           if (conversationVersion !== conversationVersionRef.current) return;
           if (city) body.clientCity = city;
         }
-
         const response = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1093,18 +1121,19 @@ export function AiChatPanel({
         const decoder = new TextDecoder();
         let fullContent = "";
         let sources: SourceReference[] = [];
-
+        let sseBuffer = "";
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n");
+          sseBuffer += decoder.decode(value, { stream: true });
+          const lines = sseBuffer.split("\n");
+          sseBuffer = lines.pop() ?? "";
 
-          for (const line of lines) {
+          for (const rawLine of lines) {
+            const line = rawLine.trim();
             if (!line.startsWith("data: ")) continue;
             const data = line.slice(6);
-
             try {
               const parsed = JSON.parse(data);
               // Guard: skip events from a stale conversation version.
@@ -1117,11 +1146,14 @@ export function AiChatPanel({
               if (parsed.type === "conversation") {
                 // First message in a new conversation: API created the conversation
                 if (parsed.id) {
+                  conversationIdRef.current = parsed.id;
+                  prevConversationIdRef.current = parsed.id;
                   onConversationCreated?.(parsed.id);
                 }
               } else if (parsed.type === "text") {
                 fullContent += parsed.delta;
                 setStreamingContent(fullContent);
+                onDelta?.(parsed.delta, fullContent);
                 // 收到文本说明已进入回答生成阶段，激活最后一个步骤为 running
                 if (streamingTasksRef.current.length > 0) {
                   const currentTasks = streamingTasksRef.current;
@@ -1142,42 +1174,43 @@ export function AiChatPanel({
               } else if (parsed.type === "sources") {
                 sources = parsed.sources ?? [];
                 setPendingSources(sources);
+              } else if (parsed.type === "clarification_suggestions") {
+                if (Array.isArray(parsed.suggestions)) {
+                  setPendingSuggestions(parsed.suggestions);
+                }
+              } else if (parsed.type === "rag_trace") {
+                if (parsed.trace) {
+                  setCurrentRagTrace(parsed.trace);
+                  onRagTraceChange?.(parsed.trace);
+                }
               } else if (parsed.type === "timeline_snapshot") {
                 // Timeline events from the new TimelineStore integration.
                 // These are flat TaskRecord[] from the backend's TimelineAdapter.
                 if (Array.isArray(parsed.tasks)) {
                   const incoming = parsed.tasks as TaskRecord[];
-                  const incomingByNodeOrLabel = new Map<string, TaskRecord>();
+
+                  // Collect nodeNames and stepLabels of all tasks that have been executed or started
+                  const executedNodeNames = new Set<string>();
+                  const executedStepLabels = new Set<string>();
                   for (const t of incoming) {
-                    if (t.nodeName) incomingByNodeOrLabel.set(t.nodeName, t);
-                    if (t.stepLabel) incomingByNodeOrLabel.set(t.stepLabel, t);
+                    if (t.nodeName) executedNodeNames.add(t.nodeName);
+                    if (t.stepLabel) executedStepLabels.add(t.stepLabel);
                   }
 
-                  const currentPlaceholders = streamingTasksRef.current;
-                  const merged: TaskRecord[] = [];
-                  const matchedTaskIds = new Set<string>();
-
-                  for (const ph of currentPlaceholders) {
+                  // Find future placeholders from initial plan that haven't been reached yet
+                  const futurePlaceholders = (initialPlaceholdersRef.current || []).filter((ph) => {
                     const nodeName = ph.nodeName ?? (ph.id.startsWith("placeholder-") ? ph.id.replace("placeholder-", "") : undefined);
-                    const real = (nodeName && incomingByNodeOrLabel.get(nodeName)) || incomingByNodeOrLabel.get(ph.stepLabel);
-                    if (real) {
-                      merged.push(real);
-                      matchedTaskIds.add(real.id);
-                    } else {
-                      merged.push(ph);
-                    }
-                  }
+                    if (nodeName && executedNodeNames.has(nodeName)) return false;
+                    if (ph.stepLabel && executedStepLabels.has(ph.stepLabel)) return false;
+                    return true;
+                  });
 
-                  // 追加未被 placeholder 覆盖的后端任务（例如动态的 humanConfirmation 节点）
-                  for (const t of incoming) {
-                    if (!matchedTaskIds.has(t.id)) {
-                      merged.push(t);
-                    }
-                  }
+                  // Combined tasks: all incoming executed/running tasks + remaining future placeholders
+                  const combined = [...incoming, ...futurePlaceholders];
 
                   // 推进状态：让第一个未完成的任务进入 running 并记录准确 startTime，后续任务保持 pending
                   let foundFirstUnfinished = false;
-                  const updatedMerged = merged.map((t, idx, arr) => {
+                  const updatedMerged = combined.map((t, idx, arr) => {
                     if (t.status === "success" || t.status === "error" || t.status === "warning") {
                       return t;
                     }
@@ -1201,9 +1234,19 @@ export function AiChatPanel({
                     };
                   });
 
-                  streamingTasksRef.current = updatedMerged;
-                  setStreamingTasks(updatedMerged);
-                  setTimelineTasks(updatedMerged);
+                  // Ensure strict ID uniqueness across the whole list (defense against any duplicate IDs)
+                  const seenIds = new Set<string>();
+                  const deduplicatedMerged: TaskRecord[] = [];
+                  for (const t of updatedMerged) {
+                    if (!seenIds.has(t.id)) {
+                      seenIds.add(t.id);
+                      deduplicatedMerged.push(t);
+                    }
+                  }
+
+                  streamingTasksRef.current = deduplicatedMerged;
+                  setStreamingTasks(deduplicatedMerged);
+                  setTimelineTasks(deduplicatedMerged);
                 }
               } else if (parsed.type === "done") {
                 setActiveToolCall(null);
@@ -1236,16 +1279,22 @@ export function AiChatPanel({
                         return t;
                       })
                   : undefined;
-                streamingTasksRef.current = finalTasks ?? [];
-                setStreamingTasks(finalTasks ?? []);
+                const deduplicatedFinalTasks = finalTasks
+                  ? (() => {
+                      const seen = new Set<string>();
+                      return finalTasks.filter((t) => !seen.has(t.id) && seen.add(t.id));
+                    })()
+                  : undefined;
+                streamingTasksRef.current = deduplicatedFinalTasks ?? [];
+                setStreamingTasks(deduplicatedFinalTasks ?? []);
                 // Calculate total thinking time for the assistant message
                 const totalThinkingMs =
-                  finalTasks && finalTasks.length > 0
+                  deduplicatedFinalTasks && deduplicatedFinalTasks.length > 0
                     ? (() => {
-                        const starts = finalTasks
+                        const starts = deduplicatedFinalTasks
                           .map((t) => t.startTime)
                           .filter((v) => typeof v === "number" && Number.isFinite(v) && v > 0);
-                        const ends = finalTasks
+                        const ends = deduplicatedFinalTasks
                           .map((t) => t.endTime)
                           .filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v > 0);
                         if (starts.length === 0 || ends.length === 0) return undefined;
@@ -1257,8 +1306,9 @@ export function AiChatPanel({
                   role: "assistant",
                   content: fullContent,
                   sources: sources.length > 0 ? sources : undefined,
-                  thinkingSteps: finalTasks,
+                  thinkingSteps: deduplicatedFinalTasks,
                   totalThinkingMs,
+                  suggestions: pendingSuggestions.length > 0 ? pendingSuggestions : undefined,
                 };
                 // If we detected a workflow match, skip adding this message
                 // (the workflow card is already shown instead)
@@ -1269,8 +1319,10 @@ export function AiChatPanel({
                   setMessages((prev) => [...prev, assistantMessage]);
                 }
                 setIsLoading(false);
+                onComplete?.(fullContent || null);
                 setStreamingContent("");
                 setPendingSources([]);
+                setPendingSuggestions([]);
 
                 // thinkingSteps now lives inside the bubble — no external collapse timer needed
               } else if (parsed.type === "workflow_match") {
@@ -1364,19 +1416,21 @@ export function AiChatPanel({
                     : prev
                 );
               } else if (parsed.type === "pending_confirmation") {
+                setIsLoading(false);
+                setStreamingContent("");
+                // Workflow approval 或无候选列表时不渲染选择器提示，避免"找到 undefined 个匹配项"
+                if (parsed.entityType === "workflow" || !Array.isArray(parsed.candidates) || parsed.candidates.length === 0) {
+                  return;
+                }
                 // Human-in-Loop: render candidate picker above input (not as a message bubble)
-                setPendingCandidates(parsed.candidates ?? []);
-                // Still add a brief natural-language hint message so the conversation context is clear.
-                // Dynamic label based on entityType to avoid "用户" for weekly_report etc.
+                setPendingCandidates(parsed.candidates);
                 const entityType = (parsed as { entityType?: string }).entityType ?? "user";
                 const entityLabelMap: Record<string, string> = { user: "用户", weekly_report: "周报", ticket: "工单", project: "项目" };
                 const entityLabel = entityLabelMap[entityType] ?? "匹配项";
-                setIsLoading(false);
-                setStreamingContent("");
                 const hintMsg: Message = {
                   id: `pending-confirm-${Date.now()}`,
                   role: "assistant",
-                  content: `找到 ${parsed.candidates?.length} 个${entityLabel}匹配，请在下方选择目标${entityLabel}：`,
+                  content: `找到 ${parsed.candidates.length} 个${entityLabel}匹配，请在下方选择目标${entityLabel}：`,
                 };
                 setMessages((prev) => [...prev, hintMsg]);
               } else if (parsed.type === "error") {
@@ -1393,6 +1447,9 @@ export function AiChatPanel({
           error instanceof Error &&
           (error.name === "AbortError" || conversationVersion !== conversationVersionRef.current)
         ) {
+          setIsLoading(false);
+          setStreamingContent("");
+          onComplete?.(null);
           return;
         }
         console.error("Chat error:", error);
@@ -1417,22 +1474,44 @@ export function AiChatPanel({
         setIsLoading(false);
         setStreamingContent("");
         setActiveToolCall(null);
+        onComplete?.(null);
         setToolCallChain([]);
       }
     },
     [conversationId, onConversationCreated, startPolling, chatImages]
   );
+  const clearVoiceInputText = useCallback(() => setVoiceInputText(""), []);
+  const {
+    inputStatus: voiceInputStatus,
+    inputDuration: voiceInputDuration,
+    chatStatus: voiceChatStatus,
+    isChatActive: voiceChatActive,
+    userTranscript: voiceUserTranscript,
+    aiResponseText: voiceAiResponseText,
+    toggleInput: toggleVoiceInput,
+    toggleChat: toggleVoiceChat,
+    finishSpeaking: finishVoiceChatSpeech,
+    stopVoiceChat,
+  } = useChatVoice({
+    onVoiceInput: (text) => setVoiceInputText(text),
+    onVoiceChat: (text, onDelta) =>
+      new Promise((resolve) => {
+        void handleSend(text, undefined, undefined, resolve, onDelta);
+      }),
+    onError: (message) => toast.error(message),
+    continuous: true,
+  });
   const initialMessageSentRef = useRef<string | null>(null);
   useEffect(() => {
-    if (
-      initialMessage &&
-      initialMessageSentRef.current !== initialMessage &&
-      !isLoading
-    ) {
+    if (!initialMessage) {
+      initialMessageSentRef.current = null;
+      return;
+    }
+    if (initialMessageSentRef.current !== initialMessage) {
       initialMessageSentRef.current = initialMessage;
       void handleSend(initialMessage, initialImages);
     }
-  }, [initialMessage, initialImages, isLoading, handleSend]);
+  }, [initialMessage, initialImages, handleSend]);
 
   const handleStop = useCallback(() => {
     if (abortControllerRef.current) {
@@ -1474,10 +1553,35 @@ export function AiChatPanel({
     setMessages([]);
   }, [isPage]);
 
+  const voiceChatBusy =
+    voiceChatStatus === "transcribing" ||
+    voiceChatStatus === "generating" ||
+    voiceChatStatus === "speaking";
+  const voiceOverlayStatus =
+    voiceChatStatus === "recording"
+      ? "listening"
+      : voiceChatStatus === "transcribing"
+        ? "transcribing"
+        : voiceChatStatus === "generating"
+          ? "thinking"
+          : voiceChatStatus === "speaking"
+            ? "speaking"
+            : voiceChatStatus === "error"
+              ? "error"
+              : "connecting";
   const padding = isPage ? "p-6" : "p-3";
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
+      {voiceChatActive && (
+        <VoiceConversationOverlay
+          status={voiceOverlayStatus}
+          userText={voiceUserTranscript}
+          aiText={voiceAiResponseText}
+          onFinishSpeaking={finishVoiceChatSpeech}
+          onStop={stopVoiceChat}
+        />
+      )}
       {/* Floating 模式精简 Header (isPage 下彻底移除，由右侧会话辅助检查器承载) */}
       {!isPage && (
         <div className="flex items-center justify-between border-b border-ink-100 px-4 py-2.5 pr-12 bg-white">
@@ -1505,7 +1609,7 @@ export function AiChatPanel({
       <div className={`flex-1 overflow-y-auto ${padding}`}>
         <div className="space-y-4">
           {/* Loading skeleton — Code Agent style */}
-          {isMessagesLoading && (
+          {isMessagesLoading && messages.length === 0 && (
             <>
               {/* AI message: left-aligned full-width panel */}
               <div className="w-full overflow-hidden rounded-xl border border-ink-200 bg-white shadow-sm">
@@ -1533,25 +1637,26 @@ export function AiChatPanel({
           )}
 
           {/* Message list */}
-          {!isMessagesLoading &&
-            messages.map((msg) => (
+          {messages.map((msg) => (
               <div key={msg.id}>
                 <AiMessageBubble
                   role={msg.role}
                   content={msg.content}
                   sources={msg.sources}
                   candidates={msg.candidates}
+                  suggestions={msg.suggestions}
+                  onSuggestionSelect={(query) => handleSend(query)}
                   thinkingSteps={msg.thinkingSteps}
                   totalThinkingMs={msg.totalThinkingMs}
                   executionStatus={msg.executionStatus}
                   attachments={msg.attachments}
                   userImages={msg.userImages}
-                  loadingType={msg.loadingType ?? (aiModeRef.current === "video" ? "video" : "image")}
+                  loadingType={msg.loadingType ?? (aiMode === "video" ? "video" : "image")}
                   progress={msg.progress}
                   onCandidateSelect={(candidateId) => handleSend(candidateId)}
                 />
               </div>
-            ))}
+          ))}
 
           {/* Streaming message — show as soon as thinking tasks arrive (no waiting for text) */}
           {isLoading && (
@@ -1562,13 +1667,13 @@ export function AiChatPanel({
                 sources={pendingSources.length > 0 ? pendingSources : undefined}
                 isStreaming
                 thinkingSteps={streamingTasks}
-                loadingType={aiModeRef.current === "video" ? "video" : "image"}
+                loadingType={aiMode === "video" ? "video" : "image"}
               />
             </div>
           )}
 
           {/* Empty state for page variant with no messages */}
-          {!isMessagesLoading && messages.length === 0 && (
+          {!isMessagesLoading && messages.length === 0 && !isLoading && !streamingContent && !initialMessage && (
             <div className="flex flex-col items-center justify-center py-10 px-4 text-center max-w-2xl mx-auto">
               <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-400 via-brand-600 to-brand-700 shadow-md">
                 <IconSparkles className="h-7 w-7 text-white" />
@@ -1705,6 +1810,16 @@ export function AiChatPanel({
           selectedModel={selectedModel}
           thinkingLevel={propThinkingLevel}
           onThinkingLevelChange={onThinkingLevelChange}
+          voiceInputStatus={voiceInputStatus}
+          voiceInputDuration={voiceInputDuration}
+          voiceInputText={voiceInputText}
+          onVoiceInputTextConsumed={clearVoiceInputText}
+          voiceChatActive={voiceChatActive}
+          voiceChatConnecting={voiceChatBusy}
+          voiceChatRecording={voiceChatStatus === "recording"}
+          onVoiceInput={toggleVoiceInput}
+          onVoiceChat={toggleVoiceChat}
+          onStopVoiceChat={stopVoiceChat}
         />
       </div>
     </div>

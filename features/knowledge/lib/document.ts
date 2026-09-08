@@ -11,6 +11,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/shared/db/client";
 import { splitIntoChunks } from "@/features/knowledge/lib/chunk";
+import { createHierarchicalChunks } from "@/features/knowledge/lib/parent-child";
 import { fetchEmbeddingsBatch } from "@/features/knowledge/lib/embedding";
 import type { FileReferenceSourceType } from "@/features/knowledge/lib/file-reference";
 
@@ -377,11 +378,17 @@ export async function processFileAssetJob(fileAssetId: string): Promise<void> {
       return;
     }
 
-    // Step 3: 切块
-    const chunks = splitIntoChunks(text);
+    // Step 3: 层次化切块 (Parent-Child)
+    const hierarchy = createHierarchicalChunks(text, document.id, {
+      parentMaxChars: 2000,
+      childMaxChars: 350,
+      childOverlap: 50,
+    });
+    const parentMap = new Map(hierarchy.parents.map((p) => [p.id, p]));
+    const chunks = hierarchy.children.map((c) => c.content);
 
     if (chunks.length === 0) {
-      throw new Error("CHUNK_EMPTY: splitIntoChunks returned empty array");
+      throw new Error("CHUNK_EMPTY: createHierarchicalChunks returned empty children");
     }
 
     // Step 4: 批量向量化
@@ -399,7 +406,9 @@ export async function processFileAssetJob(fileAssetId: string): Promise<void> {
       const chunkUrl = projectId
         ? `/projects/${projectId}/documents/${fileAsset.id}`
         : `/api/upload/${fileAsset.id}`;
-      for (let i = 0; i < chunks.length; i++) {
+      for (let i = 0; i < hierarchy.children.length; i++) {
+        const child = hierarchy.children[i];
+        const parent = parentMap.get(child.parentId);
         const saved = await tx.searchDocument.create({
           data: {
             sourceType: "DOCUMENT",
@@ -408,10 +417,17 @@ export async function processFileAssetJob(fileAssetId: string): Promise<void> {
             projectId,
             chunkIndex: i,
             title: fileAsset.originalName,
-            content: chunks[i],
+            content: child.content,
             url: chunkUrl,
-            // metadata 暂保留 fileAssetId 一个版本（PR11 清理）
-            metadata: { fileAssetId, hash: null } as Prisma.InputJsonValue,
+            metadata: {
+              fileAssetId,
+              hash: null,
+              parentId: child.parentId,
+              parentChunkId: child.parentId,
+              sectionTitle: child.sectionTitle,
+              parentContent: parent?.content,
+              isHierarchical: true,
+            } as Prisma.InputJsonValue,
           },
         });
         savedChunks.push(saved);
