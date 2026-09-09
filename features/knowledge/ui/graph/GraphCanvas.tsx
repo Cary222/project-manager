@@ -5,22 +5,36 @@ import { MultiDirectedGraph } from "graphology";
 import Sigma from "sigma";
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import type { GraphViewData } from "../../lib/graph/view-types";
-import { updateCanvasGraph } from "./graph-adapter";
+import { NODE_STYLES, updateCanvasGraph } from "./graph-adapter";
 
 export default function GraphCanvas({
   data,
   selectedId,
   onSelect,
+  onExpand,
+  typeFilter = "",
   height,
 }: {
   data: GraphViewData;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  onExpand?: (id: string) => void;
+  typeFilter?: string;
   height: number;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const renderer = useRef<Sigma | null>(null);
+  const selectRef = useRef(onSelect);
+  const typeFilterRef = useRef(typeFilter);
+  const expandRef = useRef(onExpand);
+  const expansionAnchor = useRef<string | null>(null);
   const [failure, setFailure] = useState(false);
+
+  useEffect(() => {
+    selectRef.current = onSelect;
+    typeFilterRef.current = typeFilter;
+    expandRef.current = onExpand;
+  }, [onSelect, typeFilter, onExpand]);
 
   useEffect(() => {
     if (!container.current) return;
@@ -36,8 +50,12 @@ export default function GraphCanvas({
         allowInvalidContainer: true,
       });
       renderer.current = sigma;
-      sigma.on("clickNode", ({ node }) => onSelect(node));
-      sigma.on("clickStage", () => onSelect(null));
+      sigma.on("clickNode", ({ node }) => {
+        expansionAnchor.current = node;
+        selectRef.current(node);
+        expandRef.current?.(node);
+      });
+      sigma.on("clickStage", () => selectRef.current(null));
     } catch (error) {
       console.warn(
         "[knowledge-graph] WebGL unavailable",

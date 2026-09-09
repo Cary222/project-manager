@@ -13,7 +13,7 @@ import {
   type FileAttachment,
 } from "@/features/knowledge/lib/pkm";
 import { uploadImage } from "@/features/knowledge/lib/upload";
-import { KnowledgeGraphSection } from "@/features/knowledge/ui/graph/KnowledgeGraphSection";
+import { KnowledgeGraphView } from "@/features/knowledge/ui/graph";
 
 type ProjectOption = {
   id: string;
@@ -112,6 +112,7 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [flash, setFlash] = useState<FlashState>(null);
   const [previewFile, setPreviewFile] = useState<PreviewableFile | null>(null);
+  const [viewTab, setViewTab] = useState<"overview" | "graph">("overview");
 
   useEffect(() => {
     if (initialNoteId && notes.some((note) => note.id === initialNoteId)) {
@@ -324,6 +325,36 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
 
         {flash ? <p className={`rounded-lg border px-3 py-2 text-sm ${toneClass(flash.type)}`}>{flash.message}</p> : null}
 
+        <div
+          role="tablist"
+          aria-label="PKM 视图切换"
+          className="flex gap-1 rounded-lg border border-ink-200 bg-white p-1"
+        >
+          {([
+            { key: "overview", label: "概览" },
+            { key: "graph", label: "知识图谱" },
+          ] as const).map((tab) => {
+            const active = viewTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setViewTab(tab.key)}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                  active
+                    ? "bg-brand-50 text-brand-700"
+                    : "text-ink-500 hover:bg-ink-50 hover:text-ink-700"
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {viewTab === "overview" ? (
         <div className="grid items-start gap-5 lg:grid-cols-4">
           <aside className="space-y-3 self-start lg:col-span-1">
             <div className="rounded-xl border border-ink-200 bg-white p-4 shadow-soft">
@@ -641,7 +672,11 @@ export function PkmBoard({ initialNotes, projects, publicTagSummary, initialNote
             </div>
           </div>
         </div>
-        {selectedNote && <KnowledgeGraphSection key={selectedNote.id} noteId={selectedNote.id} />}
+        ) : (
+          <div className="overflow-hidden rounded-xl border border-ink-200 bg-white shadow-soft">
+            <KnowledgeGraphView noteId={selectedNote?.id} />
+          </div>
+        )}
         {previewFile && (
           <DocumentPreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
         )}

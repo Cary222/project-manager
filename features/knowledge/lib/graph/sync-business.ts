@@ -20,17 +20,9 @@ type NodeUpsert = {
 
 function makeNode(u: NodeUpsert) {
   const normalizedName = normalizeEntityName(u.type, u.canonicalName);
-  // Prisma 要求 unique composite where 中 nullable 字段用空字符串代替 null
-  const projectIdForWhere = u.projectId ?? "";
   return {
-    where: {
-      type_normalizedName_projectId: {
-        type: u.type,
-        normalizedName,
-        projectId: projectIdForWhere,
-      },
-    },
-    create: {
+    normalizedName,
+    data: {
       type: u.type,
       canonicalName: u.canonicalName,
       normalizedName,
@@ -47,9 +39,24 @@ function makeNode(u: NodeUpsert) {
   };
 }
 
+/**
+ * NULL 安全的节点 upsert。
+ *
+ * 原实现用 Prisma 复合唯一键 type_normalizedName_projectId 做 where，
+ * 但 projectId 可为 null，而 Postgres 唯一索引里 NULL 互不相等，
+ * 导致 projectId 为空的节点（USER / DOCUMENT / 无项目笔记等）每次同步都新建一份，
+ * 图谱节点成倍膨胀。这里改为显式 findFirst（projectId: null 即 IS NULL）再 update/create。
+ */
 async function upsertNode(prisma: PrismaClient, u: NodeUpsert) {
-  const args = makeNode(u);
-  return prisma.knowledgeNode.upsert(args);
+  const { normalizedName, data, update } = makeNode(u);
+  const existing = await prisma.knowledgeNode.findFirst({
+    where: { type: u.type, normalizedName, projectId: u.projectId ?? null },
+    select: { id: true },
+  });
+  if (existing) {
+    return prisma.knowledgeNode.update({ where: { id: existing.id }, data: update });
+  }
+  return prisma.knowledgeNode.create({ data });
 }
 
 async function upsertEdge(
