@@ -21,6 +21,7 @@ import {
 import { type MultimodalPart } from "@/features/ai/core/context/messages/multimodal-builder";
 import type { UserContent } from "ai";
 import type { ClarificationSuggestion } from "@/features/ai/search/evidence-evaluator";
+import { generateSuggestedActions } from "@/features/ai/handoff/suggested-actions";
 
 /**
  * Call generateText with a dynamically selected model based on modelContext.
@@ -524,19 +525,6 @@ export async function generateResponseNode(
       pendingHumanAction: null,
     };
   }
-
-  // ── Workflow Match: Return special response to trigger frontend dialog ──
-  if (state.workflowMatch) {
-    const { workflow } = state.workflowMatch;
-    console.log(
-      `[generateResponseNode] workflow match detected: ${workflow.type}`,
-    );
-    return {
-      response: `[WORKFLOW_MATCH:${workflow.type}]:检测到你可能想要执行「${workflow.name}」工作流。它可以帮你${workflow.description}。是否现在启动？`,
-      pendingHumanAction: null,
-    };
-  }
-
   const userName = state.userName || "用户";
   const profile = state.profile ?? {};
 
@@ -566,6 +554,16 @@ export async function generateResponseNode(
         }
       : null);
 
+  const resolveFinalSuggestedActions = (generatedText?: string) => {
+    return generateSuggestedActions({
+      query: userContent,
+      queryType: state.queryType ?? undefined,
+      toolResults: state.toolResults ?? undefined,
+      resolvedEntities: state.resolvedEntities ?? null,
+      workflowMatch: state.workflowMatch ?? null,
+      answerContent: generatedText || "",
+    });
+  };
   // Handle user activity queries with summary results from searchStructured
   // 周报和个人活动查询的结果在 searchResults[0] 中（JSON 格式）
   const userActivityContext = state.toolResults?.retrieval ? null : getUserActivityContext(state.toolResults);
@@ -590,7 +588,7 @@ export async function generateResponseNode(
         state.userId,
         onDelta,
       );
-      return { response: resultText, lastMentionedUser };
+      return { response: resultText, lastMentionedUser, suggestedActions: resolveFinalSuggestedActions(resultText) };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       // 失败时降级返回原文，保证前端至少能看到内容
@@ -604,7 +602,7 @@ export async function generateResponseNode(
           onDelta(c);
         }
       }
-      return { response: userActivityContext, lastMentionedUser };
+      return { response: userActivityContext, lastMentionedUser, suggestedActions: resolveFinalSuggestedActions() };
     }
   }
 
@@ -695,6 +693,7 @@ export async function generateResponseNode(
     const clarificationSuggestions =
       retrievalToolResult?.evaluation?.suggestions ?? null;
 
+    const suggestedActions = resolveFinalSuggestedActions(resultText);
     return {
       response: resultText,
       lastMentionedUser,
@@ -702,6 +701,7 @@ export async function generateResponseNode(
       // is not hijacked by an abandoned HIL session from a previous request.
       pendingHumanAction: null,
       clarificationSuggestions,
+      suggestedActions,
     };
   } catch (error) {
     // Fallback: 如果 LLM 生成失败但有 searchResults 包含 summary，降级返回 summary

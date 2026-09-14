@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, Suspense } from "react";
+import { useCallback, useEffect, useRef, useState, Suspense } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { AiChatPanel } from "./AiChatPanel";
 import { AiConversationSidebar, type ConversationCategory } from "./AiConversationSidebar";
@@ -85,36 +85,50 @@ function AiChatPageInner() {
     };
   }, []);
 
-  // Sync activeConversationId → URL
+  // 单向响应外部路由参数变化（如初次载入、浏览器前进后退），杜绝双向 setState 环路
+  const prevUrlCRef = useRef<string | null>(searchParams.get("c") || null);
   useEffect(() => {
-    if (mode === "work") return;
-    const currentC = searchParams.get("c");
-    if (currentC === activeConversationId) return;
-
-    const params = new URLSearchParams(searchParams.toString());
-    if (activeConversationId) {
-      params.set("c", activeConversationId);
-    } else {
-      params.delete("c");
+    const currentUrlC = searchParams.get("c") || null;
+    if (currentUrlC !== prevUrlCRef.current) {
+      prevUrlCRef.current = currentUrlC;
+      setActiveConversationId(currentUrlC);
     }
-    const newQuery = params.toString();
-    const newUrl = newQuery ? `${pathname}?${newQuery}` : pathname;
-    window.history.replaceState(null, "", newUrl);
-  }, [activeConversationId, mode, pathname, router, searchParams]);
+  }, [searchParams]);
 
   // Handle selecting a conversation from the sidebar
   const handleSelect = useCallback((id: string | null) => {
     setPendingInitialMessage(null);
     setPendingInitialImages(undefined);
     setActiveConversationId(id);
-  }, []);
+    const params = new URLSearchParams(searchParams.toString());
+    if (id) {
+      params.set("c", id);
+    } else {
+      params.delete("c");
+    }
+    // 当在 Work 模式下点击具体的历史对话时，无缝切换到 Chat 视图呈现完整历史记录
+    if (mode === "work" && id) {
+      params.delete("m");
+      params.delete("goal");
+      params.delete("route");
+      const newQuery = params.toString();
+      router.replace(newQuery ? `${pathname}?${newQuery}` : pathname, { scroll: false });
+    } else {
+      const newQuery = params.toString();
+      window.history.replaceState(null, "", newQuery ? `${pathname}?${newQuery}` : pathname);
+    }
+  }, [mode, pathname, router, searchParams]);
 
   // When a new conversation is created by AiChatPanel
   const handleConversationCreated = useCallback((id: string) => {
     setActiveConversationId(id);
     setPendingInitialMessage(null);
     setPendingInitialImages(undefined);
-  }, []);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("c", id);
+    const newQuery = params.toString();
+    window.history.replaceState(null, "", newQuery ? `${pathname}?${newQuery}` : pathname);
+  }, [pathname, searchParams]);
 
   // When a conversation is deleted or 404s
   const handleConversationMissing = useCallback((id: string) => {
@@ -139,10 +153,19 @@ function AiChatPageInner() {
 
   // Switching between Chat and Work modes
   const handleSwitchToWorkMode = useCallback(
-    (workflowType?: string, goalPrompt?: string) => {
+    (
+      workflowType?: string,
+      goalPrompt?: string,
+      handoffContext?: { conversationId?: string; projectId?: string; ticketId?: string }
+    ) => {
       const params = new URLSearchParams(searchParams.toString());
       params.set("m", "work");
-      params.delete("c");
+      const targetConvId = handoffContext?.conversationId ?? activeConversationId;
+      if (targetConvId) {
+        params.set("c", targetConvId);
+      } else {
+        params.delete("c");
+      }
       if (goalPrompt) {
         params.set("goal", goalPrompt);
       } else {
@@ -153,10 +176,16 @@ function AiChatPageInner() {
       } else {
         params.delete("route");
       }
+      if (handoffContext?.projectId) {
+        params.set("projectId", handoffContext.projectId);
+      }
+      if (handoffContext?.ticketId) {
+        params.set("ticketId", handoffContext.ticketId);
+      }
       const newQuery = params.toString();
       router.replace(`${pathname}?${newQuery}`, { scroll: false });
     },
-    [pathname, router, searchParams]
+    [activeConversationId, pathname, router, searchParams]
   );
 
   const handleSwitchToConversation = useCallback(() => {
@@ -219,42 +248,43 @@ function AiChatPageInner() {
   const hasActiveChat = Boolean(activeConversationId || pendingInitialMessage);
   const showWelcomeView = !isWorkMode && !hasActiveChat;
 
-  // Top Bar Center Header Info
+  // Top Bar Center: Mode Segmented Switch (Chat 💬 vs Work ⚡)
   const topBarCenter = (
-    <div className="flex items-center gap-2 text-xs">
-      <span className="font-semibold text-ink-800">
-        {isWorkMode ? "⚡ Work 办公工作台" : showWelcomeView ? "新对话" : "💬 对话详情"}
-      </span>
-      {isWorkMode && (
-        <span className="rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700">
-          Agent 确定性调度
-        </span>
-      )}
+    <div className="flex items-center gap-2.5">
+      <div className="flex items-center rounded-lg border border-ink-200 bg-ink-100/80 p-0.5 text-xs shadow-2xs">
+        <button
+          type="button"
+          onClick={isWorkMode ? handleSwitchToConversation : undefined}
+          className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
+            !isWorkMode
+              ? "bg-white text-brand-700 shadow-xs ring-1 ring-black/5"
+              : "text-ink-600 hover:text-ink-900"
+          }`}
+        >
+          <span>💬</span>
+          <span>Chat 对话</span>
+        </button>
+        <button
+          type="button"
+          onClick={!isWorkMode ? () => handleSwitchToWorkMode() : undefined}
+          className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
+            isWorkMode
+              ? "bg-white text-brand-700 shadow-xs ring-1 ring-black/5"
+              : "text-ink-600 hover:text-ink-900"
+          }`}
+        >
+          <span>⚡</span>
+          <span>Work 工作台</span>
+          <span className="rounded bg-brand-50 px-1 py-0.2 text-[10px] font-semibold text-brand-700">
+            Agent
+          </span>
+        </button>
+      </div>
     </div>
   );
 
-  // Top Bar Right Actions
-  const topBarRight = (
-    <div className="flex items-center gap-2">
-      {isWorkMode ? (
-        <button
-          type="button"
-          onClick={handleSwitchToConversation}
-          className="flex items-center gap-1 rounded-lg border border-ink-200 bg-white px-2.5 py-1 text-xs font-medium text-ink-700 hover:bg-ink-50 transition"
-        >
-          <span>切换至 Chat</span>
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={() => handleSwitchToWorkMode()}
-          className="flex items-center gap-1 rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 transition"
-        >
-          <span>进入 Work 模式</span>
-        </button>
-      )}
-    </div>
-  );
+  // Top Bar Right Actions (Empty, right panel toggle is rendered by AiWorkspaceLayout)
+  const topBarRight = null;
 
   // Common Left Sidebar component
   const sidebarContent = (
@@ -263,7 +293,6 @@ function AiChatPageInner() {
       onSelect={handleSelect}
       onCollapse={() => setSidebarOpen(false)}
       onNewConversation={handleNewConversation}
-      onSwitchToWorkMode={() => handleSwitchToWorkMode()}
       category={conversationCategory}
       onCategoryChange={setConversationCategory}
     />
@@ -274,6 +303,10 @@ function AiChatPageInner() {
     return (
       <div className="h-[calc(100vh-8rem)] w-full overflow-hidden rounded-2xl border border-ink-200 bg-white shadow-soft">
         <WorkDashboard
+          conversationId={activeConversationId ?? searchParams.get("c") ?? undefined}
+          onConversationCreated={(newConvId) => {
+            setActiveConversationId(newConvId);
+          }}
           onSwitchToConversation={handleSwitchToConversation}
           initialGoal={searchParams.get("goal") ?? undefined}
           initialRoute={(searchParams.get("route") as WorkRoute) ?? undefined}

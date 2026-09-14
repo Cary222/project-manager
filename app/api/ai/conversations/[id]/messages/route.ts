@@ -1015,6 +1015,7 @@ async function handleLangGraphRequest(
       let capturedPendingHumanAction: PendingHumanActionState | null = null;
       let resolvedEntitiesResolved = false;
       let capturedSuggestions: unknown[] | null = null;
+      let capturedSuggestedActions: unknown[] | null = null;
       let capturedRagTrace: unknown = null;
 
       try {
@@ -1413,6 +1414,12 @@ async function handleLangGraphRequest(
               ) {
                 capturedSuggestions = nodeOutput.clarificationSuggestions;
               }
+              if (
+                nodeOutput.suggestedActions &&
+                Array.isArray(nodeOutput.suggestedActions)
+              ) {
+                capturedSuggestedActions = nodeOutput.suggestedActions;
+              }
               if (nodeOutput.ragTrace) {
                 capturedRagTrace = nodeOutput.ragTrace;
               }
@@ -1566,6 +1573,10 @@ async function handleLangGraphRequest(
         if (capturedSuggestions && capturedSuggestions.length > 0 && !isPendingDisambiguation) {
           console.log(`[AI-LangGraph] sending ${capturedSuggestions.length} clarification suggestions`);
           enqueueData({ type: "clarification_suggestions", suggestions: capturedSuggestions });
+        }
+        if (capturedSuggestedActions && capturedSuggestedActions.length > 0 && !isPendingDisambiguation) {
+          console.log(`[AI-LangGraph] sending ${capturedSuggestedActions.length} suggested actions`);
+          enqueueData({ type: "suggested_actions", actions: capturedSuggestedActions });
         }
         if (capturedRagTrace && !isPendingDisambiguation) {
           console.log(`[AI-LangGraph] sending rag_trace`);

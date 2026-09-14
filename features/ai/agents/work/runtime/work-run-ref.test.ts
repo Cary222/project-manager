@@ -12,6 +12,8 @@ describe("routeWorkGoal", () => {
     ["修复 #10212 的代码", "coding"],
     ["帮我看看我下载了哪些插件", "coding"],
     ["分析项目架构与组件依赖", "coding"],
+    ["统计上个月延期的所有外部工单，分析核心归因并输出复盘报告", "planning"],
+    ["梳理系统两阶段迁移规范与落地计划", "planning"],
   ] as const)("routes %s to %s", (goal, expected) => {
     expect(routeWorkGoal(goal)).toBe(expected);
   });

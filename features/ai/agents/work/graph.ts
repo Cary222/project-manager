@@ -17,6 +17,7 @@ import { Annotation, StateGraph, START, END } from "@langchain/langgraph";
 import { registerWorkTools } from "./tools";
 import { TemplateMatcher } from "./router/matcher";
 import { listWorkflows } from "./workflows/registry";
+import { createPlanner, type WorkStep } from "./planner/planner";
 
 // ============================================================================
 // State Annotation
@@ -39,11 +40,11 @@ const WorkAgentAnnotation = Annotation.Root({
   userInput: lastValue(() => ""),
 
   // Dispatch / Routing
-  taskType: lastValue<"workflow" | "coding" | "unknown">(() => "unknown"),
+  taskType: lastValue<"workflow" | "coding" | "planning" | "unknown">(() => "unknown"),
   workflowType: lastValue(() => ""),
   workflowName: lastValue(() => ""),
 
-  // Execution
+  // Execution — 使用 planner 的 WorkStep 类型
   steps: lastValue<WorkStep[]>(() => []),
   currentStepIndex: lastValue(() => 0),
   status: lastValue(() => "pending"),
@@ -63,12 +64,6 @@ const WorkAgentAnnotation = Annotation.Root({
 });
 
 type WorkAgentState = typeof WorkAgentAnnotation.State;
-
-interface WorkStep {
-  id: string;
-  label: string;
-  status: "pending" | "running" | "done" | "failed";
-}
 
 interface ApprovalRequest {
   title: string;
@@ -133,7 +128,12 @@ const CODING_KEYWORDS = [
   "edit",
 ];
 
-function isCodingTask(input: string): boolean {
+/**
+ * 能力判断，不是业务路由：决定要不要起一个 Pi coding session。
+ * 业务走向（统计/复盘/周报该走哪条路）一律交给服务端 Decision LLM，
+ * 不用关键词判定 —— 关键词只能表达"要不要改代码"这种能力意图。
+ */
+export function isCodingTask(input: string): boolean {
   const lower = input.toLowerCase();
   return CODING_KEYWORDS.some((kw) => lower.includes(kw));
 }
@@ -201,18 +201,27 @@ async function executeCodingNode(
 
 /**
  * Dispatch node: 任务分诊。
- * - 检测用户输入意图，路由到 workflow 或 coding。
- * - Phase 1: coding 类返回提示，workflow 类路由到对应 graph。
+ * - 检测用户输入意图，路由到 workflow、coding 或 planning。
  */
 async function dispatchNode(
   state: WorkAgentState,
 ): Promise<Partial<WorkAgentState>> {
   const input = state.userInput;
 
-  // Step 1: 尝试 workflow 路由（关键词匹配）
-  const templates = listWorkflows();
+  // Step 1: 优先检测 coding 类任务（纯代码/修复动作快速分流，避免无谓触发 LLM 规划）
+  if (isCodingTask(input)) {
+    return {
+      taskType: "coding",
+      status: "pi_pending",
+      summary: "Pi Coding Runtime 接入中，该功能将在 Phase 2 上线。",
+      updatedAt: Date.now(),
+    };
+  }
+
+  // Step 2: 尝试 workflow 路由（过滤掉 coding，走关键词 + LLM 两段式匹配）
+  const templates = listWorkflows().filter((t) => t.type !== "coding");
   const matcher = new TemplateMatcher(templates);
-  const matchResult = await matcher.match(input);
+  const matchResult = await matcher.match(input, { userId: state.userId });
 
   if (matchResult.workflowId && matchResult.confidence >= 0.8) {
     return {
@@ -225,18 +234,42 @@ async function dispatchNode(
       updatedAt: Date.now(),
     };
   }
+  // Step 3: planning 兜底 — 尝试用 planner 拆解
+  try {
+    const planner = createPlanner();
+    const plan = await planner.plan(
+      {
+        id: state.runId,
+        type: "custom",
+        description: input,
+        createdAt: new Date().toISOString(),
+      },
+      { userId: state.userId },
+    );
 
-  // Step 2: 检测 coding 类任务（Phase 1: 暂时占位）
-  if (isCodingTask(input)) {
-    return {
-      taskType: "coding",
-      status: "pi_pending",
-      summary: "Pi Coding Runtime 接入中，该功能将在 Phase 2 上线。",
-      updatedAt: Date.now(),
-    };
+    if (plan.steps.length > 1) {
+      const planTitle = plan.title || `已生成 ${plan.steps.length} 步执行计划`;
+      return {
+        taskType: "planning",
+        steps: plan.steps,
+        status: "planning_ready",
+        pendingApproval: plan.requiresApproval
+          ? {
+              title: `【${planTitle}】待确认`,
+              description: plan.steps
+                .map((s, i) => `${i + 1}. ${s.action}: ${s.description}`)
+                .join("\n"),
+            }
+          : null,
+        summary: planTitle,
+        updatedAt: Date.now(),
+      };
+    }
+  } catch {
+    // planner 异常，落入 unknown
   }
 
-  // Step 3: 无法识别的任务类型
+  // Step 4: 无法识别的任务类型
   return {
     taskType: "unknown",
     status: "failed",
@@ -352,6 +385,28 @@ async function approvalNode(): Promise<Partial<WorkAgentState>> {
 }
 
 /**
+ * Plan approval node: 展示规划结果，等待人工审批。
+ * 与 approvalNode 类似但填充真实的 steps 内容。
+ */
+async function planApprovalNode(
+  state: WorkAgentState,
+): Promise<Partial<WorkAgentState>> {
+  const stepsDesc = state.steps.length > 0
+    ? state.steps.map((s, i) => `${i + 1}. ${s.action}: ${s.description}`).join("\n")
+    : "无步骤信息";
+
+  return {
+    status: "waiting_approval",
+    waitingForHuman: true,
+    pendingApproval: {
+      title: state.summary ? `【${state.summary}】待确认` : "任务规划待确认",
+      description: `以下是系统为您生成的执行计划，请审阅后决定是否继续：\n\n${stepsDesc}`,
+    },
+    updatedAt: Date.now(),
+  };
+}
+
+/**
  * Finish node: complete the workflow.
  */
 async function finishNode(): Promise<Partial<WorkAgentState>> {
@@ -384,6 +439,7 @@ async function failNode(
 /**
  * After dispatch: route based on taskType.
  * - workflow → executeWorkflow
+ * - planning → planApproval (生成计划交人工审批)
  * - coding → END; the HTTP SSE route owns the only Pi session lifecycle
  * - unknown / error → END
  *
@@ -393,6 +449,9 @@ async function failNode(
 function routeAfterDispatch(state: WorkAgentState): string {
   if (state.taskType === "workflow" && state.status === "dispatched") {
     return "executeWorkflow";
+  }
+  if (state.taskType === "planning" && state.status === "planning_ready") {
+    return "planApproval";
   }
   return END;
 }
@@ -418,12 +477,14 @@ function buildWorkAgentGraph() {
     .addNode("executeWorkflow", executeWorkflowNode)
     .addNode("executeCoding", executeCodingNode)
     .addNode("approval", approvalNode)
+    .addNode("planApproval", planApprovalNode)
     .addNode("finish", finishNode)
     .addNode("fail", failNode)
     .addEdge(START, "dispatch")
     .addConditionalEdges("dispatch", routeAfterDispatch, {
       executeWorkflow: "executeWorkflow",
       executeCoding: "executeCoding",
+      planApproval: "planApproval",
       [END]: END,
     })
     .addConditionalEdges("executeWorkflow", routeAfterWorkflow, {
@@ -433,6 +494,7 @@ function buildWorkAgentGraph() {
     })
     .addEdge("executeCoding", "finish")
     .addEdge("approval", "executeWorkflow")
+    .addEdge("planApproval", END)   // 第一版：生成计划交人工，图结束
     .addEdge("finish", END)
     .addEdge("fail", END);
 

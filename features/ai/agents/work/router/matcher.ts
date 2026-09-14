@@ -8,7 +8,8 @@
  */
 
 import type { WorkflowTemplate } from "../workflows/registry";
-import type { RouterContext, RouterResult } from "./router";
+import type { RouterContext } from "./router";
+import { callAgnes } from "@/features/ai/llm/summarizer";
 
 export interface MatchResult {
   workflowId: string | null;
@@ -51,25 +52,82 @@ export function matchByKeyword(
   return { workflowId: null, confidence: 0 };
 }
 
-// ─── LLM-based Matcher (Future) ──────────────────────────────────────────────
+// ─── LLM-based Matcher ───────────────────────────────────────────────────────
 
 /**
  * LLM-based matcher for ambiguous inputs.
- * TODO: Implement with LLM call to determine intent.
+ *
+ * 构造候选清单 → 调 callAgnes → 解析 JSON → 白名单校验 workflowId → 兜底 null。
+ * 任何异常静默降级，不抛。
  */
 export async function matchByLLM(
   input: string,
   templates: WorkflowTemplate[],
-  _context?: RouterContext
+  context?: RouterContext
 ): Promise<MatchResult> {
-  // TODO: Call LLM to classify intent
-  void templates;
-
-  if (input.includes("分析") || input.includes("report")) {
+  if (templates.length === 0) {
     return { workflowId: null, confidence: 0 };
   }
 
-  return { workflowId: null, confidence: 0 };
+  // 构造候选清单（白名单）
+  const candidates = templates.map((t) => ({
+    id: t.type,
+    name: t.name,
+    description: t.description,
+  }));
+  const validIds = new Set(templates.map((t) => t.type));
+
+  try {
+    const res = await callAgnes(
+      [
+        {
+          role: "system",
+          content: `你是一个任务意图分类器。根据用户输入判断最匹配的工作流。
+只能从以下候选中选择，无法确定时 workflowId 输出 null。
+候选清单：
+${candidates.map((c) => `- ${c.id}: ${c.name} — ${c.description}`).join("\n")}
+
+直接输出 JSON（不要 markdown 代码块）：
+{"workflowId": "候选id 或 null", "confidence": 0.0到1.0, "reason": "判断理由"}`,
+        },
+        { role: "user", content: input },
+      ],
+      { userId: context?.userId },
+    );
+
+    // 清洗 markdown 围栏
+    const cleaned = res.content
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+
+    const parsed = JSON.parse(cleaned) as {
+      workflowId?: string | null;
+      confidence?: number;
+      reason?: string;
+    };
+
+    // 校验 workflowId 必须在白名单内（防 LLM 幻觉）
+    const wfId = parsed.workflowId ?? null;
+    if (wfId && !validIds.has(wfId)) {
+      return { workflowId: null, confidence: 0, matchedBy: "llm", reason: `LLM 返回了未知 workflowId: ${wfId}` };
+    }
+
+    // 归一化 confidence 到 [0,1]
+    const raw = Number(parsed.confidence) || 0;
+    const confidence = Math.max(0, Math.min(1, raw));
+
+    return {
+      workflowId: wfId,
+      confidence,
+      matchedBy: "llm",
+      reason: parsed.reason,
+    };
+  } catch {
+    // 任何异常静默兜底
+    return { workflowId: null, confidence: 0 };
+  }
 }
 
 // ─── Composite Matcher ───────────────────────────────────────────────────────

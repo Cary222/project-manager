@@ -21,6 +21,7 @@ import { SwitchToWorkModal } from "../ai-work/SwitchToWorkModal";
 
 import type { ClarificationSuggestion } from "@/features/ai/search/evidence-evaluator";
 import type { RagTrace } from "@/features/ai/search/rag-trace";
+import type { SuggestedAction } from "@/features/ai/handoff/suggested-actions";
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -77,6 +78,7 @@ interface Message {
   /** Total thinking duration in ms — persisted from DB for historical messages */
   totalThinkingMs?: number;
   suggestions?: ClarificationSuggestion[];
+  suggestedActions?: SuggestedAction[];
   /** 执行状态：QUEUED / PROCESSING / COMPLETED / FAILED（生图/视频模式） */
   executionStatus?: string;
   /** 附件列表（生图模式） */
@@ -147,7 +149,7 @@ interface AiChatPanelProps {
   /** Switch to work mode */
   onSwitchToWorkMode?: (goal?: string, route?: string | null) => void;
   /** Switch to work mode with optional goal and target route. */
-  onStartWorkflow?: (workflowType: string, goalPrompt?: string) => void;
+  onStartWorkflow?: (workflowType: string, goalPrompt?: string, handoffContext?: { conversationId?: string; projectId?: string; ticketId?: string }) => void;
   /** Notifies parent that the conversation no longer exists (e.g. 404). */
   onConversationMissing?: (id: string) => void;
   /** Initial message to send automatically upon mount */
@@ -199,6 +201,7 @@ export function AiChatPanel({
   const [streamingContent, setStreamingContent] = useState("");
   const [pendingSources, setPendingSources] = useState<SourceReference[]>([]);
   const [pendingSuggestions, setPendingSuggestions] = useState<ClarificationSuggestion[]>([]);
+  const [pendingSuggestedActions, setPendingSuggestedActions] = useState<SuggestedAction[]>([]);
   const [currentRagTrace, setCurrentRagTrace] = useState<RagTrace | null>(null);
 
   const [internalAiMode, setInternalAiMode] = useState<AiMode>("auto");
@@ -233,10 +236,10 @@ export function AiChatPanel({
   const [pendingCandidates, setPendingCandidates] = useState<CandidateUser[] | null>(null);
   const [selectedModel, setSelectedModel] = useState<string>(() => propSelectedModel ?? "agnes:agnes-2.5-flash");
   useEffect(() => {
-    if (propSelectedModel && propSelectedModel !== selectedModel) {
+    if (propSelectedModel) {
       setSelectedModel(propSelectedModel);
     }
-  }, [propSelectedModel, selectedModel]);
+  }, [propSelectedModel]);
   useEffect(() => {
     if (clearTrigger) {
       setMessages([]);
@@ -302,6 +305,7 @@ export function AiChatPanel({
     const saved = localStorage.getItem(modeKey);
     if (saved) {
       setSelectedModel(saved);
+      onModelChange?.(saved);
       return;
     }
     // 没有保存过偏好，使用模式系统默认模型
@@ -310,8 +314,10 @@ export function AiChatPanel({
       image: "agnes:agnes-image-2.1-flash",
       video: "agnes:agnes-video-v2.0",
     };
-    setSelectedModel(defaults[modeCategory] ?? "agnes:agnes-2.5-flash");
-  }, [aiMode]);
+    const nextModel = defaults[modeCategory] ?? "agnes:agnes-2.5-flash";
+    setSelectedModel(nextModel);
+    onModelChange?.(nextModel);
+  }, [aiMode, onModelChange]);
 
   // 模式切换时清空参考图（Image 和 Video 模式都支持参考图）
   useEffect(() => {
@@ -339,8 +345,6 @@ export function AiChatPanel({
   const conversationIdRef = useRef<string | null | undefined>(undefined);
   // 跳进程 message 轮询 ref（生图模式）
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Tracks if we should skip the next assistant message (workflow match case)
-  const skipAssistantMessageRef = useRef<string | null>(null);
   // Ref for chat sub-mode dropdown open state
   const chatToolModeRef = useRef<ChatToolMode>("chat");
   // Sync chatToolMode to ref
@@ -374,6 +378,7 @@ export function AiChatPanel({
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         const conv = json.data;
+        console.log("[AiChatPanel loadMessages]", convId, "loaded count:", conv?.messages?.length);
         if (conv?.messages && Array.isArray(conv.messages)) {
           const loaded = conv.messages.map(
             (m: {
@@ -663,8 +668,8 @@ export function AiChatPanel({
     prevConversationIdRef.current = conversationId;
 
     // 如果是刚刚在发送过程中绑定的新会话（从 null/undefined 绑定为新创建的 convId），
-    // 此时正在流式生成或执行任务，不要中断流或重置消息状态
-    if (!oldConvId && conversationId && conversationId === conversationIdRef.current) {
+    // 且此时正在流式生成或执行任务，不要中断流或重置消息状态；非生成状态下（如初次载入/视图切换）必须正常拉取历史消息
+    if (!oldConvId && conversationId && conversationId === conversationIdRef.current && (isLoading || Boolean(streamingContent))) {
       return;
     }
     const version = ++conversationVersionRef.current;
@@ -1121,6 +1126,8 @@ export function AiChatPanel({
         const decoder = new TextDecoder();
         let fullContent = "";
         let sources: SourceReference[] = [];
+        let latestSuggestions: ClarificationSuggestion[] = [];
+        let latestSuggestedActions: SuggestedAction[] = [];
         let sseBuffer = "";
         while (true) {
           const { done, value } = await reader.read();
@@ -1176,7 +1183,13 @@ export function AiChatPanel({
                 setPendingSources(sources);
               } else if (parsed.type === "clarification_suggestions") {
                 if (Array.isArray(parsed.suggestions)) {
+                  latestSuggestions = parsed.suggestions;
                   setPendingSuggestions(parsed.suggestions);
+                }
+              } else if (parsed.type === "suggested_actions") {
+                if (Array.isArray(parsed.actions)) {
+                  latestSuggestedActions = parsed.actions;
+                  setPendingSuggestedActions(parsed.actions);
                 }
               } else if (parsed.type === "rag_trace") {
                 if (parsed.trace) {
@@ -1308,21 +1321,16 @@ export function AiChatPanel({
                   sources: sources.length > 0 ? sources : undefined,
                   thinkingSteps: deduplicatedFinalTasks,
                   totalThinkingMs,
-                  suggestions: pendingSuggestions.length > 0 ? pendingSuggestions : undefined,
+                  suggestions: latestSuggestions.length > 0 ? latestSuggestions : pendingSuggestions.length > 0 ? pendingSuggestions : undefined,
+                  suggestedActions: latestSuggestedActions.length > 0 ? latestSuggestedActions : pendingSuggestedActions.length > 0 ? pendingSuggestedActions : undefined,
                 };
-                // If we detected a workflow match, skip adding this message
-                // (the workflow card is already shown instead)
-                const shouldSkip = skipAssistantMessageRef.current === assistantMessage.id;
-                if (shouldSkip) {
-                  skipAssistantMessageRef.current = null;
-                } else {
-                  setMessages((prev) => [...prev, assistantMessage]);
-                }
+                setMessages((prev) => [...prev, assistantMessage]);
                 setIsLoading(false);
                 onComplete?.(fullContent || null);
                 setStreamingContent("");
                 setPendingSources([]);
                 setPendingSuggestions([]);
+                setPendingSuggestedActions([]);
 
                 // thinkingSteps now lives inside the bubble — no external collapse timer needed
               } else if (parsed.type === "workflow_match") {
@@ -1333,8 +1341,6 @@ export function AiChatPanel({
                   description: parsed.description || "即将启动工作流",
                   goalPrompt: parsed.goalPrompt || "",
                 });
-                // Store the message ID to skip in done handler
-                skipAssistantMessageRef.current = `assistant-${Date.now()}`;
               } else if (parsed.type === "tool_call") {
                 const toolLabel =
                   parsed.toolName === "webSearch"
@@ -1539,11 +1545,18 @@ export function AiChatPanel({
 
   // ── Workflow Match Handlers ─────────────────────────────────────────────────
 
-  const handleStartWorkflow = useCallback((workflowType: string, goalPrompt?: string) => {
-    setWorkflowMatch(null);
-    setIsLoading(false);
-    onStartWorkflow?.(workflowType, goalPrompt);
-  }, [onStartWorkflow]);
+  const handleStartWorkflow = useCallback(
+    (
+      workflowType: string,
+      goalPrompt?: string,
+      handoffContext?: { conversationId?: string; projectId?: string; ticketId?: string }
+    ) => {
+      setWorkflowMatch(null);
+      setIsLoading(false);
+      onStartWorkflow?.(workflowType, goalPrompt, handoffContext);
+    },
+    [onStartWorkflow]
+  );
 
   const handleWorkflowDismiss = useCallback(() => {
     setWorkflowMatch(null);
@@ -1655,6 +1668,31 @@ export function AiChatPanel({
                   progress={msg.progress}
                   onCandidateSelect={(candidateId) => handleSend(candidateId)}
                 />
+                {msg.suggestedActions && msg.suggestedActions.length > 0 && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 pl-12">
+                    <span className="text-[11px] font-medium text-ink-400">建议后续动作：</span>
+                    {msg.suggestedActions.map((action) => (
+                      <button
+                        key={action.id}
+                        type="button"
+                        onClick={() => {
+                          if (action.target === "work") {
+                            handleStartWorkflow(
+                              action.workflowHint ?? "planning",
+                              action.label.replace(/^[^\w\u4e00-\u9fa5]+/, "").trim(),
+                              conversationId ? { conversationId } : undefined
+                            );
+                          } else {
+                            handleSend((action.payload?.query as string) || action.label);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg border border-brand-200 bg-brand-50/70 px-2.5 py-1 text-xs font-medium text-brand-700 shadow-2xs transition-all hover:border-brand-300 hover:bg-brand-100 hover:shadow-xs"
+                      >
+                        <span>{action.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
           ))}
 
@@ -1791,7 +1829,11 @@ export function AiChatPanel({
         workflowName={workflowMatch?.workflowName ?? ""}
         description={workflowMatch?.description ?? ""}
         onConfirm={(goal, route) => {
-          handleStartWorkflow(route ?? workflowMatch?.workflowType ?? "weekly_report", goal);
+          handleStartWorkflow(
+            route ?? workflowMatch?.workflowType ?? "weekly_report",
+            goal,
+            conversationId ? { conversationId } : undefined
+          );
         }}
         onDismiss={handleWorkflowDismiss}
       />

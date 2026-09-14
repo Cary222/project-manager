@@ -9,6 +9,7 @@ import type { RagTrace } from "@/features/ai/search/rag-trace";
 import type { QueryType, ResolvedTimeWindow } from "@/features/ai/core/resolvers/query-parser";
 import type { ExtractedUser, ActivityWindow } from "@/features/ai/types/structured";
 import type { WorkflowDefinition } from "@/features/ai/runtime/types";
+import type { SuggestedAction } from "@/features/ai/handoff/suggested-actions";
 
 // ─── Workflow Match Types ────────────────────────────────────────────────────
 
@@ -128,6 +129,11 @@ const AgentStateAnnotation = Annotation.Root({
   }),
   /** Post-retrieval clarification suggestions */
   clarificationSuggestions: Annotation<ClarificationSuggestion[] | null>({
+    value: (_current, update) => update ?? null,
+    default: () => null,
+  }),
+  /** Post-response Next Best Actions (Chat to Work / Follow-up actions) */
+  suggestedActions: Annotation<SuggestedAction[] | null>({
     value: (_current, update) => update ?? null,
     default: () => null,
   }),

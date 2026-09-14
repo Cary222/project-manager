@@ -10,10 +10,10 @@ export async function listWorkRunRefs(userId: string): Promise<WorkRunRef[]> {
       where: {
         userId,
         kind: "RUN",
-        workflowType: { in: ["weekly_report", "project-progress"] },
+        workflowType: { in: ["weekly_report", "project-progress", "planning"] },
       },
       orderBy: { updatedAt: "desc" },
-      select: { id: true, workflowType: true, status: true, updatedAt: true },
+      select: { id: true, workflowType: true, status: true, metadata: true, conversationId: true, updatedAt: true },
     }),
     prisma.projectMeeting.findMany({
       where: {
@@ -46,24 +46,38 @@ export async function listWorkRunRefs(userId: string): Promise<WorkRunRef[]> {
 
   return [
     ...workflows.map(
-      (run): WorkRunRef =>
-        run.workflowType === "project-progress"
-          ? {
-              kind: "project_progress",
-              source: "WorkflowRun",
-              sourceId: run.id,
-              status: run.status,
-              title: "项目进展汇总",
-              updatedAt: run.updatedAt.toISOString(),
-            }
-          : {
-              kind: "weekly_report",
-              source: "WorkflowRun",
-              sourceId: run.id,
-              status: run.status,
-              title: "周报生成",
-              updatedAt: run.updatedAt.toISOString(),
-            },
+      (run): WorkRunRef => {
+        if (run.workflowType === "planning") {
+          const meta = run.metadata as { title?: string } | null;
+          return {
+            kind: "planning",
+            source: "WorkflowRun",
+            sourceId: run.id,
+            status: run.status,
+            title: meta?.title || "自主规划任务",
+            updatedAt: run.updatedAt.toISOString(),
+            conversationId: run.conversationId ?? null,
+          };
+        }
+        if (run.workflowType === "project-progress") {
+          return {
+            kind: "project_progress",
+            source: "WorkflowRun",
+            sourceId: run.id,
+            status: run.status,
+            title: "项目进展汇总",
+            updatedAt: run.updatedAt.toISOString(),
+          };
+        }
+        return {
+          kind: "weekly_report",
+          source: "WorkflowRun",
+          sourceId: run.id,
+          status: run.status,
+          title: "周报生成",
+          updatedAt: run.updatedAt.toISOString(),
+        };
+      },
     ),
     ...meetings.map(
       (meeting): WorkRunRef => ({

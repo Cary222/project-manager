@@ -80,7 +80,7 @@ export async function executeStructuredQuery(
         result = await queryTicket({ id, filters, viewerUserId });
         break;
       case "project":
-        result = await queryProject({ id, filters });
+        result = await queryProject({ id, filters, viewerUserId });
         break;
       case "user":
         result = await queryUser({ id, filters }, viewerUserId);

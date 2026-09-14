@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
-  routeWorkGoal,
   type WorkRoute,
   type WorkRunRef,
 } from "@/features/ai/agents/work/runtime/work-run-ref";
@@ -24,6 +23,7 @@ export interface WorkflowRun {
   workflowType: string;
   status: string;
   threadId: string | null;
+  conversationId?: string | null;
   metadata: unknown;
   history: unknown;
   createdAt: string;
@@ -39,13 +39,15 @@ export interface WorkItem {
   title: string;
   updatedAt: string;
   projectId?: string;
+  conversationId?: string | null;
   metadata?: unknown;
 }
 
 interface WorkAgentRunResult {
   runId: string;
   status: string;
-  taskType: "workflow" | "coding" | "unknown";
+  taskType: "workflow" | "coding" | "planning" | "unknown";
+  steps?: Array<{ id: string; action: string; description: string; tool?: string; dependsOn: string[] }>;
   workflowType?: string;
   workflowName?: string;
   summary?: string | null;
@@ -62,11 +64,17 @@ interface SSERecord {
 
 // ─── Route labels ──────────────────────────────────────────────────────────────
 
+/** 未显式点选时的展示文案：由服务端决策，前端不预判。 */
+const AUTO_ROUTE_LABEL = "由服务端决策";
+const AUTO_ROUTE_DESC =
+  "将根据目标语义自动决定执行策略（固定模板 / 动态规划 / 单步执行 / 先澄清）";
+
 const routeLabels: Record<WorkRoute, string> = {
   project_progress: "项目进展汇总",
   weekly_report: "周报生成",
   meeting_minutes: "会议纪要",
   coding: "Coding Task",
+  planning: "自主规划",
 };
 
 const routeDescriptions: Record<WorkRoute, string> = {
@@ -74,6 +82,7 @@ const routeDescriptions: Record<WorkRoute, string> = {
   meeting_minutes: "上传录音文件 → 转写 → 摘要 → 审核发布",
   project_progress: "聚合项目维度的工单/Git/知识库数据，生成汇总报告",
   coding: "创建 Pi Session 执行代码变更，Diff 和测试结果可审核",
+  planning: "由 LLM 自主拆解多步执行方案并生成审批卡片，经人工确认后推进",
 };
 
 const codingCommandOptions: Array<{
@@ -133,6 +142,10 @@ interface WorkDashboardProps {
   previewPanelOpen?: boolean;
   /** 切换工作流预览面板折叠 */
   onTogglePreviewPanel?: () => void;
+  /** 当前关联的对话 ID */
+  conversationId?: string;
+  /** 当创建或关联了对话时回调（同步到 AiChatPage 的 activeConversationId） */
+  onConversationCreated?: (conversationId: string) => void;
   /** 自定义插槽渲染：将 mainPanel 与 previewPanel 注入三面板布局 */
   children?: (slots: { mainPanel: ReactNode; previewPanel: ReactNode }) => ReactNode;
 }
@@ -145,10 +158,18 @@ export function WorkDashboard({
   initialRoute,
   previewPanelOpen = true,
   onTogglePreviewPanel,
+  conversationId,
+  onConversationCreated,
   children,
 }: WorkDashboardProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [currentConversationId, setCurrentConversationId] = useState<string | null>(
+    () => conversationId ?? null,
+  );
+  useEffect(() => {
+    if (conversationId) setCurrentConversationId(conversationId);
+  }, [conversationId]);
 
   const queryGoal = searchParams?.get("goal") ?? "";
   const queryRoute = (searchParams?.get("route") as WorkRoute) || null;
@@ -204,10 +225,13 @@ export function WorkDashboard({
     [],
   );
 
-  // -- Goal 输入 + 路由分诊 (支持用户锁定路由或自动分诊) --
+  // -- Goal 输入 --
   const [goalInput, setGoalInput] = useState<string>(() => defaultGoal ?? "");
-  const autoRoute = useMemo(() => routeWorkGoal(goalInput), [goalInput]);
-  const route = selectedRouteOverride ?? autoRoute;
+  //
+  // 这里**不再**用正则预判业务走向。未显式点选时 route="auto"，
+  // 表示"交给服务端 Decision 决定"，UI 只如实显示这个状态，
+  // 不假装已经知道该走周报还是项目进展。
+  const route: WorkRoute | "auto" = selectedRouteOverride ?? "auto";
 
   // 当从 Chat 模式切换到 Work 模式并带入新的 goal/route 时，自动预填并高亮聚焦
   useEffect(() => {
@@ -231,23 +255,75 @@ export function WorkDashboard({
   const [isStreaming, setIsStreaming] = useState(false);
   const [lastResult, setLastResult] = useState<WorkAgentRunResult | null>(null);
   const [realtimeEvents, setRealtimeEvents] = useState<SSERecord[]>([]);
+  const [streamStartTime, setStreamStartTime] = useState<number | null>(null);
+  const [streamElapsedMs, setStreamElapsedMs] = useState(0);
+  const [isThinkingCollapsed, setIsThinkingCollapsed] = useState(false);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(
     null,
   );
   const abortControllerRef = useRef<AbortController | null>(null);
   const eventIdRef = useRef(0);
+  const currentRunIdRef = useRef<string>("");
 
   // -- HIL 审批 --
+  /**
+   * 待审批项。两层审批必须分开：
+   * - scope='plan'   ：批准“走这条路线”，绑定 planVersion
+   * - scope='action' ：批准“执行这个具体副作用”，绑定 tool+args 指纹
+   * 计划批准不授权副作用 —— 写操作仍会再弹一次动作审批。
+   */
   const [pendingApproval, setPendingApproval] = useState<{
     runId: string;
-    callId: string;
+    scope: "plan" | "action";
+    /** 幂等键。重复提交同一个 approvalId 不会重复执行。 */
+    approvalId: string;
+    planVersion?: number;
+    /** 动作审批的可读描述；计划审批用 steps 展示。 */
     tool: string;
     args: unknown;
     reason: string;
+    steps?: Array<{
+      id: string;
+      action: string;
+      description: string;
+      tool: string;
+      dependsOn: string[];
+      requiresActionApproval: boolean;
+      riskNote?: string;
+    }>;
+  } | null>(null);
+
+  /** 决策理由（C2：用户必须能看到“为什么这么走”）。 */
+  const [lastDecision, setLastDecision] = useState<{
+    mode: string;
+    intent: string;
+    reason: string;
+    summary: string;
+    confidence: number;
+    dataScope?: { mode: string; projectCount: number; truncated: boolean };
+    unsupportedConcepts?: Array<{ concept: string; why: string; ask: string }>;
+    degraded?: string | null;
+  } | null>(null);
+
+  /** 澄清请求：信息不足或数据结构无法表达时，停下来问人。 */
+  const [clarification, setClarification] = useState<{
+    text?: string;
+    missingInfo: string[];
+    unsupportedConcepts: Array<{ concept: string; why: string; ask: string }>;
   } | null>(null);
 
   // -- 选中的任务详情 --
   const [selectedItem, setSelectedItem] = useState<WorkItem | null>(null);
+
+  // 当外部传入或切换 active conversation 时，自动在任务列表中选中匹配项
+  useEffect(() => {
+    if (currentConversationId && workItems.length > 0) {
+      const matched = workItems.find((item) => item.conversationId === currentConversationId);
+      if (matched && selectedItem?.id !== matched.id) {
+        setSelectedItem(matched);
+      }
+    }
+  }, [currentConversationId, workItems, selectedItem]);
 
   // -- 周报跳转去重 --
   const NAVIGATED_RUN_IDS_KEY = "pm:navigatedRunIds";
@@ -310,6 +386,10 @@ export function WorkDashboard({
                 projectId:
                   "projectId" in ref
                     ? (ref as { projectId?: string }).projectId
+                    : undefined,
+                conversationId:
+                  "conversationId" in ref
+                    ? (ref as { conversationId?: string | null }).conversationId
                     : undefined,
               }));
             }
@@ -377,6 +457,26 @@ export function WorkDashboard({
       };
       setRealtimeEvents((prev) => [...prev, record].slice(-10));
 
+      if (data.type === "conversation_linked") {
+        const payload = data.payload as { conversationId?: string; runId?: string };
+        if (payload?.conversationId) {
+          setCurrentConversationId(payload.conversationId);
+          onConversationCreated?.(payload.conversationId);
+        }
+      }
+
+      if (data.type === "run_started") {
+        const payload = data.payload as { runId?: string };
+        if (payload?.runId) {
+          currentRunIdRef.current = payload.runId;
+          setLastResult((prev) => ({
+            runId: payload.runId!,
+            status: "running",
+            taskType: "unknown",
+            ...prev,
+          }));
+        }
+      }
       if (data.type === "pi_assistant_message") {
         const payload = data.payload as {
           assistantMessageEvent?: { content?: string; delta?: string };
@@ -427,13 +527,197 @@ export function WorkDashboard({
         };
         setPendingApproval({
           runId: payload.runId ?? "",
-          callId: payload.callId ?? "",
+          scope: "action",
+          approvalId: payload.callId ?? "",
           tool: payload.tool ?? "",
           args: payload.args ?? {},
           reason: payload.reason ?? "需要用户审批",
         });
       }
 
+      if (data.type === "dispatch_result") {
+        const payload = data.payload as {
+          taskType?: "workflow" | "coding" | "planning" | "meeting_minutes" | "direct" | "unknown";
+          /** 服务端真正启动后返回的 run id（模板路径由模板 runtime 建行）。 */
+          runId?: string;
+          skipped?: boolean;
+          workflowType?: string;
+          summary?: string;
+          steps?: Array<{ id: string; action: string; description: string; tool?: string; dependsOn: string[] }>;
+        };
+        if (payload?.taskType === "direct") {
+          const runId = currentRunIdRef.current || `direct-${Date.now()}`;
+          const directItem: WorkItem = {
+            id: `WorkflowRun-${runId}`,
+            kind: "planning",
+            source: "WorkflowRun",
+            sourceId: runId,
+            status: "done",
+            title: payload.summary?.slice(0, 30) || "直接回复",
+            updatedAt: new Date().toISOString(),
+          };
+          setWorkItems((prev) => [directItem, ...prev.filter((i) => i.id !== directItem.id)]);
+          setSelectedItem(directItem);
+          setLastResult((prev) => ({
+            ...prev!,
+            runId,
+            taskType: "planning",
+            status: "completed",
+            summary: payload.summary ?? "回答完成",
+          }));
+          setIsStreaming(false);
+          setIsRunning(false);
+          setRefreshKey((k) => k + 1);
+        } else if (payload?.taskType === "planning") {
+          const planTitle = payload.summary ?? "自主规划任务";
+          const runId = currentRunIdRef.current || `plan-${Date.now()}`;
+          const planItem: WorkItem = {
+            id: `WorkflowRun-${runId}`,
+            kind: "planning",
+            source: "WorkflowRun",
+            sourceId: runId,
+            status: "waiting_review",
+            title: planTitle,
+            updatedAt: new Date().toISOString(),
+          };
+          setWorkItems((prev) => [planItem, ...prev.filter((i) => i.id !== planItem.id)]);
+          setSelectedItem(planItem);
+          setLastResult((prev) => ({
+            ...prev!,
+            runId,
+            taskType: "planning",
+            status: "planning_ready",
+            summary: planTitle,
+            steps: payload.steps,
+          }));
+          setRefreshKey((k) => k + 1);
+        } else if (payload?.taskType === "workflow" && payload.workflowType) {
+          // 服务端 Decision 判定走固定模板，并已由模板 runtime 真正启动。
+          // 前端不再自己 POST /api/ai/workflows —— 这里只如实呈现结果。
+          const wfRunId = payload.runId ?? currentRunIdRef.current;
+          if (wfRunId) {
+            const isWeekly = payload.workflowType === "weekly_report";
+            const label = isWeekly ? "周报生成" : "项目进展汇总";
+            const item: WorkItem = {
+              id: `WorkflowRun-${wfRunId}`,
+              kind: isWeekly ? "weekly_report" : "project_progress",
+              source: "WorkflowRun",
+              sourceId: wfRunId,
+              status: payload.skipped ? "skipped" : "running",
+              title: label,
+              updatedAt: new Date().toISOString(),
+            };
+            setWorkItems((prev) => [item, ...prev.filter((i) => i.id !== item.id)]);
+            setSelectedItem(item);
+            setLastResult((prev) => ({
+              ...prev!,
+              runId: wfRunId,
+              taskType: "workflow",
+              status: payload.skipped ? "skipped" : "running",
+              workflowName: label,
+              summary: payload.summary ?? label,
+              error: payload.skipped ? "已有相同类型的工作流正在运行" : undefined,
+            }));
+            setRefreshKey((k) => k + 1);
+          }
+        } else if (payload?.taskType === "meeting_minutes") {
+          // 会议纪要需要录音，服务端只做决策，实际流程在面板内开始
+          setSelectedItem({
+            id: `new-meeting-${Date.now()}`,
+            kind: "meeting_minutes",
+            source: "ProjectMeeting",
+            sourceId: "",
+            status: "UPLOADING",
+            title: goalInput.trim() || "新建会议纪要",
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+
+      if (data.type === "plan_approval_required") {
+        const payload = data.payload as {
+          runId?: string;
+          approvalId?: string;
+          planVersion?: number;
+          title?: string;
+          goal?: string;
+          steps?: Array<{
+            id: string;
+            action: string;
+            description: string;
+            tool: string;
+            dependsOn: string[];
+            requiresActionApproval: boolean;
+            riskNote?: string;
+          }>;
+          requiresActionApproval?: boolean;
+        };
+        const runId = payload.runId ?? currentRunIdRef.current;
+        if (runId) {
+          setPendingApproval({
+            runId,
+            scope: "plan",
+            approvalId: payload.approvalId ?? `plan_${runId}_v${payload.planVersion ?? 1}`,
+            planVersion: payload.planVersion,
+            tool: "Plan",
+            args: {},
+            reason: `共 ${payload.steps?.length ?? 0} 步${payload.requiresActionApproval ? "（含需单独动作批准的有副作用步骤）" : ""}`,
+            steps: payload.steps,
+          });
+          setClarification(null);
+          setLastResult((prev) => ({
+            ...prev!,
+            runId,
+            taskType: "planning",
+            status: "waiting_approval",
+            summary: payload.title ?? "任务规划待确认",
+            steps: payload.steps,
+          }));
+          setIsStreaming(false);
+          setIsRunning(false);
+          setRefreshKey((k) => k + 1);
+        }
+      }
+
+      // 服务端决策结果 —— 用户必须看到“为什么这么走”（C2 可解释性）
+      if (data.type === "decision") {
+        const payload = data.payload as {
+          mode?: string;
+          intent?: string;
+          reason?: string;
+          summary?: string;
+          confidence?: number;
+          dataScope?: { mode: string; projectCount: number; truncated: boolean };
+          unsupportedConcepts?: Array<{ concept: string; why: string; ask: string }>;
+          degraded?: string | null;
+        };
+        setLastDecision({
+          mode: payload.mode ?? "unknown",
+          intent: payload.intent ?? "",
+          reason: payload.reason ?? "",
+          summary: payload.summary ?? "",
+          confidence: payload.confidence ?? 0,
+          dataScope: payload.dataScope,
+          unsupportedConcepts: payload.unsupportedConcepts,
+          degraded: payload.degraded ?? null,
+        });
+      }
+
+      // 澄清请求 —— 信息不足或数据结构无法表达，停下来问人而不是猜
+      if (data.type === "clarification_required") {
+        const payload = data.payload as {
+          clarification?: string;
+          missingInfo?: string[];
+          unsupportedConcepts?: Array<{ concept: string; why: string; ask: string }>;
+        };
+        setClarification({
+          text: payload.clarification,
+          missingInfo: payload.missingInfo ?? [],
+          unsupportedConcepts: payload.unsupportedConcepts ?? [],
+        });
+        setIsStreaming(false);
+        setIsRunning(false);
+      }
       if (data.type === "pi_run_completed") {
         setIsStreaming(false);
         setIsRunning(false);
@@ -482,149 +766,18 @@ export function WorkDashboard({
     async (overridePrompt?: string, overrideCommand?: string) => {
       const rawInput = (overridePrompt || goalInput).trim();
       if (!rawInput || isRunning) return;
-      const currentRoute = selectedRouteOverride ?? routeWorkGoal(rawInput);
-
-      // ── weekly_report: 调用现有 /api/ai/workflows ──
-      if (currentRoute === "weekly_report") {
-        setIsRunning(true);
-        setLastResult(null);
-        try {
-          const now = new Date();
-          const dayOfWeek = now.getDay();
-          const monday = new Date(now);
-          monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-          monday.setHours(0, 0, 0, 0);
-          const sunday = new Date(monday);
-          sunday.setDate(monday.getDate() + 6);
-          sunday.setHours(23, 59, 59, 999);
-
-          const res = await fetch("/api/ai/workflows", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              workflowType: "weekly_report",
-              weekStart: monday.toISOString(),
-              weekEnd: sunday.toISOString(),
-            }),
-          });
-          const json = await res.json();
-          if (!res.ok || json.error) {
-            setLastResult({
-              runId: "",
-              status: "failed",
-              taskType: "workflow",
-              error: json.error ?? "启动失败",
-            });
-          } else if (json.data?.skipped) {
-            setLastResult({
-              runId: json.data.existingRunId ?? "",
-              status: "skipped",
-              taskType: "workflow",
-              error: "已有相同类型的工作流正在运行",
-            });
-          } else {
-            setLastResult({
-              runId: json.data.runId,
-              status: "running",
-              taskType: "workflow",
-              workflowName: "周报",
-            });
-            setSelectedItem({
-              id: `WorkflowRun-${json.data.runId}`,
-              kind: "weekly_report",
-              source: "WorkflowRun",
-              sourceId: json.data.runId,
-              status: "running",
-              title: "周报生成",
-              updatedAt: new Date().toISOString(),
-            });
-            setRefreshKey((k) => k + 1);
-          }
-        } catch (err) {
-          setLastResult({
-            runId: "",
-            status: "failed",
-            taskType: "workflow",
-            error: err instanceof Error ? err.message : "网络错误",
-          });
-        } finally {
-          setIsRunning(false);
-        }
-        return;
-      }
-
-      // ── meeting_minutes: 直接在 Work 面板内启动会议纪要完整工作流 ──
-      if (currentRoute === "meeting_minutes") {
-        setSelectedItem({
-          id: `new-meeting-${Date.now()}`,
-          kind: "meeting_minutes",
-          source: "ProjectMeeting",
-          sourceId: "",
-          status: "UPLOADING",
-          title: rawInput || "新建会议纪要",
-          updatedAt: new Date().toISOString(),
-        });
-        return;
-      }
-
-      // ── project_progress: 调用 /api/ai/workflows ──
-      if (currentRoute === "project_progress") {
-        setIsRunning(true);
-        setLastResult(null);
-        try {
-          const res = await fetch("/api/ai/workflows", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              workflowType: "project-progress",
-            }),
-          });
-          const json = await res.json();
-          if (!res.ok || json.error) {
-            setLastResult({
-              runId: "",
-              status: "failed",
-              taskType: "workflow",
-              error: json.error ?? "启动失败",
-            });
-          } else if (json.data?.skipped) {
-            setLastResult({
-              runId: json.data.existingRunId ?? "",
-              status: "skipped",
-              taskType: "workflow",
-              error: "已有相同类型的工作流正在运行",
-            });
-          } else {
-            setLastResult({
-              runId: json.data.runId,
-              status: "completed",
-              taskType: "workflow",
-              workflowName: "项目进展汇总",
-              summary: "项目进展汇总已生成",
-            });
-            setSelectedItem({
-              id: `WorkflowRun-${json.data.runId}`,
-              kind: "project_progress",
-              source: "WorkflowRun",
-              sourceId: json.data.runId,
-              status: "completed",
-              title: "项目进展汇总",
-              updatedAt: new Date().toISOString(),
-            });
-            setRefreshKey((k) => k + 1);
-          }
-        } catch (err) {
-          setLastResult({
-            runId: "",
-            status: "failed",
-            taskType: "workflow",
-            error: err instanceof Error ? err.message : "网络错误",
-          });
-        } finally {
-          setIsRunning(false);
-        }
-        return;
-      }
+      // ── 业务路由一律交给服务端 Decision，前端不再用正则分叉 ──
+      //
+      // 这里**刻意不判断** weekly_report / project_progress / meeting_minutes / planning：
+      // 关键词判定既判不准复合目标（「统计上月延期工单并出复盘」会被吞成单一流程），
+      // 也会让「外部工单」这类数据结构无法表达的筛选条件被静默丢掉，
+      // 最终产出一份数字看着合理、语义全错的报告。
+      //
+      // 服务端 decideWorkStrategy() 决定走 固定模板 / 动态规划 / 单步 / 先澄清，
+      // 结果经 SSE 的 decision + dispatch_result 事件回到 handleSSEEvent。
+      //
+      // 唯一保留的前端输入是 selectedRouteOverride —— 那是用户**显式点选**的流程，
+      // 属显式指令而非推断，作为 preferredWorkflow 原样交给服务端校验。
 
       // ── coding: 走 /api/ai/work/run SSE 流 ──
       const effectiveCommand = (overrideCommand as CodingCommand) || codingCommand;
@@ -642,6 +795,10 @@ export function WorkDashboard({
       setIsRunning(true);
       setLastResult(null);
       setRealtimeEvents([]);
+      const startMs = Date.now();
+      setStreamStartTime(startMs);
+      setStreamElapsedMs(0);
+      setIsThinkingCollapsed(false);
       eventIdRef.current = 0;
 
       try {
@@ -655,6 +812,9 @@ export function WorkDashboard({
             input: rawInput,
             model: selectedModel,
             command: effectiveCommand,
+            // 显式点选的流程（无则 auto，交给服务端 Decision）
+            preferredWorkflow: selectedRouteOverride ?? "auto",
+            conversationId: currentConversationId || undefined,
           }),
           signal: abortController.signal,
         });
@@ -684,8 +844,10 @@ export function WorkDashboard({
           setLastResult({
             runId: "",
             status: "running",
-            taskType: "coding",
-            summary: "Pi Coding Session 执行中...",
+            // 客户端不再预判这是 planning 还是 coding —— 由服务端的
+            // decision / dispatch_result 事件回填真实 taskType，先标 unknown 不撒谎。
+            taskType: "unknown",
+            summary: "已提交，等待服务端决策…",
           });
 
           const readStream = async () => {
@@ -756,50 +918,127 @@ export function WorkDashboard({
 
   // ─── HIL 审批 ────────────────────────────────────────────────────────────────
 
-  const handleApprove = useCallback(async () => {
-    if (!pendingApproval) return;
-    try {
+  /** 提交审批决定。scope 决定它走计划层还是动作层。 */
+  const submitApproval = useCallback(
+    async (
+      approval: NonNullable<typeof pendingApproval>,
+      decision: "approve" | "reject",
+    ) => {
       const res = await fetch("/api/ai/work/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          runId: pendingApproval.runId,
-          callId: pendingApproval.callId,
-          decision: "approve",
+          runId: approval.runId,
+          scope: approval.scope,
+          approvalId: approval.approvalId,
+          planVersion: approval.planVersion,
+          decision,
         }),
       });
-      if (!res.ok) throw new Error("审批失败");
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+        idempotent?: boolean;
+        replanned?: boolean;
+        execution?: { status?: string; error?: string | null; pendingAction?: unknown };
+        run?: { status?: string; error?: string | null } | null;
+      };
+      if (!res.ok) throw new Error(data.error ?? "审批失败");
+      return data;
+    },
+    [],
+  );
+
+  const handleApprove = useCallback(async () => {
+    if (!pendingApproval) return;
+    const approval = pendingApproval;
+    try {
+      const data = await submitApproval(approval, "approve");
       setPendingApproval(null);
+
+      // 幂等：重复点击不会重复执行
+      if (data.idempotent) {
+        setLastResult((prev) => ({
+          ...prev!,
+          summary: "该审批已处理过，未重复执行",
+        }));
+        return;
+      }
+
+      // 执行可能停在下一个动作审批闸门（写操作需要单独批准）
+      const pendingAction = data.execution?.pendingAction as
+        | {
+            approvalId: string;
+            tool: string;
+            args: Record<string, unknown>;
+            stepId: string;
+            planVersion: number;
+            reason: string;
+          }
+        | undefined;
+      if (pendingAction) {
+        setPendingApproval({
+          runId: approval.runId,
+          scope: "action",
+          approvalId: pendingAction.approvalId,
+          planVersion: pendingAction.planVersion,
+          tool: pendingAction.tool,
+          args: pendingAction.args,
+          reason: pendingAction.reason,
+        });
+        setLastResult((prev) => ({
+          ...prev!,
+          status: "waiting_approval",
+          summary: `计划已批准并开始执行。下一步「${pendingAction.tool}」有副作用，需单独批准，已暂停等你确认。`,
+        }));
+        setIsStreaming(false);
+        setIsRunning(false);
+        return;
+      }
+
+      // 没有后续动作闸门 → 剩余步骤已跑完（或出错）
+      const finished = data.run?.status === "done";
+      setLastResult((prev) => ({
+        ...prev!,
+        status: finished ? "completed" : "failed",
+        summary: finished ? "计划已执行完成" : (data.message ?? "执行中"),
+        error: data.execution?.error ?? data.run?.error ?? undefined,
+      }));
+      setIsStreaming(false);
+      setIsRunning(false);
+      setRefreshKey((k) => k + 1);
     } catch (error) {
       alert(`审批失败: ${error instanceof Error ? error.message : "未知错误"}`);
     }
-  }, [pendingApproval]);
+  }, [pendingApproval, submitApproval]);
 
+  /**
+   * 拒绝是正常控制流，不是错误：
+   * 后端会带拒绝理由做有界重规划，返回新计划继续等审批；
+   * 重规划预算用尽才落终态。
+   */
   const handleDeny = useCallback(async () => {
     if (!pendingApproval) return;
+    const approval = pendingApproval;
     try {
-      const res = await fetch("/api/ai/work/approve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          runId: pendingApproval.runId,
-          callId: pendingApproval.callId,
-          decision: "deny",
-        }),
-      });
-      if (!res.ok) throw new Error("拒绝失败");
+      const data = await submitApproval(approval, "reject");
       setPendingApproval(null);
       setIsStreaming(false);
       setIsRunning(false);
       setLastResult((prev) => ({
         ...prev!,
-        status: "cancelled",
-        summary: "用户拒绝了工具调用",
+        status: data.replanned ? "waiting_approval" : "cancelled",
+        summary:
+          data.message ??
+          (data.replanned
+            ? "已拒绝，正在按你的意见重新规划"
+            : "已拒绝"),
       }));
+      setRefreshKey((k) => k + 1);
     } catch (error) {
       alert(`拒绝失败: ${error instanceof Error ? error.message : "未知错误"}`);
     }
-  }, [pendingApproval]);
+  }, [pendingApproval, submitApproval]);
 
   // ─── Workflow launched 回调 ──────────────────────────────────────────────────
 
@@ -899,42 +1138,120 @@ export function WorkDashboard({
     };
   }, []);
 
-  // ─── SSE 事件渲染 ────────────────────────────────────────────────────────────
+  // 思考与执行流程实时读秒计时器 (100ms 刷新率，类似 Chat 思考流程)
+  useEffect(() => {
+    if (!isStreaming || !streamStartTime) return;
+    const ticker = setInterval(() => {
+      setStreamElapsedMs(Date.now() - streamStartTime);
+    }, 100);
+    return () => clearInterval(ticker);
+  }, [isStreaming, streamStartTime]);
 
-  const renderEventCard = (record: SSERecord) => {
-    const icons: Record<string, string> = {
-      pi_run_started: "🚀",
-      pi_session_started: "💻",
-      pi_assistant_message: "🤖",
-      pi_tool_call: "🔧",
-      pi_tool_result: "✅",
-      pi_progress: "⏳",
-      pi_run_completed: "🎉",
-      pi_error: "❌",
-      dispatch_result: "🔀",
-    };
-    const icon = icons[record.type] ?? "📋";
-    let content = "";
-    const payload = record.payload as Record<string, unknown>;
-    if (record.type === "pi_tool_call") {
-      const argsStr = JSON.stringify(payload.args ?? {}).slice(0, 50);
-      content = `调用 ${payload.tool}(${argsStr}...)`;
-    } else if (record.type === "pi_assistant_message") {
-      content = ((payload as { content?: string }).content ?? "").slice(0, 100);
-    } else if (record.type === "pi_session_started") {
-      content = `Pi Session 已启动 (${payload?.piSessionId ?? ""})`;
-    } else if (record.type === "dispatch_result") {
-      content = `识别为 ${payload.taskType} 任务`;
-    } else {
-      content = (payload as { message?: string }).message ?? record.type;
-    }
+  // ─── 思考与规划流程事件渲染（带每步读秒与规范化展示）─────────────────────────
+
+  const EVENT_CONFIG: Record<
+    string,
+    { label: string; icon: string; describe?: (payload: Record<string, unknown>) => string }
+  > = {
+    run_started: {
+      label: "初始化任务环境",
+      icon: "🚀",
+      describe: (p) => (p.runId ? `任务实例: ${String(p.runId).slice(0, 18)}…` : "开始初始化"),
+    },
+    conversation_linked: {
+      label: "关联工作会话",
+      icon: "🔗",
+      describe: (p) => (p.conversationId ? `会话 ID: ${String(p.conversationId).slice(0, 14)}…` : "已关联会话"),
+    },
+    decision: {
+      label: "服务端策略决策",
+      icon: "🧠",
+      describe: (p) => {
+        const mode = p.mode ? `[${p.mode}] ` : "";
+        const intent = p.intent ? `${p.intent} · ` : "";
+        return `${mode}${intent}${p.reason || "完成意图分析"}`;
+      },
+    },
+    dispatch_result: {
+      label: "流程调度与分派",
+      icon: "🔀",
+      describe: (p) => (p.summary ? String(p.summary) : `分派为 ${p.taskType || "任务"}`),
+    },
+    plan_approval_required: {
+      label: "多步规划就绪，等待审批",
+      icon: "📋",
+      describe: (p) => `已生成 ${Array.isArray(p.steps) ? p.steps.length : 0} 步执行路线`,
+    },
+    workflow_progress: {
+      label: "工作流执行推进",
+      icon: "📊",
+      describe: (p) => String(p.message || p.status || "正在处理"),
+    },
+    state_update: {
+      label: "状态机快照同步",
+      icon: "💾",
+      describe: (p) => `状态更新为: ${p.status || "running"}`,
+    },
+    run_completed: {
+      label: "流程执行完成",
+      icon: "🎉",
+      describe: () => "所有规划操作已全部完成",
+    },
+    pi_run_started: { label: "启动 Pi Coding 引擎", icon: "💻" },
+    pi_session_started: { label: "创建代码开发会话", icon: "⚙️", describe: (p) => `会话: ${p.piSessionId || ""}` },
+    pi_assistant_message: {
+      label: "AI 思考与输出",
+      icon: "🤖",
+      describe: (p) => {
+        const text =
+          (p.assistantMessageEvent as { delta?: string; content?: string } | undefined)?.content ||
+          (p.content as string) ||
+          "";
+        return text.slice(0, 80);
+      },
+    },
+    pi_tool_call: {
+      label: "调度外部工具",
+      icon: "🔧",
+      describe: (p) => `调用 ${p.tool || "工具"}`,
+    },
+    pi_tool_result: { label: "工具执行完毕", icon: "✅" },
+    pi_progress: { label: "步骤执行中", icon: "⏳" },
+    pi_error: { label: "执行遇到异常", icon: "❌", describe: (p) => String(p.message || "未知错误") },
+    error: { label: "服务异常", icon: "❌", describe: (p) => String(p.message || "执行失败") },
+  };
+
+  const renderEventCard = (record: SSERecord, idx: number) => {
+    const cfg = EVENT_CONFIG[record.type] ?? { label: record.type, icon: "📋" };
+    const payload = (record.payload && typeof record.payload === "object" ? record.payload : {}) as Record<
+      string,
+      unknown
+    >;
+    const detail = cfg.describe ? cfg.describe(payload) : (payload.message ? String(payload.message) : "");
+
+    // 每步执行耗时读秒计算（相对于前一个事件或起点的时间差）
+    const prevTimestamp =
+      idx === 0 ? (streamStartTime || record.timestamp) : realtimeEvents[idx - 1].timestamp;
+    const stepDiffSec = Math.max(0.1, (record.timestamp - prevTimestamp) / 1000).toFixed(1);
+
     return (
       <div
         key={record.id}
-        className="flex items-start gap-2 rounded-md bg-white p-2 text-xs shadow-sm"
+        className="flex items-center justify-between gap-3 rounded-xl border border-ink-100 bg-white px-3.5 py-2.5 text-xs shadow-2xs transition hover:border-brand-200 hover:bg-brand-50/20"
       >
-        <span>{icon}</span>
-        <span className="flex-1 break-all text-ink-600">{content}</span>
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-50 text-[10px] text-brand-700 font-bold border border-brand-100">
+            {idx + 1}
+          </span>
+          <span className="text-sm shrink-0">{cfg.icon}</span>
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-ink-900 truncate">{cfg.label}</p>
+            {detail && <p className="text-[11px] text-ink-500 truncate mt-0.5 font-mono">{detail}</p>}
+          </div>
+        </div>
+        <span className="shrink-0 rounded-full bg-ink-100 px-2 py-0.5 font-mono text-[10px] text-ink-600 font-medium border border-ink-200">
+          ⏱️ {stepDiffSec}s
+        </span>
       </div>
     );
   };
@@ -945,166 +1262,150 @@ export function WorkDashboard({
 
   const mainPanel = (
     <div className="flex h-full min-h-0 flex-1 min-w-0 flex-col overflow-hidden bg-white">
-        {/* 头部 (固定) */}
-        <div className="flex flex-shrink-0 items-center justify-between border-b border-ink-200 px-5 py-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-sm">
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-              </svg>
-            </div>
-            <div>
-              <p className="font-semibold text-ink-900">Work</p>
-              <p className="text-xs text-ink-500">交付可审核产物</p>
-            </div>
+      {/* 执行模型与任务中枢栏 */}
+      <div className="flex flex-shrink-0 items-center justify-between border-b border-ink-100 bg-ink-50/40 px-5 py-3">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-2xs">
+            <span className="text-sm">⚡</span>
           </div>
-          {onSwitchToConversation && (
-            <button
-              onClick={onSwitchToConversation}
-              className="rounded-md px-2.5 py-1.5 text-xs text-ink-600 transition-colors hover:bg-ink-100"
-            >
-              切换到 Chat
-            </button>
-          )}
-        </div>
-
-        {/* 执行模型选择栏 (固定) */}
-        <div className="flex flex-shrink-0 flex-col gap-1.5 border-b border-ink-200 bg-white/90 px-5 py-3">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-medium text-ink-600">执行模型</span>
-            <span className="text-[11px] text-ink-400">点击切换模型</span>
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold text-ink-900">Work 任务中枢</span>
+              <span className="rounded bg-brand-50 px-1.5 py-0.2 text-[10px] font-semibold text-brand-700">
+                Agent
+              </span>
+            </div>
+            <p className="text-[11px] text-ink-400">确定性任务调度 · 产物可直接审核</p>
           </div>
-          <ModelSelector
-            value={selectedModel}
-            onChange={(model) => {
-              setSelectedModel(model);
-              localStorage.setItem("preferredModel", model);
-              localStorage.setItem("preferredModel_work", model);
-            }}
-            category="chat"
-            fullWidth
-            align="full"
-          />
         </div>
-
-        {/* 可滚动的主内容区域 */}
-        <div
-          ref={sidebarScrollRef}
-          className="flex flex-1 min-h-0 flex-col overflow-y-auto divide-y divide-ink-200"
-        >
-          {/* Goal 输入 */}
-          <div className="space-y-3 px-5 py-4">
-            <label
-              htmlFor="work-goal"
-              className="block text-sm font-medium text-ink-700"
-            >
-              你希望完成什么？
-            </label>
-            <textarea
-              ref={goalTextareaRef}
-              id="work-goal"
-              value={goalInput}
-              onChange={(e) => setGoalInput(e.target.value)}
-              onCompositionStart={() => {
-                isComposingRef.current = true;
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-ink-500 font-medium hidden sm:inline">模型:</span>
+          <div className="w-48 sm:w-56">
+            <ModelSelector
+              value={selectedModel}
+              onChange={(model) => {
+                setSelectedModel(model);
+                localStorage.setItem("preferredModel", model);
+                localStorage.setItem("preferredModel_work", model);
               }}
-              onCompositionEnd={() => {
-                isComposingRef.current = false;
-                lastCompositionEndAtRef.current = Date.now();
-              }}
-              onKeyDown={(e) => {
-                const isComposing =
-                  isComposingRef.current ||
-                  e.nativeEvent.isComposing ||
-                  e.keyCode === 229 ||
-                  Date.now() - lastCompositionEndAtRef.current < 100;
-
-                if (e.key === "Enter" && !e.shiftKey) {
-                  if (isComposing) return;
-                  e.preventDefault();
-                  void submitGoal();
-                }
-              }}
-              placeholder="例如：生成本周周报 / 帮我重构 ticket 模块"
-              className="min-h-20 w-full rounded-lg border border-ink-300 bg-white p-3 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-              disabled={isRunning}
+              category="chat"
+              fullWidth
+              align="right"
             />
-            <div className="space-y-1.5 pt-0.5">
-              <div className="flex flex-wrap items-center justify-between gap-1">
-                <span className="text-[11px] font-medium text-ink-500">
-                  目标路由：
-                  <span className="font-semibold text-brand-600">
-                    {routeLabels[route]}
-                  </span>
+          </div>
+        </div>
+      </div>
+
+      {/* 可滚动的主内容区域 */}
+      <div
+        ref={sidebarScrollRef}
+        className="flex flex-1 min-h-0 flex-col overflow-y-auto divide-y divide-ink-200"
+      >
+        {/* Goal 输入 */}
+        <div className="space-y-3 px-5 py-4">
+          <label
+            htmlFor="work-goal"
+            className="block text-sm font-medium text-ink-700"
+          >
+            你希望完成什么？
+          </label>
+          <textarea
+            ref={goalTextareaRef}
+            id="work-goal"
+            value={goalInput}
+            onChange={(e) => setGoalInput(e.target.value)}
+            onCompositionStart={() => {
+              isComposingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              isComposingRef.current = false;
+              lastCompositionEndAtRef.current = Date.now();
+            }}
+            onKeyDown={(e) => {
+              const isComposing =
+                isComposingRef.current ||
+                e.nativeEvent.isComposing ||
+                e.keyCode === 229 ||
+                Date.now() - lastCompositionEndAtRef.current < 100;
+
+              if (e.key === "Enter" && !e.shiftKey) {
+                if (isComposing) return;
+                e.preventDefault();
+                void submitGoal();
+              }
+            }}
+            placeholder="例如：生成本周周报 / 帮我重构 ticket 模块 / 分析会议纪要"
+            className="min-h-20 w-full rounded-lg border border-ink-300 bg-white p-3 text-sm outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+            disabled={isRunning}
+          />
+          <div className="space-y-1.5 pt-0.5">
+            <div className="flex flex-wrap items-center justify-between gap-1">
+              <span className="text-[11px] font-medium text-ink-500">
+                目标路由：
+                <span className="font-semibold text-brand-600">
+                  {route === "auto" ? AUTO_ROUTE_LABEL : routeLabels[route]}
                 </span>
-                {selectedRouteOverride === null && (
-                  <span className="text-[10px] text-ink-400">已启用自动分诊</span>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {/* 自动路由按钮 */}
-                <button
-                  type="button"
-                  onClick={() => setSelectedRouteOverride(null)}
-                  className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition ${
-                    selectedRouteOverride === null
-                      ? "bg-brand-600 text-white shadow-2xs"
-                      : "border border-ink-200 bg-white text-ink-600 hover:border-brand-300 hover:bg-brand-50/50"
-                  }`}
-                >
-                  自动
-                </button>
-                {/* 4 个具体路由按钮 */}
-                {(
-                  [
-                    "weekly_report",
-                    "project_progress",
-                    "meeting_minutes",
-                    "coding",
-                  ] as WorkRoute[]
-                ).map((r) => {
-                  const isExplicitActive = selectedRouteOverride === r;
-                  return (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() =>
-                        setSelectedRouteOverride(
-                          selectedRouteOverride === r ? null : r,
-                        )
-                      }
-                      className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition ${
-                        isExplicitActive
-                          ? "bg-brand-600 text-white shadow-2xs"
-                          : "border border-ink-200 bg-white text-ink-600 hover:border-brand-300 hover:bg-brand-50/50"
-                      }`}
-                    >
-                      {routeLabels[r]}
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="text-[11px] text-ink-400 pt-0.5">
-                说明：{routeDescriptions[route]}
-              </p>
+              </span>
+              {selectedRouteOverride === null && (
+                <span className="text-[10px] text-ink-400">已启用自动分诊</span>
+              )}
             </div>
-            <button
-              type="button"
-              onClick={() => void submitGoal()}
-              disabled={!goalInput.trim() || isRunning}
-              className="w-full rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isRunning ? "执行中…" : "创建任务"}
-            </button>
+            <div className="flex flex-wrap gap-1">
+              {/* 自动路由按钮 */}
+              <button
+                type="button"
+                onClick={() => setSelectedRouteOverride(null)}
+                className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+                  selectedRouteOverride === null
+                    ? "bg-brand-600 text-white shadow-2xs"
+                    : "border border-ink-200 bg-white text-ink-700 hover:border-brand-300 hover:bg-brand-50/50"
+                }`}
+              >
+                智能分诊
+              </button>
+              {/* 5 个具体路由按钮 */}
+              {(
+                [
+                  "weekly_report",
+                  "project_progress",
+                  "meeting_minutes",
+                  "coding",
+                  "planning",
+                ] as WorkRoute[]
+              ).map((r) => {
+                const isExplicitActive = selectedRouteOverride === r;
+                return (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() =>
+                      setSelectedRouteOverride(
+                        selectedRouteOverride === r ? null : r,
+                      )
+                    }
+                    className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+                      isExplicitActive
+                        ? "bg-brand-600 text-white shadow-2xs"
+                        : "border border-ink-200 bg-white text-ink-700 hover:border-brand-300 hover:bg-brand-50/50"
+                    }`}
+                  >
+                    {routeLabels[r]}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-ink-400 pt-0.5">
+              说明：{route === "auto" ? AUTO_ROUTE_DESC : routeDescriptions[route]}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void submitGoal()}
+            disabled={!goalInput.trim() || isRunning}
+            className="w-full rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isRunning ? "正在执行中…" : "🚀 提交目标并启动任务"}
+          </button>
           </div>
 
           {/* 快捷工作流 */}
@@ -1221,7 +1522,12 @@ export function WorkDashboard({
                         </button>
                         <button
                           type="button"
-                          onClick={() => setSelectedItem(item)}
+                          onClick={() => {
+                            setSelectedItem(item);
+                            if (item.conversationId) {
+                              onConversationCreated?.(item.conversationId);
+                            }
+                          }}
                           className="rounded-md px-2.5 py-1 text-xs font-medium text-brand-600 transition-colors hover:bg-brand-50 hover:text-brand-700"
                         >
                           查看详情 →
@@ -1306,6 +1612,22 @@ export function WorkDashboard({
                   item={selectedItem}
                   onBack={() => setSelectedItem(null)}
                   onDelete={() => void handleDeleteItem(selectedItem)}
+                />
+              );
+            }
+
+            if (selectedItem.kind === "planning") {
+              return (
+                <PlanningTaskDetail
+                  runId={selectedItem.sourceId}
+                  initialTitle={selectedItem.title}
+                  initialStatus={selectedItem.status}
+                  conversationId={currentConversationId || undefined}
+                  onBack={() => setSelectedItem(null)}
+                  onDelete={() => void handleDeleteItem(selectedItem)}
+                  onApprove={() => void handleApprove()}
+                  onDeny={() => void handleDeny()}
+                  onAdvance={(nextPrompt) => void submitGoal(nextPrompt)}
                 />
               );
             }
@@ -1427,6 +1749,42 @@ export function WorkDashboard({
                     </Link>
                   </div>
                 )}
+                {lastResult.taskType === "planning" && lastResult.steps && lastResult.steps.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold text-brand-900 flex items-center gap-1.5">
+                        <span>📋</span>
+                        <span>AI 自主拆解步骤:</span>
+                      </p>
+                      <span className="rounded bg-brand-100 px-1.5 py-0.2 text-[10px] font-medium text-brand-800">
+                        共 {lastResult.steps.length} 步
+                      </span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {lastResult.steps.map((s, idx) => (
+                        <div
+                          key={s.id || idx}
+                          className="rounded-xl border border-brand-200 bg-white p-3 text-xs text-ink-800 shadow-2xs transition hover:border-brand-300"
+                        >
+                          <div className="flex items-center justify-between font-semibold text-brand-950">
+                            <div className="flex items-center gap-2">
+                              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-100 text-[10px] font-bold text-brand-700">
+                                {idx + 1}
+                              </span>
+                              <span>{s.action}</span>
+                            </div>
+                            {s.tool && (
+                              <span className="rounded-md border border-ink-200 bg-ink-50 px-1.5 py-0.5 font-mono text-[10px] text-ink-600">
+                                {s.tool}
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-1.5 pl-7 text-xs leading-relaxed text-ink-600">{s.description}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {lastResult.taskType === "coding" && (
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <button
@@ -1441,7 +1799,7 @@ export function WorkDashboard({
                           updatedAt: new Date().toISOString(),
                         });
                       }}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-medium text-white transition-colors hover:bg-brand-700"
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-medium text-white shadow-sm transition-colors hover:bg-brand-700"
                     >
                       <span>💻 在 Work 中查看 Coding 详情</span>
                       <svg
@@ -1459,7 +1817,7 @@ export function WorkDashboard({
                       href={`/ai-workspace${lastResult.runId ? `?session=${encodeURIComponent(lastResult.runId)}` : ""}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-ink-300 bg-white px-3.5 py-2 text-xs font-medium text-ink-700 transition-colors hover:bg-ink-50"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-3.5 py-2 text-xs font-medium text-ink-700 shadow-2xs transition-colors hover:bg-ink-50"
                     >
                       <span>在独立窗口打开 Workspace</span>
                       <svg
@@ -1481,41 +1839,167 @@ export function WorkDashboard({
             )}
 
             {/* SSE 实时流 */}
-            {isStreaming && (
-              <div className="rounded-xl border border-brand-200 bg-brand-50 p-4">
-                <div className="mb-3 flex items-center justify-between">
-                  <p className="text-sm font-medium text-brand-700">
-                    🔄 执行中…
-                  </p>
-                  <button
-                    onClick={async () => {
-                      if (readerRef.current) {
-                        await readerRef.current.cancel().catch(() => {});
-                        readerRef.current = null;
-                      }
-                      if (abortControllerRef.current) {
-                        abortControllerRef.current.abort();
-                        abortControllerRef.current = null;
-                      }
-                      setIsStreaming(false);
-                      setIsRunning(false);
-                    }}
-                    className="text-xs text-danger-600 hover:text-danger-700"
-                  >
-                    停止
-                  </button>
+            {/* ── 实时思考与规划流程（每一步读秒 + 支持折叠）─────────────── */}
+            {(isStreaming || (realtimeEvents.length > 0 && !lastResult?.summary)) && (
+              <div className="rounded-xl border border-brand-200 bg-gradient-to-b from-brand-50/40 to-white p-4 shadow-sm transition-all">
+                <div className="flex items-center justify-between border-b border-brand-100/80 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <span
+                      className={`flex h-7 w-7 items-center justify-center rounded-lg bg-brand-600 text-xs text-white shadow-2xs ${
+                        isStreaming ? "animate-pulse" : ""
+                      }`}
+                    >
+                      🧠
+                    </span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-brand-950">
+                          {isStreaming ? "AI 正在思考与调度工作流…" : "思考与执行流程完毕"}
+                        </span>
+                        <span className="rounded-full bg-brand-100 px-2 py-0.5 font-mono text-[10px] font-bold text-brand-700 border border-brand-200">
+                          ⏱️ {(streamElapsedMs / 1000).toFixed(1)}s
+                        </span>
+                        <span className="rounded bg-ink-100 px-1.5 py-0.5 text-[10px] font-medium text-ink-600">
+                          {realtimeEvents.length} 步
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-ink-400 mt-0.5">
+                        {isStreaming ? "正在实时追踪 Agent 执行轨迹与中间状态" : "所有执行节点已调度完成"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsThinkingCollapsed((c) => !c)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-brand-200 bg-white px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50 shadow-2xs transition"
+                    >
+                      {isThinkingCollapsed ? "展开流程 ▼" : "折叠流程 ▲"}
+                    </button>
+                    {isStreaming && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (readerRef.current) {
+                            await readerRef.current.cancel().catch(() => {});
+                            readerRef.current = null;
+                          }
+                          if (abortControllerRef.current) {
+                            abortControllerRef.current.abort();
+                            abortControllerRef.current = null;
+                          }
+                          setIsStreaming(false);
+                          setIsRunning(false);
+                        }}
+                        className="rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50 shadow-2xs transition"
+                      >
+                        停止
+                      </button>
+                    )}
+                  </div>
                 </div>
-                {lastResult?.piOutput && (
-                  <div className="mb-3 whitespace-pre-wrap rounded-md border border-brand-300 bg-white p-3 font-mono text-xs text-ink-700">
-                    <p className="mb-1 text-xs font-medium text-brand-700">
-                      🤖 Pi 输出:
-                    </p>
-                    {lastResult.piOutput}
+
+                {!isThinkingCollapsed && (
+                  <div className="mt-3 space-y-2">
+                    {lastResult?.piOutput && (
+                      <div className="mb-2.5 whitespace-pre-wrap rounded-xl border border-brand-200 bg-white p-3 font-mono text-xs text-ink-700 shadow-2xs">
+                        <p className="mb-1 text-xs font-medium text-brand-700">🤖 Pi 输出:</p>
+                        {lastResult.piOutput}
+                      </div>
+                    )}
+                    <div className="space-y-1.5">
+                      {realtimeEvents.map((r, idx) => renderEventCard(r, idx))}
+                    </div>
+                    {isStreaming && (
+                      <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-brand-700 animate-pulse font-mono">
+                        <span className="h-1.5 w-1.5 rounded-full bg-brand-600 animate-ping" />
+                        <span>正在推进当前步骤… ⏱️ {(streamElapsedMs / 1000).toFixed(1)}s</span>
+                      </div>
+                    )}
                   </div>
                 )}
-                <div className="space-y-2">
-                  {realtimeEvents.map(renderEventCard)}
+              </div>
+            )}
+
+            {/* ── 决策理由（C2：用户必须能看到"为什么这么走"）────────────── */}
+            {lastDecision && (
+              <div className="rounded-xl border border-primary-200 bg-primary-50 p-4">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-primary-900">
+                    执行策略：{lastDecision.intent || "未命名"}
+                  </p>
+                  <span className="rounded bg-primary-100 px-2 py-0.5 text-xs text-primary-700">
+                    {lastDecision.mode}
+                    {lastDecision.confidence > 0
+                      ? ` · 置信度 ${(lastDecision.confidence * 100).toFixed(0)}%`
+                      : ""}
+                  </span>
                 </div>
+                <p className="text-sm text-primary-900">{lastDecision.reason}</p>
+                {lastDecision.dataScope && (
+                  <p className="mt-2 text-xs text-primary-700">
+                    数据权限：
+                    {lastDecision.dataScope.mode === "all_projects"
+                      ? "全部项目（ROOT）"
+                      : `成员项目 ${lastDecision.dataScope.projectCount} 个`}
+                    {lastDecision.dataScope.truncated ? "（已截断）" : ""}
+                  </p>
+                )}
+                {lastDecision.degraded && (
+                  <p className="mt-2 rounded bg-warning-100 p-2 text-xs text-warning-800">
+                    ⚠️ 决策服务降级，已退回通用流程：{lastDecision.degraded}
+                  </p>
+                )}
+                {lastDecision.unsupportedConcepts &&
+                  lastDecision.unsupportedConcepts.length > 0 && (
+                    <ul className="mt-2 space-y-1 text-xs text-warning-800">
+                      {lastDecision.unsupportedConcepts.map((concept) => (
+                        <li key={concept.concept}>
+                          「{concept.concept}」当前无法表达：{concept.why}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+              </div>
+            )}
+
+            {/* ── 澄清请求：宁可问人，也不编造缺失的条件 ─────────────────── */}
+            {clarification && (
+              <div className="rounded-xl border-2 border-warning-400 bg-warning-50 p-4">
+                <p className="mb-2 text-sm font-semibold text-warning-900">
+                  需要你补充信息后才能继续
+                </p>
+                {clarification.unsupportedConcepts.length > 0 && (
+                  <div className="mb-2 space-y-2">
+                    {clarification.unsupportedConcepts.map((concept) => (
+                      <div key={concept.concept} className="rounded bg-warning-100 p-2">
+                        <p className="text-sm font-medium text-warning-900">
+                          「{concept.concept}」
+                        </p>
+                        <p className="text-xs text-warning-800">{concept.why}</p>
+                        <p className="mt-1 text-xs italic text-warning-800">
+                          {concept.ask}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {clarification.missingInfo.length > 0 && (
+                  <ul className="list-inside list-disc text-sm text-warning-900">
+                    {clarification.missingInfo.map((info) => (
+                      <li key={info}>{info}</li>
+                    ))}
+                  </ul>
+                )}
+                {clarification.text && (
+                  <p className="mt-2 text-sm text-warning-900">{clarification.text}</p>
+                )}
+                <button
+                  onClick={() => setClarification(null)}
+                  className="mt-3 rounded-md bg-warning-600 px-4 py-2 text-sm font-medium text-white hover:bg-warning-700"
+                >
+                  知道了，我会补充后重新发起
+                </button>
               </div>
             )}
 
@@ -1537,19 +2021,47 @@ export function WorkDashboard({
                     />
                   </svg>
                   <p className="text-sm font-semibold text-warning-900">
-                    需要审批
+                    {pendingApproval.scope === "plan"
+                      ? "请审阅执行计划"
+                      : "请批准这个具体操作"}
                   </p>
                 </div>
                 <div className="mb-3 space-y-1 text-sm text-warning-900">
                   <p>
                     <strong>工具:</strong> {pendingApproval.tool}
                   </p>
-                  <p>
-                    <strong>参数:</strong>
-                  </p>
-                  <pre className="mt-1 overflow-x-auto rounded bg-warning-100 p-2 text-xs">
-                    {JSON.stringify(pendingApproval.args, null, 2)}
-                  </pre>
+                  {pendingApproval.steps && pendingApproval.steps.length > 0 ? (
+                    <>
+                      <p>
+                        <strong>执行计划（{pendingApproval.steps.length} 步）:</strong>
+                      </p>
+                      <ol className="mt-1 list-inside list-decimal space-y-1">
+                        {pendingApproval.steps.map((s) => (
+                          <li key={s.id}>
+                            <span className="font-medium">{s.action}</span>
+                            <span className="text-warning-800">：{s.description}</span>
+                            <span className="ml-1 text-xs text-warning-700">
+                              [{s.tool}]
+                            </span>
+                            {s.requiresActionApproval && (
+                              <span className="ml-1 rounded bg-warning-200 px-1 text-xs">
+                                有副作用 · 执行前需单独批准
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ol>
+                    </>
+                  ) : (
+                    <>
+                      <p>
+                        <strong>参数:</strong>
+                      </p>
+                      <pre className="mt-1 overflow-x-auto rounded bg-warning-100 p-2 text-xs">
+                        {JSON.stringify(pendingApproval.args, null, 2)}
+                      </pre>
+                    </>
+                  )}
                   <p className="mt-2 italic">{pendingApproval.reason}</p>
                 </div>
                 <div className="flex gap-2">
@@ -1570,40 +2082,193 @@ export function WorkDashboard({
             )}
           </div>
         ) : (
-          /* 空状态 → 引导 */
-          <div className="my-auto flex min-h-full w-full flex-1 flex-col items-center justify-center p-8 text-center text-ink-500">
-            <div className="mx-auto max-w-md py-8">
-              <svg
-                className="mx-auto mb-4 h-16 w-16 text-ink-200"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
+          /* 空状态 → 工作流步骤流程全景预览与导引 */
+          <div className="flex h-full w-full flex-1 flex-col justify-start space-y-4 py-2">
+            <div className="rounded-2xl border border-brand-200 bg-gradient-to-br from-brand-50/60 via-white to-brand-50/20 p-4 shadow-xs">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-600 text-sm text-white shadow-2xs">
+                  ⚡
+                </span>
+                <div>
+                  <h3 className="text-sm font-bold text-ink-900">
+                    Agent 确定性工作流流程预览
+                  </h3>
+                  <p className="text-xs text-ink-500">
+                    标准化分步流水线，涵盖数据采集、智能起草、代码开发与自主规划
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">
+                  预置标准化工作流步骤流程预览
+                </p>
+                <span className="text-[11px] text-ink-400">点击卡片可快速载入目标</span>
+              </div>
+
+              {/* 工作流 1: 周报生成 */}
+              <div
+                onClick={() => handleSelectPresetGoal("生成本周周报", undefined, "weekly_report")}
+                className="group cursor-pointer rounded-xl border border-ink-200 bg-white p-4 shadow-2xs transition-all hover:border-brand-300 hover:bg-brand-50/20 hover:shadow-sm"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
-                />
-              </svg>
-              <p className="text-lg font-semibold text-ink-800">
-                告诉 Work 你想完成什么
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-600 text-sm font-bold">
+                      📊
+                    </span>
+                    <div>
+                      <h4 className="text-xs font-bold text-ink-900 group-hover:text-brand-700 transition">
+                        周报自动生成工作流
+                      </h4>
+                      <p className="text-[11px] text-ink-500">聚合工单、Git 提交与笔记，经草稿审阅后一键落盘</p>
+                    </div>
+                  </div>
+                  <span className="rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                    3 步流水线
+                  </span>
+                </div>
+
+                <div className="mt-3 grid grid-cols-3 gap-2 border-t border-ink-100 pt-3">
+                  <div className="flex items-center gap-1.5 rounded-lg bg-ink-50/80 p-2 text-[11px]">
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[9px] font-bold text-white">1</span>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-ink-800 truncate">数据采集</p>
+                      <p className="text-[10px] text-ink-400 truncate">工单 & 提交</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 rounded-lg bg-ink-50/80 p-2 text-[11px]">
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[9px] font-bold text-white">2</span>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-ink-800 truncate">智能起草</p>
+                      <p className="text-[10px] text-ink-400 truncate">提炼重点与风险</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 rounded-lg bg-ink-50/80 p-2 text-[11px]">
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[9px] font-bold text-white">3</span>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-ink-800 truncate">审阅落盘</p>
+                      <p className="text-[10px] text-ink-400 truncate">人机审批与导出</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 工作流 2: 会议纪要 */}
+              <div
+                onClick={() => handleSelectPresetGoal("整理本周项目组站会纪要", undefined, "meeting_minutes")}
+                className="group cursor-pointer rounded-xl border border-ink-200 bg-white p-4 shadow-2xs transition-all hover:border-brand-300 hover:bg-brand-50/20 hover:shadow-sm"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-purple-50 text-purple-600 text-sm font-bold">
+                      🎙️
+                    </span>
+                    <div>
+                      <h4 className="text-xs font-bold text-ink-900 group-hover:text-brand-700 transition">
+                        会议纪要转写工作流
+                      </h4>
+                      <p className="text-[11px] text-ink-500">录音拖拽上传，智能转写并按 7 要素抽取决议待办</p>
+                    </div>
+                  </div>
+                  <span className="rounded-md border border-purple-200 bg-purple-50 px-2 py-0.5 text-[10px] font-medium text-purple-700">
+                    3 步流水线
+                  </span>
+                </div>
+
+                <div className="mt-3 grid grid-cols-3 gap-2 border-t border-ink-100 pt-3">
+                  <div className="flex items-center gap-1.5 rounded-lg bg-ink-50/80 p-2 text-[11px]">
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-purple-600 text-[9px] font-bold text-white">1</span>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-ink-800 truncate">音频上传</p>
+                      <p className="text-[10px] text-ink-400 truncate">m4a / mp3 预检</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 rounded-lg bg-ink-50/80 p-2 text-[11px]">
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-purple-600 text-[9px] font-bold text-white">2</span>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-ink-800 truncate">语音转写</p>
+                      <p className="text-[10px] text-ink-400 truncate">对齐发言人时间</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 rounded-lg bg-ink-50/80 p-2 text-[11px]">
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-purple-600 text-[9px] font-bold text-white">3</span>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-ink-800 truncate">纪要沉淀</p>
+                      <p className="text-[10px] text-ink-400 truncate">7要素决策与归档</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 工作流 3: Coding 开发任务 */}
+              <div
+                onClick={() => handleSelectPresetGoal("梳理工单流转逻辑并修复评论异常", "plan", "coding")}
+                className="group cursor-pointer rounded-xl border border-ink-200 bg-white p-4 shadow-2xs transition-all hover:border-brand-300 hover:bg-brand-50/20 hover:shadow-sm"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 text-sm font-bold">
+                      💻
+                    </span>
+                    <div>
+                      <h4 className="text-xs font-bold text-ink-900 group-hover:text-brand-700 transition">
+                        Pi Coding 开发与审查工作流
+                      </h4>
+                      <p className="text-[11px] text-ink-500">影响范围梳理、多步方案实施与代码合规质量审查</p>
+                    </div>
+                  </div>
+                  <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                    3 步流水线
+                  </span>
+                </div>
+
+                <div className="mt-3 grid grid-cols-3 gap-2 border-t border-ink-100 pt-3">
+                  <div className="flex items-center gap-1.5 rounded-lg bg-ink-50/80 p-2 text-[11px]">
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[9px] font-bold text-white">1</span>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-ink-800 truncate">影响梳理</p>
+                      <p className="text-[10px] text-ink-400 truncate">/reach 依赖分析</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 rounded-lg bg-ink-50/80 p-2 text-[11px]">
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[9px] font-bold text-white">2</span>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-ink-800 truncate">方案计划</p>
+                      <p className="text-[10px] text-ink-400 truncate">/plan 拆解步骤</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 rounded-lg bg-ink-50/80 p-2 text-[11px]">
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[9px] font-bold text-white">3</span>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-ink-800 truncate">受控执行</p>
+                      <p className="text-[10px] text-ink-400 truncate">/goal 实施交付</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-amber-200/80 bg-amber-50/40 p-3 text-xs text-amber-800">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-medium">
+                  <span>🛡️</span>
+                  <span>人机协同与安全保证</span>
+                </div>
+                {onSwitchToConversation && (
+                  <button
+                    type="button"
+                    onClick={onSwitchToConversation}
+                    className="text-[11px] font-medium text-brand-600 hover:text-brand-800 transition"
+                  >
+                    切换至 Chat 模式 →
+                  </button>
+                )}
+              </div>
+              <p className="mt-1 text-[11px] leading-relaxed text-amber-700">
+                涉及持久化写入与高风险操作时，系统会生成审批卡片等待人工核验，批准后方可执行。
               </p>
-              <p className="mt-2 text-sm leading-relaxed text-ink-400">
-                输入目标后，系统会自动分诊到周报生成、会议纪要、项目汇总或
-                Coding 路由。
-                <br />
-                写入和高风险操作会在执行前进入审批。
-              </p>
-              {onSwitchToConversation && (
-                <button
-                  type="button"
-                  onClick={onSwitchToConversation}
-                  className="mt-6 inline-flex items-center gap-1.5 rounded-xl border border-ink-300 bg-white px-4 py-2 text-sm font-medium text-ink-700 shadow-sm transition-all hover:border-ink-400 hover:bg-ink-50"
-                >
-                  切换到 Chat 模式
-                </button>
-              )}
             </div>
           </div>
         )}
@@ -1826,9 +2491,9 @@ function CodingCommandPreview({
               <div className="mb-2 flex items-center justify-between">
                 <span className="flex items-center gap-1.5 text-xs font-semibold text-brand-950">
                   <span>🚀</span>
-                  <span>最佳方案路线:</span>
+                  <span>推荐执行路线:</span>
                 </span>
-                <span className="rounded bg-brand-100 px-2 py-0.5 text-[11px] font-bold text-brand-800">
+                <span className="rounded-full bg-brand-100 px-2.5 py-0.5 text-[11px] font-bold text-brand-800 border border-brand-200">
                   推荐置信度: {routeData?.confidence || "60%"}
                 </span>
               </div>
@@ -1837,12 +2502,12 @@ function CodingCommandPreview({
                 routeData.bestRouteSteps.length > 0 ? (
                   routeData.bestRouteSteps.map((step, idx) => (
                     <div key={idx} className="flex items-center gap-2">
-                      <span className="inline-flex items-center gap-1.5 rounded-lg border border-brand-300 bg-white px-3 py-1.5 text-xs font-semibold text-brand-900 shadow-2xs">
-                        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-brand-600 text-[10px] text-white">
+                      <div className="inline-flex items-center gap-2 rounded-xl border border-brand-200 bg-white px-3.5 py-1.5 text-xs font-medium text-ink-900 shadow-2xs hover:border-brand-300 transition">
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-600 text-[10px] font-bold text-white shadow-2xs">
                           {idx + 1}
                         </span>
-                        <span>{step}</span>
-                      </span>
+                        <span className="font-semibold text-brand-950">{step}</span>
+                      </div>
                       {idx < routeData.bestRouteSteps.length - 1 && (
                         <span className="text-sm font-bold text-brand-400">
                           →
@@ -1869,7 +2534,7 @@ function CodingCommandPreview({
                   </span>
                 </p>
                 <span className="text-[11px] text-ink-400">
-                  支持自由组合工作流
+                  支持自由组合工作流能力
                 </span>
               </div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -1883,7 +2548,7 @@ function CodingCommandPreview({
                       className={`relative flex items-start gap-2.5 rounded-xl border p-3 text-left transition ${
                         isChecked
                           ? "border-brand-500 bg-brand-50/70 shadow-xs ring-1 ring-brand-500/40"
-                          : "border-ink-200 bg-white opacity-70 hover:border-ink-300 hover:opacity-100"
+                          : "border-ink-200 bg-white opacity-75 hover:border-ink-300 hover:opacity-100"
                       }`}
                     >
                       <span
@@ -1900,11 +2565,11 @@ function CodingCommandPreview({
                           <span className="text-xs font-bold text-ink-900">
                             {cap.name}
                           </span>
-                          <span className="font-mono text-[11px] font-semibold text-brand-600">
-                            ({cap.command})
+                          <span className="rounded bg-brand-50 px-1.5 py-0.2 font-mono text-[10px] font-semibold text-brand-700 border border-brand-100">
+                            {cap.command}
                           </span>
                         </div>
-                        <p className="mt-0.5 text-[11px] leading-relaxed text-ink-500">
+                        <p className="mt-1 text-[11px] leading-relaxed text-ink-500">
                           {cap.description}
                         </p>
                       </div>
@@ -1923,7 +2588,7 @@ function CodingCommandPreview({
                     分步执行指令与优化提示词规划 (支持直接编辑微调):
                   </span>
                 </p>
-                <span className="text-[11px] text-ink-400">
+                <span className="rounded bg-brand-50 px-2 py-0.5 font-mono text-[11px] font-medium text-brand-700">
                   共 {activeSteps.length} 个步骤
                 </span>
               </div>
@@ -1941,18 +2606,18 @@ function CodingCommandPreview({
                     return (
                       <div
                         key={step.index}
-                        className="rounded-xl border border-ink-200 bg-ink-50/60 p-3.5 text-xs transition hover:border-brand-300"
+                        className="rounded-xl border border-ink-200 bg-white p-3.5 text-xs shadow-2xs transition hover:border-brand-300"
                       >
-                        <div className="flex items-center justify-between gap-2 border-b border-ink-200/60 pb-2">
+                        <div className="flex items-center justify-between gap-2 border-b border-ink-100 pb-2.5">
                           <div className="flex items-center gap-2">
-                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-[11px] font-bold text-white">
+                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-600 text-[11px] font-bold text-white shadow-2xs">
                               {step.index}
                             </span>
                             <span className="font-bold text-ink-900">
                               [{step.title}]
                             </span>
                           </div>
-                          <span className="rounded border border-ink-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-brand-700">
+                          <span className="rounded-md border border-brand-200 bg-brand-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-brand-700">
                             指令: {step.command}
                           </span>
                         </div>
@@ -1969,7 +2634,7 @@ function CodingCommandPreview({
                                   e.target.value,
                                 )
                               }
-                              className="mt-1 min-h-16 w-full rounded-lg border border-ink-200 bg-white p-2.5 text-xs leading-relaxed text-ink-800 outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                              className="mt-1 min-h-16 w-full rounded-lg border border-ink-300 bg-white p-2.5 text-xs leading-relaxed text-ink-800 outline-none transition-all focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
                             />
                           </label>
                         </div>
@@ -1991,14 +2656,14 @@ function CodingCommandPreview({
               type="button"
               disabled={!goal.trim()}
               onClick={() => onStartWithPrompt(firstCommand, firstPrompt)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-brand-600 px-5 py-2 text-xs font-medium text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50 shadow-sm"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-5 py-2.5 text-xs font-medium text-white shadow-sm transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <span>🚀 确认并启动 Pi 会话</span>
             </button>
             <button
               type="button"
               onClick={onOpenWorkspace}
-              className="rounded-xl border border-ink-300 bg-white px-4 py-2 text-xs font-medium text-ink-700 transition hover:bg-ink-50"
+              className="rounded-lg border border-ink-200 bg-white px-4 py-2.5 text-xs font-medium text-ink-700 shadow-2xs transition hover:bg-ink-50"
             >
               新窗口打开 Workspace ↗
             </button>
@@ -2058,6 +2723,23 @@ function getRouteIcon(kind: WorkRoute) {
         >
           <polyline points="16 18 22 12 16 6" />
           <polyline points="8 6 2 12 8 18" />
+        </svg>
+      );
+    case "planning":
+      return (
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" y1="13" x2="8" y2="13" />
+          <line x1="16" y1="17" x2="8" y2="17" />
+          <polyline points="10 9 9 9 8 9" />
         </svg>
       );
     case "project_progress":
@@ -2622,6 +3304,632 @@ function CodingTaskDetail({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function PlanningTaskDetail({
+  runId,
+  initialTitle,
+  initialStatus,
+  conversationId,
+  onBack,
+  onDelete,
+  onAdvance,
+}: {
+  runId: string;
+  initialTitle?: string;
+  initialStatus?: string;
+  conversationId?: string;
+  onBack: () => void;
+  onDelete?: () => void;
+  onApprove?: () => void;
+  onDeny?: () => void;
+  onAdvance?: (prompt: string) => void;
+}) {
+  const [fetchedRun, setFetchedRun] = useState<WorkflowRun | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [followUpInput, setFollowUpInput] = useState("");
+  const [isFollowUpSending, setIsFollowUpSending] = useState(false);
+  // 步骤折叠状态与高精度读秒
+  const [collapsedSteps, setCollapsedSteps] = useState<Record<string, boolean>>({});
+  const [allCollapsed, setAllCollapsed] = useState(false);
+  const [now, setNow] = useState(Date.now());
+
+  const handleSendFollowUp = async () => {
+    const text = followUpInput.trim();
+    if (!text || isFollowUpSending) return;
+    setIsFollowUpSending(true);
+    setFollowUpInput("");
+    try {
+      if (isWaitingApproval) {
+        // 在待审批阶段输入修改意见，触发自适应重规划
+        const res = await fetch("/api/ai/work/approve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            runId,
+            scope: "plan",
+            approvalId: `plan_${runId}_v${planVersion}`,
+            planVersion,
+            decision: "reject",
+            feedback: text,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) alert(`重规划失败: ${data.error ?? "未知错误"}`);
+        await reload();
+      } else {
+        // 在完成或后续阶段，通过 onAdvance 推进工作流
+        if (onAdvance) {
+          onAdvance(text);
+        } else {
+          const res = await fetch("/api/ai/work/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              input: text,
+              conversationId: fetchedRun?.conversationId ?? conversationId ?? undefined,
+            }),
+          });
+          if (!res.ok) {
+            const data = await res.json();
+            alert(`推进失败: ${data.error ?? "未知错误"}`);
+          }
+          await reload();
+        }
+      }
+    } catch (e) {
+      alert(`指令发送异常: ${e instanceof Error ? e.message : "网络错误"}`);
+    } finally {
+      setIsFollowUpSending(false);
+    }
+  };
+
+  const reload = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/ai/workflows/${runId}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.data?.run) {
+          setFetchedRun(json.data.run);
+        }
+      }
+    } catch {}
+  }, [runId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setIsLoading(true);
+      try {
+        const res = await fetch(`/api/ai/workflows/${runId}`);
+        if (res.ok && !cancelled) {
+          const json = await res.json();
+          if (json.data?.run) {
+            setFetchedRun(json.data.run);
+          }
+        }
+      } catch {
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [runId]);
+
+  // 运行期自轮询：当处于 running 或 planning 时每 2 秒拉一次最新状态
+  const status = fetchedRun?.status || initialStatus || "waiting_review";
+  useEffect(() => {
+    if (status !== "running" && status !== "planning") return;
+    const timer = setInterval(() => {
+      void reload();
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [status, reload]);
+
+  // 步骤级高频读秒定时器 (100ms)
+  useEffect(() => {
+    if (status !== "running" && status !== "planning") return;
+    const ticker = setInterval(() => setNow(Date.now()), 100);
+    return () => clearInterval(ticker);
+  }, [status]);
+
+  const toggleStep = (stepId: string) => {
+    setCollapsedSteps((prev) => ({
+      ...prev,
+      [stepId]: !prev[stepId],
+    }));
+  };
+
+  const toggleAllSteps = () => {
+    const nextState = !allCollapsed;
+    setAllCollapsed(nextState);
+    const updated: Record<string, boolean> = {};
+    for (const s of steps) {
+      updated[s.id] = nextState;
+    }
+    setCollapsedSteps(updated);
+  };
+
+  const meta =
+    fetchedRun?.metadata && typeof fetchedRun.metadata === "object"
+      ? (fetchedRun.metadata as Record<string, unknown>)
+      : {};
+
+  const planVersion =
+    typeof meta.activePlanVersion === "number"
+      ? meta.activePlanVersion
+      : typeof meta.planVersion === "number"
+        ? meta.planVersion
+        : 1;
+
+  const plans = (meta.plans && typeof meta.plans === "object" ? meta.plans : {}) as Record<
+    string,
+    {
+      goal?: string;
+      title?: string;
+      steps?: Array<{
+        id: string;
+        action: string;
+        description: string;
+        tool?: string;
+        args?: Record<string, unknown>;
+        dependsOn?: string[];
+        requiresActionApproval?: boolean;
+        riskNote?: string;
+      }>;
+    }
+  >;
+  const currentPlan = plans[String(planVersion)] || plans["1"];
+
+  const title =
+    (meta.title as string) || currentPlan?.title || initialTitle || "自主规划任务";
+  const userInput = (meta.userInput as string) || currentPlan?.goal || "";
+
+  const steps = Array.isArray(currentPlan?.steps)
+    ? currentPlan.steps
+    : Array.isArray(meta.steps)
+      ? (meta.steps as Array<{
+          id: string;
+          action: string;
+          description: string;
+          tool?: string;
+          args?: Record<string, unknown>;
+          dependsOn?: string[];
+          requiresActionApproval?: boolean;
+        }>)
+      : [];
+
+  const stepResults = (meta.stepResults && typeof meta.stepResults === "object"
+    ? meta.stepResults
+    : {}) as Record<
+    string,
+    {
+      status?: "pending" | "running" | "done" | "failed" | "waiting_action_approval";
+      startedAt?: number;
+      finishedAt?: number;
+      error?: string;
+      result?: { content?: string; details?: unknown };
+    }
+  >;
+
+  const isWaitingApproval =
+    status === "waiting_review" ||
+    status === "waiting_approval" ||
+    status === "waiting_plan_approval";
+
+  // 提取已生成的报告/回答 Markdown
+  const generatedReport = (() => {
+    // 1. 优先提取带有 Markdown 标题的正式报告
+    for (const res of Object.values(stepResults)) {
+      if (
+        res?.result?.content &&
+        (res.result.content.startsWith("# ") || res.result.content.includes("## "))
+      ) {
+        return res.result.content;
+      }
+    }
+    // 2. 提取任意已完成步骤的文本产出
+    for (const res of Object.values(stepResults)) {
+      if (res?.result?.content && res.status === "done") {
+        return res.result.content;
+      }
+    }
+    // 3. 提取任务 summary（如直接回复）
+    if (meta.summary && typeof meta.summary === "string" && meta.summary !== title) {
+      return meta.summary;
+    }
+    return null;
+  })();
+
+  const handleDetailApprove = async () => {
+    setIsSubmitting(true);
+    try {
+      const res = await fetch("/api/ai/work/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId,
+          scope: "plan",
+          approvalId: `plan_${runId}_v${planVersion}`,
+          planVersion,
+          decision: "approve",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(`审批失败: ${data.error ?? "未知错误"}`);
+      }
+      await reload();
+    } catch (e) {
+      alert(`审批异常: ${e instanceof Error ? e.message : "网络错误"}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDetailDeny = async () => {
+    const reason = prompt(
+      "请输入拒绝原因或调整意见（系统将依据你的反馈重新规划）：",
+      "计划步骤不符合要求，请优化",
+    );
+    if (reason === null) return;
+    setIsSubmitting(true);
+    try {
+      const res = await fetch("/api/ai/work/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId,
+          scope: "plan",
+          approvalId: `plan_${runId}_v${planVersion}`,
+          planVersion,
+          decision: "reject",
+          feedback: reason || "用户拒绝了该计划",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(`拒绝失败: ${data.error ?? "未知错误"}`);
+      }
+      await reload();
+    } catch (e) {
+      alert(`拒绝异常: ${e instanceof Error ? e.message : "网络错误"}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-1 flex-col space-y-6">
+      <div className="flex items-center justify-between border-b border-ink-200 pb-3">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-sm text-ink-500 transition-colors hover:text-ink-800"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+            返回列表
+          </button>
+          <span className="text-ink-300">|</span>
+          <span className="font-semibold text-ink-900">{title}</span>
+          <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 border border-brand-200">
+            {isWaitingApproval ? "待人工审批" : status === "done" ? "已完成" : status === "running" ? "执行中" : status}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          {onDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs font-medium text-red-600 transition hover:bg-red-50"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              </svg>
+              <span>删除此任务</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex flex-1 items-center justify-center p-8">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {userInput && (
+            <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-xs">
+              <p className="text-xs font-semibold uppercase tracking-wider text-ink-400">
+                🎯 目标需求
+              </p>
+              <p className="mt-2 text-sm text-ink-800 leading-relaxed font-medium">
+                {userInput}
+              </p>
+            </div>
+          )}
+
+          <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-xs">
+            <div className="mb-4 flex items-center justify-between border-b border-ink-100 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-50 text-brand-600">
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                    <polyline points="10 9 9 9 8 9" />
+                  </svg>
+                </span>
+                <h2 className="text-sm font-semibold text-ink-900">
+                  AI 自主拆解步骤清单 (共 {steps.length} 步 · 计划 v{planVersion})
+                </h2>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-ink-400">
+                  状态：{isWaitingApproval ? "待确认" : status === "done" ? "已完成" : status}
+                </span>
+                {steps.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={toggleAllSteps}
+                    className="inline-flex items-center gap-1 rounded-md border border-ink-200 bg-white px-2 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-50 transition"
+                  >
+                    {allCollapsed ? "全部展开 ▼" : "全部折叠 ▲"}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {steps.length > 0 ? (
+              <div className="space-y-3">
+                {steps.map((step, idx) => {
+                  const resultRecord = stepResults[step.id];
+                  const stepStatus = resultRecord?.status ?? "pending";
+                  const isCollapsed = Boolean(collapsedSteps[step.id]);
+
+                  // 读秒与耗时计算
+                  let timingBadge: ReactNode = null;
+                  if (stepStatus === "done") {
+                    if (
+                      typeof resultRecord?.finishedAt === "number" &&
+                      typeof resultRecord?.startedAt === "number"
+                    ) {
+                      const durSec = Math.max(
+                        0.1,
+                        (resultRecord.finishedAt - resultRecord.startedAt) / 1000,
+                      ).toFixed(1);
+                      timingBadge = (
+                        <span className="rounded bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 font-mono text-[10px] font-medium text-emerald-700">
+                          ⏱️ 耗时 {durSec}s
+                        </span>
+                      );
+                    }
+                  } else if (stepStatus === "running") {
+                    const start = resultRecord?.startedAt || now;
+                    const elapsedSec = Math.max(0.1, (now - start) / 1000).toFixed(1);
+                    timingBadge = (
+                      <span className="rounded bg-blue-50 border border-blue-200 px-1.5 py-0.5 font-mono text-[10px] font-medium text-blue-700 animate-pulse">
+                        ⏳ 执行中 {elapsedSec}s
+                      </span>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={step.id || idx}
+                      className="flex flex-col gap-2 rounded-lg border border-brand-100 bg-brand-50/40 p-3.5 transition hover:border-brand-300"
+                    >
+                      {/* 卡片头部（支持点击快速折叠/展开） */}
+                      <div
+                        onClick={() => toggleStep(step.id)}
+                        className="flex items-start gap-3 cursor-pointer select-none group"
+                      >
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-600 font-mono text-xs font-bold text-white shadow-2xs">
+                          {idx + 1}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-sm font-semibold text-brand-950 group-hover:text-brand-700 transition-colors">
+                              {step.action}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              {stepStatus === "done" && (
+                                <span className="rounded bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                                  ✓ 已完成
+                                </span>
+                              )}
+                              {stepStatus === "running" && (
+                                <span className="rounded bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700 animate-pulse">
+                                  ⏳ 执行中
+                                </span>
+                              )}
+                              {stepStatus === "failed" && (
+                                <span className="rounded bg-red-100 px-2 py-0.5 text-[11px] font-medium text-red-700">
+                                  ✗ 失败
+                                </span>
+                              )}
+                              {stepStatus === "waiting_action_approval" && (
+                                <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                                  ⚠️ 待动作审批
+                                </span>
+                              )}
+                              {timingBadge}
+                              {step.tool && (
+                                <span className="rounded bg-brand-100 px-2 py-0.5 font-mono text-[11px] text-brand-700">
+                                  工具: {step.tool}
+                                </span>
+                              )}
+                              {step.requiresActionApproval && (
+                                <span className="rounded bg-amber-200/80 px-1.5 py-0.5 text-[10px] text-amber-900">
+                                  有副作用
+                                </span>
+                              )}
+                              {step.dependsOn && step.dependsOn.length > 0 && (
+                                <span className="rounded bg-ink-100 px-2 py-0.5 text-[11px] text-ink-600">
+                                  依赖: {step.dependsOn.join(", ")}
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleStep(step.id);
+                                }}
+                                className="ml-1 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-medium text-ink-500 hover:bg-ink-200 hover:text-ink-700 transition"
+                              >
+                                {isCollapsed ? "展开明细 ▼" : "折叠 ▲"}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 卡片详情区（折叠时不显示，避免长文本霸屏） */}
+                      {!isCollapsed && (
+                        <div className="pl-9 pt-1">
+                          <p className="text-xs text-ink-600 leading-relaxed">
+                            {step.description}
+                          </p>
+                          {resultRecord?.result?.content && (
+                            <div className="mt-2.5 rounded-md bg-white border border-ink-100 p-3 text-xs text-ink-800 shadow-2xs">
+                              <p className="font-semibold text-ink-500 mb-1">执行产出：</p>
+                              <div className="prose prose-xs max-w-none text-ink-900 leading-relaxed">
+                                <MarkdownContent content={resultRecord.result.content} />
+                              </div>
+                            </div>
+                          )}
+                          {resultRecord?.error && (
+                            <p className="mt-2 text-xs text-red-600 bg-red-50 p-2 rounded border border-red-200">
+                              错误: {resultRecord.error}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-ink-400">暂无步骤记录</p>
+            )}
+          </div>
+
+          {/* 生成的报告/回复展示 */}
+          {generatedReport && (
+            <div className="rounded-xl border border-ink-200 bg-white p-6 shadow-xs">
+              <div className="mb-3 flex items-center gap-2 border-b border-ink-100 pb-3">
+                <span className="text-base">{generatedReport.startsWith("# ") ? "📊" : "💬"}</span>
+                <h3 className="text-sm font-semibold text-ink-900">
+                  {generatedReport.startsWith("# ") ? "执行产出复盘报告" : "AI 回复与产出内容"}
+                </h3>
+              </div>
+              <div className="prose prose-sm max-w-none text-ink-800">
+                <MarkdownContent content={generatedReport} />
+              </div>
+            </div>
+          )}
+
+          {isWaitingApproval && (
+            <div className="rounded-xl border-2 border-warning-400 bg-warning-50 p-5 shadow-xs">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-warning-900">
+                    人机协同审批确认 (HIL Gate · 计划 v{planVersion})
+                  </h3>
+                  <p className="mt-1 text-xs text-warning-800 leading-relaxed">
+                    以上多步计划由 LLM 自主生成，请核验动作边界与工具权限。批准后系统将启动持久化幂等执行。
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => void handleDetailApprove()}
+                    className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-medium text-white shadow-xs transition hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    {isSubmitting ? "处理中…" : "✓ 批准执行"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => void handleDetailDeny()}
+                    className="rounded-lg border border-red-200 bg-white px-4 py-2 text-xs font-medium text-red-600 shadow-xs transition hover:bg-red-50 disabled:opacity-50"
+                  >
+                    ✗ 拒绝并重规划
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── 底部交互推进对话框 ──────────────────────────── */}
+          <div className="sticky bottom-0 rounded-xl border border-ink-200 bg-white/95 p-3.5 shadow-sm backdrop-blur-xs">
+            <div className="flex items-end gap-2">
+              <textarea
+                value={followUpInput}
+                onChange={(e) => setFollowUpInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void handleSendFollowUp();
+                  }
+                }}
+                placeholder={
+                  isWaitingApproval
+                    ? "提出调整意见（如“请精简为两步”、“换个分析维度”）以触发重规划，按 Enter 发送…"
+                    : "输入后续指令推进此工作流进程（如“帮我把这些延期工单导出整改单”），按 Enter 发送…"
+                }
+                rows={2}
+                className="flex-1 resize-none bg-transparent px-2.5 py-1.5 text-xs text-ink-900 placeholder:text-ink-400 focus:outline-none"
+              />
+              <button
+                type="button"
+                disabled={isFollowUpSending || !followUpInput.trim()}
+                onClick={() => void handleSendFollowUp()}
+                className="rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white shadow-xs transition hover:bg-brand-700 disabled:opacity-40"
+              >
+                {isFollowUpSending ? "处理中…" : "发送推进 →"}
+              </button>
+            </div>
+            <p className="mt-1.5 text-[11px] text-ink-400">
+              {isWaitingApproval
+                ? "💡 提示：在此输入修改意见将自动触发带反馈的自适应重规划；确认无误可点击上方「✓ 批准执行」"
+                : "💡 提示：输入后续指令将无缝继承当前工作流上下文，并在左侧「工作」对话记录中保持实时双向同步"}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

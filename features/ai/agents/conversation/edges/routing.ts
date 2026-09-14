@@ -1,8 +1,8 @@
 import { END } from "@langchain/langgraph";
 import type { AgentState, NextNode } from "../agent";
 import {
-  isUserActivityQuery,
-  isDeepContentQuery,
+ isUserActivityQuery,
+ isDeepContentQuery,
 } from "@/features/ai/core/resolvers/query-parser";
 import { decideRetrievalRoute } from "@/features/ai/search/retrieval-router";
 
@@ -24,73 +24,75 @@ export type { NextNode } from "../agent";
  * - chat: generateResponse (no tools)
  */
 export function routeByMode(state: AgentState): NextNode {
-  const lastMessage = state.messages[state.messages.length - 1];
-  const content =
-    typeof lastMessage?.content === "string"
-      ? lastMessage.content
-      : "";
+ const lastMessage = state.messages[state.messages.length - 1];
+ const content =
+  typeof lastMessage?.content === "string" ? lastMessage.content : "";
 
-  const isPersonQuery =
-    state.queryType === "user" ||
-    isUserActivityQuery(content) ||
-    state.retrievalPlan?.fineGrainedIntent === "RECENT_ACTIVITY" ||
-    state.retrievalPlan?.fineGrainedIntent === "TIMELINE";
+ const isPersonQuery =
+  state.queryType === "user" ||
+  isUserActivityQuery(content) ||
+  state.retrievalPlan?.fineGrainedIntent === "RECENT_ACTIVITY" ||
+  state.retrievalPlan?.fineGrainedIntent === "TIMELINE";
 
-  if (isPersonQuery) return "searchStructured";
+ if (isPersonQuery) return "searchStructured";
 
-  if (state.retrievalPlan) {
-    const route = decideRetrievalRoute(state.retrievalPlan);
-    if (route === "STRUCTURED") return "searchStructured";
-    return "retrieveEvidence";
+ if (state.retrievalPlan) {
+  const route = decideRetrievalRoute(state.retrievalPlan);
+  if (route === "STRUCTURED") return "searchStructured";
+  return "retrieveEvidence";
+ }
+
+ switch (state.mode) {
+  case "search":
+   // 人员近况在 search 模式下也直接走 DB（结构化人员数据更准）。
+   if (isUserActivityQuery(content)) return "searchStructured";
+   return "searchKnowledge";
+
+  case "auto": {
+   // 人员近况 → DB 快查
+   if (isUserActivityQuery(content)) return "searchStructured";
+   // Deep content / document / note queries → RAG for semantic retrieval
+   if (isDeepContentQuery(content)) return "searchKnowledge";
+   // Everything else (exact IDs, stats, vcs, workflow) → fast DB
+   return "searchStructured";
   }
 
-  switch (state.mode) {
-    case "search":
-      // 人员近况在 search 模式下也直接走 DB（结构化人员数据更准）。
-      if (isUserActivityQuery(content)) return "searchStructured";
-      return "searchKnowledge";
+  case "web":
+   return "webSearch";
 
-    case "auto": {
-      // 人员近况 → DB 快查
-      if (isUserActivityQuery(content)) return "searchStructured";
-      // Deep content / document / note queries → RAG for semantic retrieval
-      if (isDeepContentQuery(content)) return "searchKnowledge";
-      // Everything else (exact IDs, stats, vcs, workflow) → fast DB
-      return "searchStructured";
-    }
-
-    case "web":
-      return "webSearch";
-
-    case "image":
-    case "video":
-    case "chat":
-    default:
-      return "generateResponse";
-  }
+  case "image":
+  case "video":
+  case "chat":
+  default:
+   return "generateResponse";
+ }
 }
 
 export function routeAfterDetectIntent(state: AgentState): NextNode {
-  const waiting = state.waitingForConfirmation;
-  const mode = state.mode;
-  console.log(`[routeAfterDetectIntent] waitingForConfirmation=${waiting} mode=${mode}`);
+ const waiting = state.waitingForConfirmation;
+ const mode = state.mode;
+ console.log(
+  `[routeAfterDetectIntent] waitingForConfirmation=${waiting} mode=${mode}`,
+ );
 
-  // ── Workflow approval: skip humanConfirmationNode (no candidates to pick) ────
-  // Workflow match ("帮我生成周报") sets pendingHumanAction.type="approve".
-  // Routing to humanConfirmationNode would show "输入无效" because there are no
-  // candidates. Instead, go directly to generateResponse (which returns empty text
-  // while waiting) and let routeAfterGenerateResponse → END end the turn cleanly.
-  // The workflow_match SSE event is sent directly from route.ts.
-  if (waiting && state.pendingHumanAction?.type === "approve") {
-    console.log(`[routeAfterDetectIntent] workflow approval pending, skipping humanConfirmationNode`);
-    return "generateResponse";
-  }
+ // ── Workflow approval: skip humanConfirmationNode (no candidates to pick) ────
+ // Workflow match ("帮我生成周报") sets pendingHumanAction.type="approve".
+ // Routing to humanConfirmationNode would show "输入无效" because there are no
+ // candidates. Instead, go directly to generateResponse (which returns empty text
+ // while waiting) and let routeAfterGenerateResponse → END end the turn cleanly.
+ // The workflow_match SSE event is sent directly from route.ts.
+ if (waiting && state.pendingHumanAction?.type === "approve") {
+  console.log(
+   `[routeAfterDetectIntent] workflow approval pending, skipping humanConfirmationNode`,
+  );
+  return "generateResponse";
+ }
 
-  // ── Human-in-Loop: always route to humanConfirmation while waiting ──
-  if (waiting) {
-    return "humanConfirmation";
-  }
-  return routeByMode(state);
+ // ── Human-in-Loop: always route to humanConfirmation while waiting ──
+ if (waiting) {
+  return "humanConfirmation";
+ }
+ return routeByMode(state);
 }
 
 /**
@@ -106,21 +108,23 @@ export function routeAfterDetectIntent(state: AgentState): NextNode {
  *   - otherwise → END (nothing pending, nothing resolved = end of HIL flow)
  */
 export function routeAfterHumanConfirmation(state: AgentState): NextNode {
-  if (state.pendingHumanAction) {
-    // Invalid selection or still waiting — self-loop to re-prompt.
-    // The error message is already in state.messages from the node's return.
-    return "humanConfirmation";
-  }
-  if (state.resolvedEntities?.user ||
-      state.resolvedEntities?.project ||
-      state.resolvedEntities?.ticket ||
-      state.resolvedEntities?.weekly_report) {
-    // Valid selection — "回炉" to decision so it can process the next decision
-    // (e.g. cross-type search → user picked type → query that type for specific entity).
-    return "decision";
-  }
-  // No pending, no resolution — end the HIL flow.
-  return END;
+ if (state.pendingHumanAction) {
+  // Invalid selection or still waiting — self-loop to re-prompt.
+  // The error message is already in state.messages from the node's return.
+  return "humanConfirmation";
+ }
+ if (
+  state.resolvedEntities?.user ||
+  state.resolvedEntities?.project ||
+  state.resolvedEntities?.ticket ||
+  state.resolvedEntities?.weekly_report
+ ) {
+  // Valid selection — "回炉" to decision so it can process the next decision
+  // (e.g. cross-type search → user picked type → query that type for specific entity).
+  return "decision";
+ }
+ // No pending, no resolution — end the HIL flow.
+ return END;
 }
 
 /**
@@ -131,16 +135,16 @@ export function routeAfterHumanConfirmation(state: AgentState): NextNode {
  * - Otherwise → END
  */
 export function routeAfterDecision(state: AgentState): NextNode {
-  if (state.pendingHumanAction) {
-    return "humanConfirmation";
-  }
-  if (state.resolvedEntities) {
-    return "searchStructured";
-  }
-  // Fallback: ambiguous query with no candidates matched → bail out to
-  // generateResponse so the chat layer can answer conversationally instead
-  // of returning an empty bubble.
-  return "generateResponse";
+ if (state.pendingHumanAction) {
+  return "humanConfirmation";
+ }
+ if (state.resolvedEntities) {
+  return "searchStructured";
+ }
+ // Fallback: ambiguous query with no candidates matched → bail out to
+ // generateResponse so the chat layer can answer conversationally instead
+ // of returning an empty bubble.
+ return "generateResponse";
 }
 
 /**
@@ -150,7 +154,7 @@ export function routeAfterDecision(state: AgentState): NextNode {
  * results are available for the final answer.
  */
 export function routeAfterSearchKnowledge(_state: AgentState): NextNode {
-  return "searchStructured";
+ return "searchStructured";
 }
 
 /**
@@ -164,39 +168,47 @@ export function routeAfterSearchKnowledge(_state: AgentState): NextNode {
  * - Otherwise: proceeds to generateResponse with grounded evidence & clarification suggestions.
  */
 export function routeAfterRetrieveEvidence(state: AgentState): NextNode {
-  const currentStep = state.agenticStep ?? 0;
-  const maxAgenticSteps = 3;
-  const report = state.toolResults?.retrieval as {
-    evaluation?: { status?: string };
-    allowWeb?: boolean;
-  } | undefined;
-
-  const evalStatus = report?.evaluation?.status;
-
-  // 1. If sufficient or ambiguous, proceed to generateResponse immediately
-  if (evalStatus === "SUFFICIENT" || evalStatus === "AMBIGUOUS") {
-    return "generateResponse";
-  }
-
-  // 2. If weak or insufficient and we have remaining agentic steps (currentStep < maxAgenticSteps)
-  if ((evalStatus === "WEAK" || evalStatus === "INSUFFICIENT") && currentStep < maxAgenticSteps) {
-    const subQueries = state.retrievalPlan?.subQueries;
-    const nextSubQueryIndex = currentStep - 1 >= 0 ? currentStep - 1 : 0;
-    if (subQueries && subQueries.length > nextSubQueryIndex) {
-      console.log(
-        `[Agentic RAG] step ${currentStep}/${maxAgenticSteps}: re-routing with orthogonal sub-query for missing evidence: "${subQueries[nextSubQueryIndex]}"`,
-      );
-      return "retrieveEvidence";
+ const currentStep = state.agenticStep ?? 0;
+ const maxAgenticSteps = 3;
+ const report = state.toolResults?.retrieval as
+  | {
+     evaluation?: { status?: string };
+     allowWeb?: boolean;
     }
-  }
+  | undefined;
 
-  // 3. If external web search is permitted and internal evidence is insufficient
-  if (state.retrievalPlan?.scope === "WEB_ALLOWED" && report?.allowWeb === true) {
-    return "webSearch";
-  }
+ const evalStatus = report?.evaluation?.status;
 
-  // 4. Default: proceed to generate response
+ // 1. If sufficient or ambiguous, proceed to generateResponse immediately
+ if (evalStatus === "SUFFICIENT" || evalStatus === "AMBIGUOUS") {
   return "generateResponse";
+ }
+
+ // 2. If weak or insufficient and we have remaining agentic steps (currentStep < maxAgenticSteps)
+ if (
+  (evalStatus === "WEAK" || evalStatus === "INSUFFICIENT") &&
+  currentStep < maxAgenticSteps
+ ) {
+  const subQueries = state.retrievalPlan?.subQueries;
+  const nextSubQueryIndex = currentStep - 1 >= 0 ? currentStep - 1 : 0;
+  if (subQueries && subQueries.length > nextSubQueryIndex) {
+   console.log(
+    `[Agentic RAG] step ${currentStep}/${maxAgenticSteps}: re-routing with orthogonal sub-query for missing evidence: "${subQueries[nextSubQueryIndex]}"`,
+   );
+   return "retrieveEvidence";
+  }
+ }
+
+ // 3. If external web search is permitted and internal evidence is insufficient
+ if (
+  state.retrievalPlan?.scope === "WEB_ALLOWED" &&
+  report?.allowWeb === true
+ ) {
+  return "webSearch";
+ }
+
+ // 4. Default: proceed to generate response
+ return "generateResponse";
 }
 /**
  * Route after searchStructured → to decision, humanConfirmation, or generateResponse.
@@ -215,36 +227,38 @@ export function routeAfterRetrieveEvidence(state: AgentState): NextNode {
  * 5. Otherwise → generateResponse.
  */
 export function routeAfterSearchStructured(state: AgentState): NextNode {
-  // Check for decision — but only if the user has not yet picked from a previous round.
-  // If resolvedEntities is set, the selection is complete and we should generate
-  // the response, NOT route to decision (which would re-trigger HIL).
-  const toolResult = state.toolResults?.searchStructured;
-  if (toolResult && typeof toolResult === "object" && !state.resolvedEntities) {
-    const resultObj = toolResult as Record<string, unknown>;
-    const decision = resultObj.decision as { type?: string } | undefined;
-    if (decision?.type === "human") {
-      return "decision";
-    }
+ // Check for decision — but only if the user has not yet picked from a previous round.
+ // If resolvedEntities is set, the selection is complete and we should generate
+ // the response, NOT route to decision (which would re-trigger HIL).
+ const toolResult = state.toolResults?.searchStructured;
+ if (toolResult && typeof toolResult === "object" && !state.resolvedEntities) {
+  const resultObj = toolResult as Record<string, unknown>;
+  const decision = resultObj.decision as { type?: string } | undefined;
+  if (decision?.type === "human") {
+   return "decision";
   }
-  // No pending decision — check resolvedEntities for a confirmed selection.
-  if (state.resolvedEntities?.user ||
-      state.resolvedEntities?.project ||
-      state.resolvedEntities?.ticket ||
-      state.resolvedEntities?.weekly_report) {
-    return "generateResponse";
-  }
-  // Still waiting for initial confirmation?
-  if (state.pendingHumanAction) {
-    return "humanConfirmation";
-  }
+ }
+ // No pending decision — check resolvedEntities for a confirmed selection.
+ if (
+  state.resolvedEntities?.user ||
+  state.resolvedEntities?.project ||
+  state.resolvedEntities?.ticket ||
+  state.resolvedEntities?.weekly_report
+ ) {
   return "generateResponse";
+ }
+ // Still waiting for initial confirmation?
+ if (state.pendingHumanAction) {
+  return "humanConfirmation";
+ }
+ return "generateResponse";
 }
 
 /**
  * Route after webSearch → to generateResponse.
  */
 export function routeToResponse(_state: AgentState): NextNode {
-  return "generateResponse";
+ return "generateResponse";
 }
 
 /**
@@ -265,10 +279,10 @@ export function routeToResponse(_state: AgentState): NextNode {
  * route back to humanConfirmation to present the next round of candidates.
  */
 export function routeAfterGenerateResponse(state: AgentState): NextNode {
-  if (state.pendingHumanAction) {
-    return "humanConfirmation";
-  }
-  return END;
+ if (state.pendingHumanAction && state.pendingHumanAction.type !== "approve") {
+  return "humanConfirmation";
+ }
+ return END;
 }
 
 /**
@@ -282,58 +296,63 @@ export function routeAfterGenerateResponse(state: AgentState): NextNode {
  * a confirmation dialog to launch the workflow.
  */
 export function routeAfterModelSelect(state: AgentState): NextNode {
-  // Always check waitingForConfirmation first (HIL must not be skipped)
-  if (state.waitingForConfirmation) {
-    return "humanConfirmation";
-  }
-
-  // Workflow match detected → go directly to response (frontend will show launch dialog)
-  if (state.workflowMatch) {
-    console.log(`[routeAfterModelSelect] workflow match detected: ${state.workflowMatch.type}`);
-    return "generateResponse";
-  }
-
-  // If user selected a candidate from HIL, route to searchStructured to execute the query
-  if (state.resolvedEntities) {
-    return "searchStructured";
-  }
-
-  const lastMessage = state.messages[state.messages.length - 1];
-  const content =
-    typeof lastMessage?.content === "string"
-      ? lastMessage.content
-      : "";
-
-  // Check if this is a person / user activity query that must go through searchStructured & resolveUser
-  const isPersonQuery =
-    state.queryType === "user" ||
-    isUserActivityQuery(content) ||
-    state.retrievalPlan?.fineGrainedIntent === "RECENT_ACTIVITY" ||
-    state.retrievalPlan?.fineGrainedIntent === "TIMELINE";
-
-  if (isPersonQuery) {
-    return "searchStructured";
-  }
-
-  // If retrievalPlan is present:
-  if (state.retrievalPlan) {
-    const route = decideRetrievalRoute(state.retrievalPlan);
-    if (route === "STRUCTURED") {
-      return "searchStructured";
-    }
-    return "retrieveEvidence";
-  }
-
-  const mode = state.mode;
-  if (mode === "web") return "webSearch";
-  if (mode === "chat") return "generateResponse";
-  if (mode === "image") return "generateResponse";
-  if (mode === "video") return "generateResponse";
-  if (mode === "search" || mode === "auto") {
-    if (isUserActivityQuery(content)) return "searchStructured";
-    return "retrieveEvidence";
-  }
-
-  // Default fallback
+ // 1. Workflow match priority: 工作流匹配/审批优先直达 generateResponse，触发前端弹窗
+ // 注意：workflowMatch 会将 waitingForConfirmation 设为 true，但其 type 是 "approve"（无候选列表）。
+ // 绝不能路由到 humanConfirmationNode，否则会因缺少候选而报“输入无效”并陷入死循环。
+ if (
+  state.workflowMatch ||
+  (state.waitingForConfirmation && state.pendingHumanAction?.type === "approve")
+ ) {
+  console.log(
+   `[routeAfterModelSelect] workflow match/approve detected, routing to generateResponse`,
+  );
   return "generateResponse";
+ }
+
+ // 2. 普通人机协同消歧（有待选实体候选列表）
+ if (state.waitingForConfirmation) {
+  return "humanConfirmation";
+ }
+
+ // If user selected a candidate from HIL, route to searchStructured to execute the query
+ if (state.resolvedEntities) {
+  return "searchStructured";
+ }
+
+ const lastMessage = state.messages[state.messages.length - 1];
+ const content =
+  typeof lastMessage?.content === "string" ? lastMessage.content : "";
+
+ // Check if this is a person / user activity query that must go through searchStructured & resolveUser
+ const isPersonQuery =
+  state.queryType === "user" ||
+  isUserActivityQuery(content) ||
+  state.retrievalPlan?.fineGrainedIntent === "RECENT_ACTIVITY" ||
+  state.retrievalPlan?.fineGrainedIntent === "TIMELINE";
+
+ if (isPersonQuery) {
+  return "searchStructured";
+ }
+
+ // If retrievalPlan is present:
+ if (state.retrievalPlan) {
+  const route = decideRetrievalRoute(state.retrievalPlan);
+  if (route === "STRUCTURED") {
+   return "searchStructured";
+  }
+  return "retrieveEvidence";
+ }
+
+ const mode = state.mode;
+ if (mode === "web") return "webSearch";
+ if (mode === "chat") return "generateResponse";
+ if (mode === "image") return "generateResponse";
+ if (mode === "video") return "generateResponse";
+ if (mode === "search" || mode === "auto") {
+  if (isUserActivityQuery(content)) return "searchStructured";
+  return "retrieveEvidence";
+ }
+
+ // Default fallback
+ return "generateResponse";
 }

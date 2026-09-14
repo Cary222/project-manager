@@ -7,6 +7,7 @@ import { prisma } from "@/shared/db/client";
 import { chineseToPinyin } from "@/features/profile/lib/user-search";
 import { pinyin as pinyinArray } from "pinyin-pro";
 import type { ExtractedUser, MatchType, ResolveResult } from "@/features/ai/types/structured";
+import { COMMON_NON_NAMES } from "./query-parser";
 
 /**
  * Resolves a user identifier (name/email prefix/id) to a user record.
@@ -33,7 +34,16 @@ export async function resolveUser(
   const rawTrimmed = raw.trim();
   const normTrimmed = normalized.trim();
 
-  if (!normTrimmed) return { user: null, confidence: 0, matchType: null };
+  const GREETING_OR_COMMON_REGEX = /^(?:你好|您好|在吗|在不在|在嘛|谢谢|谢谢你|多谢|感谢|好的|好的好的|好嘞|明白|收到|再见|哈喽|早上好|下午好|晚上好|嗨|hello|hi)\s*[!！.?。~～]*$/i;
+  if (
+    !normTrimmed ||
+    COMMON_NON_NAMES.has(normTrimmed) ||
+    COMMON_NON_NAMES.has(rawTrimmed) ||
+    GREETING_OR_COMMON_REGEX.test(normTrimmed) ||
+    GREETING_OR_COMMON_REGEX.test(rawTrimmed)
+  ) {
+    return { user: null, confidence: 0, matchType: null };
+  }
 
   // === 构建搜索词序列 ===
   // 原则：拆 token + 原始整体 + 变体都要搜

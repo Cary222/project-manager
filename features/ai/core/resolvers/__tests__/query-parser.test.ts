@@ -4,6 +4,8 @@ import {
   resolveTemporalWindow,
   isImplicitTicketReference,
   isUserActivityQuery,
+  extractUserIdentifier,
+  parseQueryType,
 } from "../query-parser";
 
 describe("query-parser Temporal and Coreference Resolution", () => {
@@ -66,6 +68,39 @@ describe("query-parser Temporal and Coreference Resolution", () => {
       expect(isUserActivityQuery("刘工这周在做什么")).toBe(true);
       expect(isUserActivityQuery("最近团队开发了什么")).toBe(true);
       expect(isUserActivityQuery("帮我看看代码报错")).toBe(false);
+    });
+  });
+
+  describe("extractUserIdentifier non-name protections", () => {
+    it("should return undefined for greetings and conversational words", () => {
+      expect(extractUserIdentifier("你好")).toBeUndefined();
+      expect(extractUserIdentifier("您好！")).toBeUndefined();
+      expect(extractUserIdentifier("在吗")).toBeUndefined();
+      expect(extractUserIdentifier("谢谢你")).toBeUndefined();
+      expect(extractUserIdentifier("好的好的")).toBeUndefined();
+      expect(extractUserIdentifier("哈喽")).toBeUndefined();
+    });
+
+    it("should extract real names when present", () => {
+      const res = extractUserIdentifier("刘工最近在干什么");
+      expect(res).toBeDefined();
+      expect(res?.raw).toBe("刘工");
+    });
+  });
+
+  describe("parseQueryType non-name protections", () => {
+    it("should return ambiguous for greetings and not user", () => {
+      expect(parseQueryType("你好")).toBe("ambiguous");
+      expect(parseQueryType("您好")).toBe("ambiguous");
+      expect(parseQueryType("在吗")).toBe("ambiguous");
+      expect(parseQueryType("帮我看看")).toBe("ambiguous");
+      expect(parseQueryType("请问在不在")).toBe("ambiguous");
+    });
+
+    it("should correctly identify user queries when real person activity is asked", () => {
+      expect(parseQueryType("刘工最近在干什么")).toBe("user");
+      expect(parseQueryType("张经理负责什么工单")).toBe("ticket"); // 工单 keyword takes precedence
+      expect(parseQueryType("王工在做什么")).toBe("user");
     });
   });
 });

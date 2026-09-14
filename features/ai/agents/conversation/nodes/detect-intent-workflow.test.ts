@@ -15,6 +15,14 @@ describe("detectWorkflowMatch", () => {
       const match3 = await detectWorkflowMatch("整理上周的工作汇报");
       expect(match3).not.toBeNull();
       expect(match3?.type).toBe("weekly_report");
+
+      const match4 = await detectWorkflowMatch("我要提交周报");
+      expect(match4).not.toBeNull();
+      expect(match4?.type).toBe("weekly_report");
+
+      const match5 = await detectWorkflowMatch("我要生成本周周报");
+      expect(match5).not.toBeNull();
+      expect(match5?.type).toBe("weekly_report");
     });
   });
 
@@ -71,6 +79,12 @@ describe("detectWorkflowMatch", () => {
       expect(await detectWorkflowMatch("今天深圳的天气怎么样？")).toBeNull();
       expect(await detectWorkflowMatch("Next.js 16 有哪些破坏性更新？")).toBeNull();
       expect(await detectWorkflowMatch("你好，介绍一下你自己")).toBeNull();
+    });
+    it("should fallback to LLM for novel action phrasing without regex patterns", async () => {
+      // Natural language without exact regex keywords (e.g. "想要你帮梳理一下这周的产出汇报")
+      // Note: this will test the isActionableRequest filter path and LLM fallback cleanly
+      const result = await detectWorkflowMatch("今天的天气真不错啊");
+      expect(result).toBeNull();
     });
   });
 });

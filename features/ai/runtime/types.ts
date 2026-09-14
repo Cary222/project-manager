@@ -100,9 +100,14 @@ export interface WorkflowEdge {
 }
 
 export interface WorkflowDefinition {
+  id?: string;
   type: string;
   name: string;
   description: string;
+  requiredInputs?: string[];
+  capabilities?: string[];
+  riskLevel?: "low" | "medium" | "high";
+  outputType?: string;
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   initialState?: Record<string, unknown>;

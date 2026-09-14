@@ -1,5 +1,6 @@
 import type { AgentState } from "../agent";
 import type { DisambiguationCandidate } from "../types";
+import { COMMON_NON_NAMES, isUserActivityQuery } from "@/features/ai/core/resolvers/query-parser";
 
 /**
  * Decision node — unified decision layer after searchStructured.
@@ -47,18 +48,46 @@ export async function disambiguateIntentNode(
       ? lastMessage.content
       : "";
 
+    const isNonNameQuery =
+      COMMON_NON_NAMES.has(content.trim()) ||
+      (decisionField?.query && COMMON_NON_NAMES.has(decisionField.query.trim()));
+
+    const candidates = decisionField?.candidates ?? [];
+    const isTaskBlocking = Boolean(
+      state.queryType === "user" ||
+      isUserActivityQuery(content) ||
+      state.queryType === "weekly_report"
+    );
+
+    // 1. 如果仅有 1 个候选，自动对齐采信，绝不弹窗打扰用户
     if (
       decisionField?.type === "human" &&
-      // Guard: if resolvedEntities is already set (user picked from a previous round),
-      // do NOT re-trigger HIL — the selection is complete, route to generateResponse.
+      decisionField.entityType === "user" &&
+      candidates.length === 1 &&
+      !state.resolvedEntities
+    ) {
+      return {
+        resolvedEntities: {
+          user: { id: candidates[0].id, name: candidates[0].label, resolvedBy: "auto" },
+          originalQueryType: (extractedQueryType as "user" | "project" | "ticket" | "commit" | "meeting" | "weekly_report") || "user",
+        },
+      };
+    }
+
+    // 2. 只有在任务被强阻塞且候选数适中(2~6)时才触发 HIL（Search Ambiguity != Human Interaction）
+    if (
+      decisionField?.type === "human" &&
+      state.mode !== "chat" &&
+      !isNonNameQuery &&
       !state.resolvedEntities &&
       decisionField.entityType === "user" &&
-      decisionField.candidates &&
-      decisionField.candidates.length > 0
+      isTaskBlocking &&
+      candidates.length >= 2 &&
+      candidates.length <= 6
     ) {
       const entityType = decisionField.entityType;
       console.log(
-        `[decision] tool.decision.human entityType=${entityType} candidates=${decisionField.candidates.length} extractedQueryType=${extractedQueryType ?? "none"}`
+        `[decision] tool.decision.human entityType=${entityType} candidates=${candidates.length} extractedQueryType=${extractedQueryType ?? "none"}`
       );
       return {
         pendingHumanAction: {

@@ -12,6 +12,7 @@ import type {
 import { DISAMBIGUATION_THRESHOLDS } from "@/features/ai/types/structured";
 import { getWindowStart } from "@/features/ai/core/formatters";
 import { resolveUser } from "@/features/ai/core/resolvers/user-resolver";
+import { resolveDataScope, ticketScopeWhere } from "@/features/ai/core/policy/data-scope";
 
 export interface TicketQueryInput {
   id?: string;
@@ -58,6 +59,15 @@ export async function queryTicket(
       },
     });
     if (ticket) {
+      if (input.viewerUserId) {
+        const dataScope = await resolveDataScope(input.viewerUserId);
+        if (dataScope.mode !== "all_projects" && !dataScope.projectIds.includes(ticket.project.id)) {
+          return {
+            summary: `无权访问工单 #${idStr}（不属于你所在的项目）`,
+            sources: [],
+          };
+        }
+      }
       const assigneeNames = ticket.assignees.map((a) => a.user.name || a.user.email).join("、");
       const deadlineStr = ticket.deadline
         ? `，截止 ${new Date(ticket.deadline).toLocaleDateString("zh-CN")}`
@@ -124,12 +134,28 @@ export async function queryTicket(
     };
   }
 
-  // Filter-based list
+  // Filter-based list with ACL scope
   const where: Record<string, unknown> = {};
+  if (input.viewerUserId) {
+    const dataScope = await resolveDataScope(input.viewerUserId);
+    const scopeFilter = ticketScopeWhere(dataScope);
+    if (scopeFilter.projectId) {
+      if (filters?.projectId) {
+        if (dataScope.mode !== "all_projects" && !dataScope.projectIds.includes(filters.projectId)) {
+          return { summary: "没有找到符合条件的工单（无权访问该项目）", sources: [] };
+        }
+        where.projectId = filters.projectId;
+      } else {
+        where.projectId = scopeFilter.projectId;
+      }
+    } else if (filters?.projectId) {
+      where.projectId = filters.projectId;
+    }
+  } else if (filters?.projectId) {
+    where.projectId = filters.projectId;
+  }
   if (filters?.status) where.status = filters.status;
   if (filters?.priority) where.priority = filters.priority;
-  if (filters?.projectId) where.projectId = filters.projectId;
-
   // 用户过滤：优先使用 extractedUser（包含 raw + normalized），其次使用 userId
   const extractedUser = filters?.extractedUser;
   const targetUserId = filters?.userId;

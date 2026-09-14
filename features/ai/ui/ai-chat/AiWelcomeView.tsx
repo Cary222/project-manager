@@ -139,15 +139,51 @@ export function AiWelcomeView({
   }, []);
 
   // Submit action
-  const handleSubmit = useCallback(() => {
+  // Submit action with Global Mode Router
+  const handleSubmit = useCallback(async () => {
     const trimmed = input.trim();
     if (!trimmed && images.length === 0) return;
 
-    if (mode === "chat") {
-      onStartChat(trimmed || "请分析上传的附件", selectedModel, images);
-    } else {
+    if (mode === "work") {
       onStartWork(trimmed, undefined, selectedModel);
+      return;
     }
+
+    // 模式自动感知（Global Mode Router）：
+    // 若用户未手动点选“工作”Tab，但输入是明确的执行目标（如“生成本周周报”），
+    // 经由 Global Mode Router 自动进入 Work，用户无需理解底层产品边界。
+    try {
+      const res = await fetch("/api/ai/routing/mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: trimmed }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const decision = json.data as {
+          route?: string;
+          confidence?: number;
+          workSuggestion?: { workflowHint?: string };
+        } | null;
+
+        // 欢迎页中立网关：用户输入明确执行目标（如“我要写周报”、“修改代码”）时，直通进入 Work 模式
+        if (
+          decision?.route === "work" ||
+          (decision?.route === "chat_then_offer_work" && decision?.workSuggestion?.workflowHint)
+        ) {
+          onStartWork(
+            trimmed,
+            (decision.workSuggestion?.workflowHint as any) ?? undefined,
+            selectedModel,
+          );
+          return;
+        }
+      }
+    } catch {
+      // 路由请求失败时，安全退回既有 chat
+    }
+
+    onStartChat(trimmed || "请分析上传的附件", selectedModel, images);
   }, [images, input, mode, onStartChat, onStartWork, selectedModel]);
 
   const handleCompositionStart = useCallback(() => {

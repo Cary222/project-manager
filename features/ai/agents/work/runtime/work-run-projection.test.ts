@@ -7,5 +7,6 @@ describe("Work durable source convention", () => {
     expect(routeWorkGoal("周报")).toBe("weekly_report");
     expect(routeWorkGoal("会议纪要")).toBe("meeting_minutes");
     expect(routeWorkGoal("Coding Task")).toBe("coding");
+    expect(routeWorkGoal("延期工单分析复盘规划")).toBe("planning");
   });
 });

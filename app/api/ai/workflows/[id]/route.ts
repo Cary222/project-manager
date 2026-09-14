@@ -37,7 +37,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       );
     }
 
-    if (run.kind === "SCHEDULE" || !run.threadId) {
+    if (run.kind === "SCHEDULE" || !run.threadId || run.workflowType !== "weekly_report") {
       return NextResponse.json({
         data: {
           run: serializeRun(run),

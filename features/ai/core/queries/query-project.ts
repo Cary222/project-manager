@@ -5,6 +5,7 @@
 import { prisma } from "@/shared/db/client";
 import type { StructuredResult, SourceReference } from "@/features/ai/types/structured";
 import { DISAMBIGUATION_THRESHOLDS } from "@/features/ai/types/structured";
+import { resolveDataScope, scopeWhere } from "@/features/ai/core/policy/data-scope";
 
 export interface ProjectQueryInput {
   id?: string;
@@ -12,6 +13,7 @@ export interface ProjectQueryInput {
     status?: string;
   };
   limit?: number;
+  viewerUserId?: string;
 }
 
 /**
@@ -22,9 +24,15 @@ export async function queryProject(input: ProjectQueryInput): Promise<Structured
   const { id, filters: _filters } = input;
 
   if (!id) {
-    // List active projects
+    // List active projects with dataScope ACL
+    let where: Record<string, unknown> = { status: "ACTIVE" };
+    if (input.viewerUserId) {
+      const dataScope = await resolveDataScope(input.viewerUserId);
+      const scopeFilter = scopeWhere(dataScope);
+      if (scopeFilter.id) where.id = scopeFilter.id;
+    }
     const projects = await prisma.project.findMany({
-      where: { status: "ACTIVE" },
+      where,
       orderBy: { name: "asc" },
       take: 20,
       select: { id: true, name: true },
@@ -68,6 +76,12 @@ export async function queryProject(input: ProjectQueryInput): Promise<Structured
   });
 
   if (!project) return { summary: `未找到项目 ID: ${id}`, sources: [] };
+  if (input.viewerUserId) {
+    const dataScope = await resolveDataScope(input.viewerUserId);
+    if (dataScope.mode !== "all_projects" && !dataScope.projectIds.includes(project.id)) {
+      return { summary: `无权访问项目 "${project.name}"（不属于你所在的项目）`, sources: [] };
+    }
+  }
 
   let total = 0;
   let done = 0;

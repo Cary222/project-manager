@@ -73,6 +73,7 @@ function createMockState(overrides: Partial<AgentState> = {}): AgentState {
     ragTrace: null,
     agenticStep: 0,
     response: "",
+    suggestedActions: null,
     ...overrides,
   };
 }

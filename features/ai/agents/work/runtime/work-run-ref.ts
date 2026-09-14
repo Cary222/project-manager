@@ -36,6 +36,15 @@ export type WorkRunRef =
       status: string;
       title: string;
       updatedAt: string;
+    }
+  | {
+      kind: "planning";
+      source: "WorkflowRun";
+      sourceId: string;
+      status: string;
+      title: string;
+      updatedAt: string;
+      conversationId?: string | null;
     };
 
 export type WorkRoute = WorkRunRef["kind"];
@@ -69,13 +78,23 @@ export function routeWorkGoal(goal: string): WorkRoute {
   if (/会议|纪要|例会|周会|录音|音频|meeting/.test(normalized)) {
     return "meeting_minutes";
   }
-
-  // 3. 项目进展与工作动态大盘：
-  // 包含显式进展关键词，或命中人员活动/产出回顾（如"我上周干了什么"、"最近做了什么"、"上周工作内容"）
+  // 3. 自主规划与分析复盘类（Planning）：
+  // 包含明确的规划、方案制定、归因复盘、跨步分析
   if (
-    /进展|进度|汇总|概况|统计|大盘|动态|活跃工单|project[-_ ]?progress|progress/.test(
+    /规划|计划|拆解|复盘|方案|整改|调研|评估/.test(normalized) ||
+    /统计.*(?:分析|归因|原因|报告|复盘|方案)/.test(normalized) ||
+    /分析.*(?:归因|原因|趋势|报告|复盘|整改)/.test(normalized)
+  ) {
+    return "planning";
+  }
+
+  // 4. 项目进展与工作动态大盘：
+  // 包含显式进展关键词，或命中人员活动/产出回顾（如"我上周干了什么"、"最近做了什么"）
+  if (
+    /进展|进度|概况|大盘|活跃工单|project[-_ ]?progress|progress/.test(
       normalized,
     ) ||
+    /(?:项目|团队|当前).{0,6}(?:汇总|统计)/.test(normalized) ||
     isUserActivityQuery(cleaned) ||
     /(?:上周|本周|最近|近期|昨天).{0,10}(?:干了|做了|完成|产出|开发|工作)/.test(
       normalized,
@@ -84,7 +103,7 @@ export function routeWorkGoal(goal: string): WorkRoute {
     return "project_progress";
   }
 
-  // 4. 代码任务（Coding Task）：
+  // 5. 代码任务（Coding Task）：
   // 具备明确的代码、缺陷修复、工程开发、工具插件等特征
   if (
     /#\d+|工单\s*#?\d+|bug|缺陷|报错|代码|code|coding|修复|实现|重构|开发|插件|组件|依赖|架构|终端|bash|git/i.test(
@@ -94,11 +113,11 @@ export function routeWorkGoal(goal: string): WorkRoute {
     return "coding";
   }
 
-  // 5. 兜底分流：
-  // 纯疑问词/查询句（“什么”、“有哪些”、“如何”、“怎样”）归为进展/信息汇总，其余归入通用 Coding 执行
+  // 6. 兜底分流：
+  // 纯疑问词/查询句（“什么”、“有哪些”、“如何”、“怎样”）归为进展/信息汇总，其余归入通用 Planning 执行
   if (/(?:什么|有哪些|怎么样|如何|怎样|详情|在哪)/.test(normalized)) {
     return "project_progress";
   }
 
-  return "coding";
+  return "planning";
 }

@@ -5,12 +5,12 @@ import { prisma } from "@/shared/db/client";
 import {
   ensureSchedulerStarted,
   scheduleWeeklyReport,
-  startWorkflowManually,
 } from "@/features/ai/runtime/scheduler";
 import { WEEKLY_REPORT_WORKFLOW_TYPE } from "@/features/ai/agents/work/workflows/weekly-report/graph";
-import { startWorkflowAsync } from "@/features/ai/agents/work/workflows/weekly-report/approval";
-import { getWeekRange } from "@/features/weekly-reports/lib/week";
-import { generateProjectProgressSummary } from "@/features/ai/agents/work/workflows/project-progress/generate-progress-summary";
+import {
+  startWorkflowByType,
+  type StartWorkflowResult,
+} from "@/features/ai/agents/work/workflows/start";
 
 // Supported workflow types
 const WORKFLOW_TYPES = ["weekly_report", "project-progress"] as const;
@@ -67,85 +67,25 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Start a workflow by type.
- * Currently supports: weekly_report
- * Future: other workflow types via registry
+ * 按类型启动工作流。
  *
- * Uses async start (fire-and-forget) so the POST returns immediately
- * without waiting for HIL interrupts.
- *
- * Optionally links the workflow to an existing conversation.
+ * 实现已抽到 `features/ai/agents/work/workflows/start.ts`，
+ * 以便 `/api/ai/work/run` 在 Decision 判定为 workflow 模式时复用**同一份**启动逻辑
+ * （Next.js route 文件不能导出非 HTTP 方法，所以必须外置）。
+ * 此处的行为与抽出前完全一致：幂等、skipped 语义、fire-and-forget。
  */
-async function startWorkflow(
-  options: {
-    userId: string;
-    userName?: string;
-    workflowType: SupportedWorkflowType;
-    weekStart?: Date;
-    weekEnd?: Date;
-    parentScheduleId?: string;
-    metadata?: Record<string, unknown>;
-    conversationId?: string;
-    /** If true, cancel any existing active run before starting a new one */
-    forceRestart?: boolean;
-  }
-): Promise<{ runId: string; threadId: string; skipped: boolean; existingRunId?: string; conversationId?: string }> {
-  const workflowType = options.workflowType;
-
-  // If forceRestart, cancel existing active runs first
-  if (options.forceRestart) {
-    await prisma.workflowRun.updateMany({
-      where: {
-        userId: options.userId,
-        workflowType: options.workflowType,
-        kind: "RUN",
-        status: { in: ["running", "waiting_review", "pending"] },
-      },
-      data: { status: "cancelled" },
-    });
-  }
-
-  // Use scheduler's idempotent start with conversationId
-  const result = await startWorkflowManually({
-    ...options,
-    conversationId: options.conversationId,
-  });
-
-  if (result.skipped) {
-    return result;
-  }
-
-  // Start the workflow asynchronously (fire-and-forget).
-  // Does NOT block — returns immediately even if the graph hits HIL.
-  if (workflowType === WEEKLY_REPORT_WORKFLOW_TYPE) {
-    const now = new Date();
-    const fallbackRange = getWeekRange(now);
-    const weekStart = options.weekStart ?? fallbackRange.weekStart;
-    const weekEnd = options.weekEnd ?? now;
-    
-    await startWorkflowAsync({
-      userId: options.userId,
-      userName: options.userName,
-      weekStart: weekStart.toISOString(),
-      weekEnd: weekEnd.toISOString(),
-      workflowRunId: result.runId,
-      threadId: result.threadId,
-    });
-  } else if (workflowType === "project-progress") {
-    void (async () => {
-      try {
-        await generateProjectProgressSummary(result.runId, options.userId);
-      } catch (e) {
-        console.error("[project-progress] generation failed:", e);
-        await prisma.workflowRun.update({
-          where: { id: result.runId },
-          data: { status: "failed", metadata: { error: e instanceof Error ? e.message : "汇总失败" } },
-        });
-      }
-    })();
-  }
-
-  return { ...result, conversationId: options.conversationId };
+async function startWorkflow(options: {
+  userId: string;
+  userName?: string;
+  workflowType: SupportedWorkflowType;
+  weekStart?: Date;
+  weekEnd?: Date;
+  parentScheduleId?: string;
+  metadata?: Record<string, unknown>;
+  conversationId?: string;
+  forceRestart?: boolean;
+}): Promise<StartWorkflowResult> {
+  return startWorkflowByType(options);
 }
 
 export async function POST(request: NextRequest) {

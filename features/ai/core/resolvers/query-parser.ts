@@ -5,6 +5,16 @@
 
 import type { ExtractedUser, ActivityWindow } from "@/features/ai/types/structured";
 
+/** 明确非人名的常见口语词/问候词/无意义残留词，绝不能被解析为用户姓名。 */
+export const COMMON_NON_NAMES = new Set([
+  "你好", "您好", "在吗", "在不在", "在嘛", "早上好", "下午好", "晚上好", "嗨", "哈喽",
+  "hello", "hi", "hey",
+  "谢谢", "多谢", "感谢", "好的", "收到", "明白", "了解", "好的好的", "好嘞", "行", "OK", "ok",
+  "再见", "拜拜", "下次见",
+  "请问", "帮我", "麻烦", "看一下", "查一下", "找一下", "问一下", "帮忙", "告诉", "介绍",
+  "功能", "帮助", "你能做", "可以做", "怎么用", "是谁", "什么", "怎么", "如何", "为什么",
+  "项目", "工单", "周报", "文档", "笔记", "代码", "仓库",
+]);
 /**
  * Extract a user identifier from the user message so we can resolve names
  * like "cary" / "刘屹鹏" / "jing zhang" to a real user record.
@@ -13,6 +23,13 @@ import type { ExtractedUser, ActivityWindow } from "@/features/ai/types/structur
  * the remaining token is more likely to be a real user name or email prefix.
  */
 export function extractUserIdentifier(content: string): ExtractedUser | undefined {
+  const trimmedInput = content.trim();
+  if (
+    COMMON_NON_NAMES.has(trimmedInput) ||
+    /^(?:你好|您好|在吗|在不在|在嘛|谢谢|好的|好的好的|好嘞|明白|收到|再见|哈喽|hi|hello)\s*[!！.?。~～]*$/i.test(trimmedInput)
+  ) {
+    return undefined;
+  }
   const timeAdverbs = [
     "最近", "近期", "这周", "本周", "本周内", "近几天", "这几天", "这阵子",
     "今天", "今天内", "今天呢", "今日", "昨天", "昨日", "前天", "前天呢",
@@ -26,6 +43,7 @@ export function extractUserIdentifier(content: string): ExtractedUser | undefine
   const stopPhrases = [
     "这位", "这位同事", "一下", "问下", "帮我", "请", "谢谢", "请问",
     "调出", "列出", "查看", "了解", "想了解", "看看", "翻翻",
+    "你好", "您好", "在吗", "在不在", "早上好", "下午好", "晚上好", "嗨", "哈喽",
   ];
   const excludeWords = [
     "周报", "日报", "月报", "周", "日", "月",
@@ -86,6 +104,9 @@ export function extractUserIdentifier(content: string): ExtractedUser | undefine
   }
 
   if (!cleaned) return undefined;
+  if (COMMON_NON_NAMES.has(cleaned) || /^(?:你好|您好|在吗|在不在|在嘛|谢谢|好的|再见|哈喽|hi|hello)\s*[!！.?。~～]*$/i.test(cleaned)) {
+    return undefined;
+  }
 
   const tokens = cleaned.split(/\s+/).filter(Boolean);
   if (tokens.length > 1) {
@@ -118,11 +139,13 @@ export function extractUserIdentifier(content: string): ExtractedUser | undefine
   if (chinese && chinese.length > 0) {
     const token = chinese.sort((a, b) => b.length - a.length)[0];
     const raw = stripStructuralParticles(token);
+    if (COMMON_NON_NAMES.has(raw) || raw.length < 2) return undefined;
     return { raw, normalized: raw };
   }
 
   const token = tokens[0] ?? cleaned;
   const raw = stripStructuralParticles(token);
+  if (COMMON_NON_NAMES.has(raw) || (raw.length < 2 && !/^[a-zA-Z]$/.test(raw))) return undefined;
   return { raw, normalized: raw.toLowerCase() };
 }
 
@@ -190,13 +213,20 @@ export function parseQueryType(content: string): QueryType {
   if (/commit|提交/i.test(content)) return "commit";
   if (/笔记|note|文档|需求|内容/i.test(content)) return "note";
 
-  if (/^[\u4e00-\u9fa5A-Za-z0-9_.\-@]{1,60}\s*(?:的|最近|在干|干了|做了什么|工|老师|经理|总)/.test(content)) {
-    return "user";
+  // 纯打招呼/问候/口语词，绝不当作实体查询
+  const trimmed = content.trim();
+  if (COMMON_NON_NAMES.has(trimmed) || /^(?:你好|您好|在吗|在不在|在嘛|谢谢|好的|再见|哈喽|hi|hello)\s*[!！.?。~～]*$/i.test(trimmed)) {
+    return "ambiguous";
   }
-  if (
-    /(?:帮我|请问|找|查|看)\s*[\u4e00-\u9fa5A-Za-z0-9_.\-@]{1,30}/.test(content)
-    && !/(?:项目|工单|笔记|周报|文档|需求)/.test(content)
-  ) {
+
+  // 人员查询：必须有明确的人员活动/指派/归属指示，不能仅凭"帮我找/查"就强判为查人
+  if (/^[\u4e00-\u9fa5A-Za-z0-9_.\-@]{1,30}\s*(?:的|最近|在干|干了|做了什么|工|老师|经理|总)/.test(content)) {
+    // 排除诸如"系统的设计"、"模块的功能"等误伤
+    if (!/^(?:系统|模块|组件|功能|项目|工单|知识库|接口)\s*的/.test(content)) {
+      return "user";
+    }
+  }
+  if (/(?:在做什么|在干什么|在干嘛|在干啥|工作近况|工作内容|动态|负责什么|是谁负责|指派给|assignee)/i.test(content)) {
     return "user";
   }
 

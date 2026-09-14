@@ -53,9 +53,14 @@ export function listWorkflows(): WorkflowDefinition[] {
  * Weekly Report workflow definition.
  */
 export const weeklyReportWorkflow: WorkflowDefinition = {
+  id: "weekly_report",
   type: "weekly_report",
   name: "周报生成",
   description: "自动汇总本周工单、提交和进度，生成结构化周报",
+  requiredInputs: ["userId"],
+  capabilities: ["business_query", "generate_text"],
+  riskLevel: "medium",
+  outputType: "weekly_report",
   nodes: [
     { id: "collectData", type: "collect", label: "采集数据", description: "拉取工单和提交数据" },
     { id: "draft", type: "draft", label: "生成草稿", description: "基于数据生成周报草稿" },
@@ -77,9 +82,14 @@ export const weeklyReportWorkflow: WorkflowDefinition = {
   },
 };
 export const projectProgressWorkflow: WorkflowDefinition = {
+  id: "project_progress",
   type: "project_progress",
   name: "项目进展汇总",
   description: "汇总项目活跃工单、最新 Git 提交并生成核心指标与进展报告",
+  requiredInputs: ["userId"],
+  capabilities: ["business_query", "business_report"],
+  riskLevel: "low",
+  outputType: "project_progress_report",
   nodes: [
     { id: "collect", type: "collect", label: "采集工单与提交", description: "统计项目当前活跃工单与 Git 提交" },
     { id: "synthesize", type: "output", label: "AI 总结与指标", description: "生成 4 项核心指标与项目进展摘要" },
@@ -93,9 +103,14 @@ export const projectProgressWorkflow: WorkflowDefinition = {
 };
 
 export const meetingMinutesWorkflow: WorkflowDefinition = {
+  id: "meeting_minutes",
   type: "meeting_minutes",
   name: "会议纪要整理",
   description: "对会议录音或文本进行 Whisper 转写与 7 要素提炼，一键发布到项目知识库",
+  requiredInputs: ["userId", "audioFile"],
+  capabilities: ["audio.transcribe", "generate_text"],
+  riskLevel: "low",
+  outputType: "meeting_summary",
   nodes: [
     { id: "transcribe", type: "collect", label: "录音转写", description: "Whisper 语音转写" },
     { id: "summarize", type: "draft", label: "7要素提炼", description: "提炼核心议题与行动项" },
@@ -111,9 +126,14 @@ export const meetingMinutesWorkflow: WorkflowDefinition = {
 };
 
 export const codingWorkflow: WorkflowDefinition = {
+  id: "coding",
   type: "coding",
   name: "Coding 任务开发",
   description: "通过 Pi Coding Agent 独立执行代码变更、测试验证与 Diff 审查",
+  requiredInputs: ["userId", "prompt"],
+  capabilities: ["coding.execute"],
+  riskLevel: "high",
+  outputType: "code_diff",
   nodes: [
     { id: "dispatch", type: "collect", label: "分配 Session", description: "创建 Pi Coding 会话" },
     { id: "execute", type: "draft", label: "执行代码变更", description: "代码编写与执行" },
